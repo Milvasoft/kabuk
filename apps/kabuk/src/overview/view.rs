@@ -1,7 +1,8 @@
 //! What the overview draws on a monitor: the desk colour over the work area, a panel per
-//! workspace cell (the shown one framed with the accent, as the looks mark state) and,
-//! in the cells of hidden workspaces, a box per window in its place with the program's
-//! icon and title. The live thumbnails of the shown workspace go on top (DWM, not here).
+//! workspace cell (the shown one framed with the accent, as the looks mark state) with
+//! its number under it (as Windows' Task View names its desktops) and, in the cells of
+//! hidden workspaces, a box per window in its place with the program's icon and title.
+//! The live thumbnails of the shown workspace go on top (DWM, not here), inside its frame.
 //! The design page has no overview: sizes follow the tray tooltip (D21). Pure.
 
 use kabuk_ui::geom::{Insets, Rect, Size};
@@ -48,8 +49,26 @@ pub struct WindowBox {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Cell {
     pub rect: Rect,
+    /// The workspace's number, written under the cell.
+    pub number: u32,
     pub shown: bool,
     pub boxes: Vec<WindowBox>,
+}
+
+/// The number under a cell: centred in the gap below it, in the accent when shown.
+fn label(c: &Cell, s: &OverviewStyle, text_scale: f32) -> Node {
+    Node::text(TextSpec {
+        spans: vec![Span {
+            text: c.number.to_string(),
+            color: if c.shown { Role::Accent } else { Role::Dim },
+            weight: if c.shown { 600 } else { 400 },
+            after: 0.0,
+            underline: false,
+        }],
+        font: FontRole::Ui,
+        size: s.text * text_scale,
+        max_width: None,
+    })
 }
 
 /// `node` given the size of `r` and moved to `r` inside a layer of `parent` size (a
@@ -114,6 +133,8 @@ pub fn scene(size: Size, cells: &[Cell], s: &OverviewStyle, text_scale: f32) -> 
         for b in &c.boxes {
             layers.push(at(window_box(b, s, text_scale), b.rect, size));
         }
+        let under = Rect::new(c.rect.x, c.rect.y + c.rect.h, c.rect.w, s.gap);
+        layers.push(at(Node::layer(vec![label(c, s, text_scale)]), under, size));
     }
     Node::layer(layers).size(Some(size.w), Some(size.h)).paint(Paint {
         fill: Role::Desk,
@@ -149,11 +170,13 @@ mod tests {
         vec![
             Cell {
                 rect: Rect::new(20.0, 20.0, 470.0, 270.0),
+                number: 1,
                 shown: true,
                 boxes: Vec::new(),
             },
             Cell {
                 rect: Rect::new(510.0, 20.0, 470.0, 270.0),
+                number: 3,
                 shown: false,
                 boxes: vec![WindowBox {
                     rect: Rect::new(515.0, 25.0, 200.0, 120.0),
@@ -201,6 +224,33 @@ mod tests {
             panic!("a layer")
         };
         assert_eq!(children[0].paint.unwrap().border, Some((Role::Accent, s.active_border)));
-        assert_eq!(children[1].paint.unwrap().border, Some((Role::SurfaceLine, s.border)));
+        // The first cell: its panel, its number; the second: its panel, a box, its number.
+        assert_eq!(children[2].paint.unwrap().border, Some((Role::SurfaceLine, s.border)));
+    }
+
+    /// Each cell is numbered under itself with its workspace's number (a cell's place
+    /// is not its number: workspaces 1 and 3 here), the shown one in the accent.
+    #[test]
+    fn every_cell_is_numbered_under_itself() {
+        let l = layout(&scene(SIZE, &cells(), &STYLE, 1.0), Point::default(), &Fake);
+        let numbers: Vec<(String, Role, f32, f32)> = l
+            .draws
+            .iter()
+            .filter_map(|d| match d {
+                kabuk_ui::node::Draw::Text { spec, rect } => {
+                    Some((spec.spans[0].text.clone(), spec.spans[0].color, rect.x, rect.y))
+                }
+                _ => None,
+            })
+            .filter(|(t, ..)| t.len() == 1)
+            .collect();
+        assert_eq!(numbers.len(), 2);
+        let (one, three) = (&numbers[0], &numbers[1]);
+        assert_eq!((one.0.as_str(), one.1), ("1", Role::Accent));
+        assert_eq!((three.0.as_str(), three.1), ("3", Role::Dim));
+        // Under the cells (which end at y = 290), centred under each (a digit is 7 wide).
+        assert!(one.3 >= 290.0 && three.3 >= 290.0);
+        assert!((one.2 + 3.5 - (20.0 + 235.0)).abs() < 1.0, "{one:?}");
+        assert!((three.2 + 3.5 - (510.0 + 235.0)).abs() < 1.0, "{three:?}");
     }
 }

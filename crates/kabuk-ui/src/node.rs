@@ -532,24 +532,20 @@ fn place(node: &Node, me: &Measured, rect: Rect, out: &mut Layout) {
         Kind::Spacer => {}
         Kind::Layer { children } => {
             for (child, s) in children.iter().zip(&me.children) {
+                // A filled child takes the layer's size on that axis; its own children keep
+                // their sizes (place reads only them, the text and the rectangle given).
                 let (w, h) = match child.fill {
                     Some((Axis::Row, inset)) => ((inner.w - 2.0 * inset).max(0.0), s.size.h),
                     Some((Axis::Column, inset)) => (s.size.w, (inner.h - 2.0 * inset).max(0.0)),
                     None => (s.size.w, s.size.h),
                 };
-                let s = &Measured {
-                    size: Size { w, h },
-                    baseline: s.baseline,
-                    text: s.text,
-                    children: Vec::new(),
-                };
-                let x = inner.x + (inner.w - s.size.w) / 2.0 + child.offset.x;
+                let x = inner.x + (inner.w - w) / 2.0 + child.offset.x;
                 let y = match child.align {
                     Align::Start => inner.y,
-                    Align::End => inner.bottom() - s.size.h,
-                    Align::Center | Align::Baseline => inner.y + (inner.h - s.size.h) / 2.0,
+                    Align::End => inner.bottom() - h,
+                    Align::Center | Align::Baseline => inner.y + (inner.h - h) / 2.0,
                 } + child.offset.y;
-                place(child, s, Rect::new(x, y, s.size.w, s.size.h), out);
+                place(child, s, Rect::new(x, y, w, h), out);
             }
         }
         Kind::Box { axis, children } => {
@@ -628,6 +624,25 @@ mod tests {
             size,
             max_width: None,
         })
+    }
+
+    /// Found by the overview's numbers and window titles, which never showed: a layer's
+    /// child that is a row or column lost its children's sizes, so nothing in it was laid
+    /// out.
+    #[test]
+    fn a_layers_row_lays_out_its_children() {
+        let row = Node::row(vec![text("Notes", 10.0), Node::icon("app", 16.0, Role::Dim)])
+            .size(Some(200.0), Some(40.0))
+            .align(Align::Start)
+            .offset(10.0, 20.0);
+        let l = layout(
+            &Node::layer(vec![row]).size(Some(400.0), Some(300.0)),
+            Point::default(),
+            &Fake,
+        );
+        let texts = l.draws.iter().filter(|d| matches!(d, Draw::Text { .. })).count();
+        let icons = l.draws.iter().filter(|d| matches!(d, Draw::Icon { .. })).count();
+        assert_eq!((texts, icons), (1, 1));
     }
 
     fn rects(l: &Layout) -> Vec<Rect> {

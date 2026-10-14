@@ -60,8 +60,9 @@ struct Sheet {
     _surface: Option<WindowSurface>,
     window: Window,
     device: String,
-    /// The cells in the sheet's pixels, by workspace (0-based).
+    /// The cells in the sheet's pixels, and the number of each one's workspace.
     cells: Vec<kabuk_layout::Rect>,
+    numbers: Vec<u32>,
     /// The cell of the workspace on screen.
     shown: Option<usize>,
 }
@@ -236,11 +237,24 @@ impl Shared {
             let scale = Scale(m.dpi as f32 / Scale::BASE_DPI);
             let area = layout_rect(m.work_area);
             let local = kabuk_layout::Rect { x: 0, y: 0, ..area };
-            let cells = overview::cells(mv.workspaces.len(), local, scale.px(STYLE.gap));
-            let shown = mv.workspaces.iter().position(|w| w.active);
+            // The workspaces the bar shows (found using it: the bar had 4, the overview 9).
+            let shown_count = self
+                .config()
+                .windows
+                .shown_workspaces
+                .min(self.config().windows.workspaces)
+                .max(1);
+            let numbers: Vec<u32> = super::view::visible_workspaces(&mv.workspaces, shown_count)
+                .iter()
+                .map(|w| w.number)
+                .collect();
+            let workspaces: Vec<&kabuk_layout::WorkspaceInfo> =
+                mv.workspaces.iter().filter(|w| numbers.contains(&w.number)).collect();
+            let cells = overview::cells(workspaces.len(), local, scale.px(STYLE.gap));
+            let shown = workspaces.iter().position(|w| w.active);
             let mut thumbs_to: Vec<(u64, kabuk_layout::Rect, kabuk_layout::Rect)> = Vec::new();
             let mut drawn = Vec::new();
-            for (i, (ws, cell)) in mv.workspaces.iter().zip(&cells).enumerate() {
+            for (i, (ws, cell)) in workspaces.iter().zip(&cells).enumerate() {
                 let mut boxes = Vec::new();
                 let windows = view
                     .windows
@@ -255,7 +269,19 @@ impl Shared {
                     } else {
                         r
                     };
-                    let place = overview::place_in(r, area, *cell);
+                    // The live thumbnails sit inside the shown cell's frame, so it shows.
+                    let inside = if Some(i) == shown {
+                        let b = scale.px(STYLE.active_border);
+                        kabuk_layout::Rect {
+                            x: cell.x + b,
+                            y: cell.y + b,
+                            w: cell.w - 2 * b,
+                            h: cell.h - 2 * b,
+                        }
+                    } else {
+                        *cell
+                    };
+                    let place = overview::place_in(r, area, inside);
                     if Some(i) == shown {
                         // Its place on the monitor, in the sheet's pixels.
                         let from = kabuk_layout::Rect {
@@ -274,6 +300,7 @@ impl Shared {
                 }
                 drawn.push(Cell {
                     rect: dips(*cell, scale),
+                    number: ws.number,
                     shown: Some(i) == shown,
                     boxes,
                 });
@@ -338,6 +365,7 @@ impl Shared {
                 window,
                 device: m.device.clone(),
                 cells,
+                numbers,
                 shown,
             });
         }
@@ -371,14 +399,14 @@ impl Shared {
                 let (x, y) = msg::point(m.lparam);
                 let device = sheet.device.clone();
                 let cell = overview::cell_at(&sheet.cells, x, y);
+                let numbers = sheet.numbers.clone();
                 // The workspace already on screen: its windows fly back as it closes.
                 if cell.is_some() && cell == sheet.shown {
                     self.close_overview_flying();
                     return Some(0);
                 }
                 self.close_overview();
-                if let Some(i) = cell {
-                    let number = u32::try_from(i + 1).unwrap_or(1);
+                if let Some(number) = cell.and_then(|i| numbers.get(i).copied()) {
                     tracing::info!(device = %device, number, "overview cell chosen");
                     if let Some(link) = &self.wm {
                         link.send(wm::Command::SwitchOn { device, number });

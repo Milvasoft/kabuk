@@ -1368,7 +1368,8 @@ fn the_overview_shows_every_workspace_and_a_click_goes_there() {
     let line = sandbox
         .last_log_line(&["overview shown", &m.device])
         .expect("sheet logged");
-    assert!(line.contains("cells=9") && line.contains("thumbnails=1"), "{line}");
+    // The workspaces the bar shows: 4 by default, workspace 2 among them (D34).
+    assert!(line.contains("cells=4") && line.contains("thumbnails=1"), "{line}");
     // Asked for by the user: with full motion the window on screen flies into its cell.
     if kabuk_win::system::animations_on() {
         assert_eq!(sandbox.log_lines("overview windows fly in"), 1);
@@ -1388,7 +1389,7 @@ fn the_overview_shows_every_workspace_and_a_click_goes_there() {
         h: m.work_area.bottom - m.work_area.top,
     };
     let gap = (kabuk::overview::view::STYLE.gap * m.dpi as f32 / 96.0).round() as i32;
-    let cell = kabuk_layout::overview::cells(9, area, gap)[1];
+    let cell = kabuk_layout::overview::cells(4, area, gap)[1];
     kabuk_win::msgloop::post_message(
         sheet,
         Msg {
