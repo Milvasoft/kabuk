@@ -153,7 +153,7 @@
     return head(t("navLook"), t("lookDesc")) + `
       <div class="set-grp"><span class="gl">${t("theme")}</span><div class="themes">${cards}</div></div>
       <div class="set-grp"><span class="gl">${t("accent")}</span><div class="swatches">${swatches}<span class="sw-label">${own ? t("themeAccent") : t("accents-" + accent.slice(1))}</span></div>${adapted}</div>
-      <div class="set-grp">${rowFor("appearance.mode", t("modeLbl"), t("modeH"), segFor("appearance.mode", t("modeLbl"), [["dark", t("dark")], ["light", t("light")], ["system", t("modeSystem")], ["time", t("modeSun")]]))}
+      <div class="set-grp">${rowFor("appearance.mode", t("modeLbl"), modeHint(), segFor("appearance.mode", t("modeLbl"), [["dark", t("dark")], ["light", t("light")], ["system", t("modeSystem")], ["time", t("modeSun")]]))}
       ${rowFor("appearance.text_size", t("textSize"), "", segFor("appearance.text_size", t("textSize"), [["small", t("small")], ["normal", t("normal")], ["large", t("large")]]))}
       ${rowFor("appearance.animations", t("setAnimations"), t("setAnimationsH"), segFor("appearance.animations", t("setAnimations"), [["full", t("setAnimationsFull")], ["reduced", t("setAnimationsReduced")], ["off", t("setAnimationsOff")]]))}
       ${rowFor("appearance.cursors", t("setCursors"), t("setCursorsH"), segFor("appearance.cursors", t("setCursors"), [["windows", t("setCursorsWindows")], ["kabuk", t("setCursorsKabuk")], ["custom", t("setCursorsCustom")]]))}
@@ -445,6 +445,11 @@
       ${tgl("wallpaper.drift", t("setDrift"), tv("setDriftH", cfg().wallpaper.drift_minutes))}
       ${tgl("oled.idle_dim", t("dim"), t("dimH"))}
       ${dimRow()}</div>`;
+  }
+
+  /** What the chosen mode does (found using Settings: "By time of day…" showed under "Dark"). */
+  function modeHint() {
+    return { dark: t("setModeDarkH"), light: t("setModeLightH"), system: t("setModeSystemH") }[get("appearance.mode")] ?? t("modeH");
   }
 
   function aboutPage() {

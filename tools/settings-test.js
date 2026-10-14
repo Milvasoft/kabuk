@@ -239,6 +239,15 @@ async function main() {
   await page.click(`[data-set="windows.minimize_effect"][data-val='"genie"']`); await settled();
   check(/minimize_effect = "genie"/.test(toml()), "minimise: the genie again");
 
+  // The mode's hint says what the chosen mode does.
+  await go("look");
+  const modeHint = () => page.$eval(`[data-set="appearance.mode"]`, (e) => e.closest(".set-row").querySelector(".h").textContent);
+  await page.click(`[data-set="appearance.mode"][data-val='"dark"']`); await settled();
+  const darkHint = await modeHint();
+  await page.click(`[data-set="appearance.mode"][data-val='"time"']`); await settled();
+  const timeHint = await modeHint();
+  check(darkHint.includes("koyu") && timeHint.includes("07:00") && darkHint !== timeHint, `mode: the hint follows the choice (${darkHint} / ${timeHint})`);
+
   // A still picture's drift (DECISIONS D47): on by default, a switch on the OLED page.
   await go("oled");
   check(await page.$eval(`[data-tgl="wallpaper.drift"]`, (e) => e.getAttribute("aria-checked") === "true"), "drift: on by default");

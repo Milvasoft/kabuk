@@ -172,6 +172,16 @@ impl Shared {
         });
     }
 
+    /// Card `i`'s × was clicked: its window is asked to close, as Windows' preview does.
+    fn preview_close_clicked(&mut self, i: usize) {
+        let Some(hwnd) = self.app_preview.as_ref().and_then(|p| p.windows.get(i).copied()) else {
+            return;
+        };
+        self.hide_app_preview();
+        tracing::info!(hwnd, "window closed from its preview");
+        Hwnd(hwnd).close_async();
+    }
+
     /// Card `i` was clicked: its window comes to the front.
     fn preview_clicked(&mut self, i: usize) {
         let Some(hwnd) = self.app_preview.as_ref().and_then(|p| p.windows.get(i).copied()) else {
@@ -229,12 +239,13 @@ impl Shared {
                     x: p.scale.dips(x),
                     y: p.scale.dips(y),
                 };
-                let i = p
-                    .layout
-                    .hit_test(at)
-                    .filter(|h| h.module == app_preview::HIT || h.module == app_preview::FRAME)?
-                    .value as usize;
-                self.preview_clicked(i);
+                let hit = p.layout.hit_test(at)?;
+                let i = hit.value as usize;
+                if hit.module == app_preview::CLOSE {
+                    self.preview_close_clicked(i);
+                } else if hit.module == app_preview::HIT || hit.module == app_preview::FRAME {
+                    self.preview_clicked(i);
+                }
                 Some(0)
             }
             _ => None,

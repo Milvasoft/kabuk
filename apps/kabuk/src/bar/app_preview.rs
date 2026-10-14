@@ -1,6 +1,6 @@
 //! Previews of an app's windows over the bar (asked for by the user: as Windows' taskbar
-//! shows them on hover): one card per window with its title and a live picture of it,
-//! side by side, in the tray panel's surface (D21, D26). The pictures are DWM thumbnails
+//! shows them on hover): one card per window with its title, a × that closes it and a
+//! live picture of it, side by side, in the tray panel's surface (D21, D26). The pictures are DWM thumbnails
 //! the host lays over the empty frames this tree leaves for them. Pure.
 
 use kabuk_ui::geom::Insets;
@@ -12,6 +12,10 @@ use super::tooltip::TipStyle;
 pub const HIT: &str = "app-preview";
 /// Hit-test id of a card's picture frame (where its thumbnail goes); same values.
 pub const FRAME: &str = "app-preview-frame";
+/// Hit-test id of a card's ×, which closes its window; same values.
+pub const CLOSE: &str = "app-preview-close";
+/// The × drawn as text (the design's icon set has no close icon), as Windows' previews.
+const CLOSE_MARK: &str = "×";
 
 /// Sizes in DIPs, and how long the previews wait for the mouse that left the app.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -25,6 +29,9 @@ pub struct PreviewStyle {
     pub title_gap: f32,
     /// Around a card's contents, and the frame's rounding.
     pub card_pad: f32,
+    /// The ×'s square, and its text size against the title's.
+    pub close: f32,
+    pub close_text: f32,
     pub frame_radius: f32,
     /// The most windows previewed (Windows' taskbar turns to a list beyond its width).
     pub max_windows: usize,
@@ -38,6 +45,8 @@ pub const PREVIEW: PreviewStyle = PreviewStyle {
     gap: 6.0,
     title_gap: 6.0,
     card_pad: 6.0,
+    close: 18.0,
+    close_text: 1.3,
     frame_radius: 4.0,
     max_windows: 6,
     grace: std::time::Duration::from_millis(300),
@@ -82,18 +91,27 @@ pub fn view(text_scale: f32, tip: &TipStyle, s: &PreviewStyle, shots: &[Shot]) -
         .map(|(i, shot)| {
             let (w, h) = frame_size(shot.size, s);
             let index = u32::try_from(i).unwrap_or(u32::MAX);
-            let title = Node::text(TextSpec {
-                spans: vec![Span {
-                    text: shot.title.clone(),
-                    color: Role::Fg,
-                    weight: 400,
-                    after: 0.0,
-                    underline: false,
-                }],
-                font: FontRole::Ui,
-                size: tip.text * text_scale,
-                max_width: Some(w),
-            });
+            let line = |text: &str, color: Role, size: f32, max_width: Option<f32>| {
+                Node::text(TextSpec {
+                    spans: vec![Span {
+                        text: text.to_string(),
+                        color,
+                        weight: 400,
+                        after: 0.0,
+                        underline: false,
+                    }],
+                    font: FontRole::Ui,
+                    size,
+                    max_width,
+                })
+            };
+            let title_w = (w - s.close - s.title_gap).max(0.0);
+            let title = Node::row(vec![line(&shot.title, Role::Fg, tip.text * text_scale, Some(title_w))])
+                .size(Some(title_w), None);
+            let close = line(CLOSE_MARK, Role::Dim, tip.text * s.close_text * text_scale, None)
+                .size(Some(s.close), Some(s.close))
+                .hit(CLOSE, index);
+            let title = Node::row(vec![title, close]).gap(s.title_gap).align(Align::Center);
             let frame = Node::spacer(w, h)
                 .paint(Paint {
                     fill: Role::SurfaceAlt,
@@ -163,6 +181,27 @@ mod tests {
         assert_eq!(fit((100, 200), (0.0, 0.0, 100.0, 100.0)), (25.0, 0.0, 50.0, 100.0));
         let (_, _, w, h) = fit((0, 0), (0.0, 0.0, 100.0, 50.0));
         assert!(w.is_finite() && h.is_finite());
+    }
+
+    #[test]
+    fn every_card_has_a_close_mark_inside_its_title_line() {
+        let shots = [Shot {
+            title: "A long window title that has to be cut".into(),
+            size: (1600, 900),
+        }];
+        let l = layout(&view(1.0, &TIP, &PREVIEW, &shots), Point::default(), &Fake);
+        let of = |m: &str| {
+            l.hits
+                .iter()
+                .filter(|(_, h)| h.module == m)
+                .map(|(r, _)| *r)
+                .collect::<Vec<_>>()
+        };
+        let (close, frame) = (of(CLOSE), of(FRAME));
+        assert_eq!(close.len(), 1);
+        // Above the picture, at its right edge.
+        assert!(close[0].bottom() <= frame[0].y);
+        assert!((close[0].right() - frame[0].right()).abs() < 1.0, "{close:?} {frame:?}");
     }
 
     #[test]
