@@ -31,6 +31,8 @@ pub struct WindowEntry {
     pub workspace: u32,
     /// Windows' display number ("Monitor n").
     pub monitor: u32,
+    /// Where its program's picture comes from, as the bar's apps have it.
+    pub picture: Option<String>,
 }
 
 /// Open windows, in the order given (the front window first).
@@ -46,7 +48,11 @@ pub fn window_items(windows: &[WindowEntry], i18n: &I18n) -> Vec<Item> {
                     ("monitor", Arg::Num(f64::from(w.monitor))),
                 ],
             );
-            Item::new(w.title.clone(), where_, Kind::Window, Target::Window(w.hwnd))
+            let item = Item::new(w.title.clone(), where_, Kind::Window, Target::Window(w.hwnd));
+            match &w.picture {
+                Some(p) => item.with_picture(p.clone()),
+                None => item,
+            }
         })
         .collect()
 }
@@ -64,7 +70,10 @@ pub fn gather(cfg: &LauncherConfig, i18n: &I18n) -> Vec<Item> {
                 items.extend(
                     apps.into_iter()
                         .filter(|a| seen.insert((a.name.clone(), a.id.clone())))
-                        .map(|a| Item::new(a.name.clone(), label.clone(), Kind::App, Target::Shell(a.target()))),
+                        .map(|a| {
+                            Item::new(a.name.clone(), label.clone(), Kind::App, Target::Shell(a.target()))
+                                .with_picture(a.target())
+                        }),
                 );
             }
             Err(e) => tracing::warn!(error = %e, "installed apps unavailable"),
@@ -135,7 +144,8 @@ fn path_item(path: &Path, is_dir: bool) -> Item {
         .map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
     let subtitle = path.parent().map(|p| p.display().to_string()).unwrap_or_default();
     let kind = if is_dir { Kind::Folder } else { Kind::File };
-    Item::new(title, subtitle, kind, Target::Shell(path.display().to_string()))
+    let path = path.display().to_string();
+    Item::new(title, subtitle, kind, Target::Shell(path.clone())).with_picture(path)
 }
 
 /// The targets of the shortcuts in Windows' recent items folder, newest first; shortcuts
@@ -421,12 +431,14 @@ mod tests {
         let tr = I18n::new(Lang::Tr);
         let w = [
             WindowEntry {
+                picture: None,
                 hwnd: 7,
                 title: "kabuk – Visual Studio Code".into(),
                 workspace: 2,
                 monitor: 1,
             },
             WindowEntry {
+                picture: None,
                 hwnd: 8,
                 title: " ".into(),
                 workspace: 1,

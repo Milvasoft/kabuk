@@ -2,7 +2,8 @@
 //! its entries and what choosing one does. A child of the bar manager, so it shares the
 //! GPU, the look, the language and the configuration with the bars.
 
-use std::sync::{Arc, Mutex};
+use std::collections::{HashMap, HashSet};
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use kabuk_core::config::{shortcut::Chord, Config};
@@ -27,11 +28,15 @@ use crate::wm;
 pub const LAUNCHER_CLASS: &str = "Kabuk.Launcher";
 /// The worker finished gathering entries.
 pub(super) const MSG_LAUNCHER_ITEMS: u32 = msg::APP + 8;
+/// The picture worker loaded some of the entries' pictures.
+pub(super) const MSG_LAUNCHER_PICTURES: u32 = msg::APP + 43;
 /// Integration tests open (`wparam` 1) or close (0) the launcher without the shortcut;
 /// opened this way it shows without taking the keyboard from the user's window.
 pub const MSG_TEST_LAUNCHER: u32 = msg::APP + 24;
 /// Hotkey ids of the launcher's chords on the control window.
 const HOTKEY_FIRST: i32 = 100;
+/// The entries run lately, in the state folder.
+const RAN_FILE: &str = "launcher-recent.json";
 /// Gathered entries older than this are gathered again when the launcher opens.
 const REFRESH_AFTER: Duration = Duration::from_secs(300);
 
@@ -55,6 +60,64 @@ pub(super) struct LauncherState {
     surrogate: Option<u16>,
     /// When the shortcut was pressed, for the first-frame time (PLAN M6).
     asked: Option<Instant>,
+    /// The entries' own pictures (an app's icon takes 10-60 ms to load: a worker loads
+    /// those of the rows shown, and they are drawn as they come).
+    pictures: Pictures,
+    /// The entries run lately, newest first (an empty launcher lists them first).
+    ran: Vec<String>,
+}
+
+/// What the picture worker gives back: (source, side in pixels, pixels); `None` when it
+/// could not be loaded.
+type Loaded = Arc<Mutex<Vec<(String, u32, Option<Vec<u8>>)>>>;
+
+/// The entries' pictures: loaded ones by source, the ones asked for, and the worker.
+#[derive(Default)]
+struct Pictures {
+    loaded: HashMap<String, u64>,
+    asked: HashSet<String>,
+    /// To the worker: (source, side in pixels).
+    worker: Option<mpsc::Sender<(String, u32)>>,
+    /// From the worker.
+    done: Loaded,
+}
+
+/// The renderer's key of an entry's picture at `side` pixels.
+fn picture_key(source: &str, side: u32) -> u64 {
+    crate::bar::apps::image_key(&format!("launcher|{source}|{side}"))
+}
+
+/// Starts the picture worker: it loads what it is asked for, one at a time, and tells
+/// the control window when some are done.
+fn picture_worker(control: Hwnd, done: Loaded) -> Option<mpsc::Sender<(String, u32)>> {
+    let (tx, rx) = mpsc::channel::<(String, u32)>();
+    let spawned = std::thread::Builder::new()
+        .name("launcher-pictures".into())
+        .spawn(move || {
+            kabuk_win::system::com_init();
+            while let Ok((source, side)) = rx.recv() {
+                let px = kabuk_win::icon::shell_item_icon_pixels(&source, side)
+                    .or_else(|| kabuk_win::icon::file_icon_pixels(std::path::Path::new(&source), side));
+                if let Ok(mut d) = done.lock() {
+                    d.push((source, side, px));
+                }
+                let _ = msgloop::post_message(
+                    control,
+                    Msg {
+                        id: MSG_LAUNCHER_PICTURES,
+                        wparam: 0,
+                        lparam: 0,
+                    },
+                );
+            }
+        });
+    match spawned {
+        Ok(_) => Some(tx),
+        Err(e) => {
+            tracing::warn!(error = %e, "launcher pictures not loaded");
+            None
+        }
+    }
 }
 
 fn options(cfg: &Config, i18n: &I18n, bottom_up: bool) -> Options {
@@ -101,7 +164,16 @@ impl Shared {
             hotkeys: Vec::new(),
             surrogate: None,
             asked: None,
+            pictures: Pictures::default(),
+            ran: self
+                .ran_file()
+                .and_then(|f| std::fs::read_to_string(f).ok())
+                .and_then(|t| serde_json::from_str(&t).ok())
+                .unwrap_or_default(),
         });
+        if let (Some(control), Some(l)) = (self.control.as_ref().map(Window::hwnd), self.launcher.as_mut()) {
+            l.pictures.worker = picture_worker(control, l.pictures.done.clone());
+        }
         self.bind_launcher_keys();
     }
 
@@ -212,6 +284,10 @@ impl Shared {
                     .windows
                     .iter()
                     .map(|w| WindowEntry {
+                        picture: Hwnd(w.hwnd)
+                            .pid()
+                            .and_then(|pid| self.apps.exes.get(&pid))
+                            .map(|(_, icon)| icon.clone()),
                         hwnd: w.hwnd,
                         title: Hwnd(w.hwnd).title(),
                         workspace: w.workspace,
@@ -232,8 +308,41 @@ impl Shared {
                 items.extend(sources::commands(&self.i18n));
             }
             items.extend(l.slow.iter().cloned());
+            return crate::launcher::item::recent_first(items, &l.ran, &self.pinned_targets());
         }
         items
+    }
+
+    /// The bar's pinned apps as the launcher opens them (`shell:AppsFolder\<app id>`).
+    fn pinned_targets(&self) -> Vec<String> {
+        self.apps
+            .pins
+            .iter()
+            .filter_map(|p| {
+                p.app_id.clone().or_else(|| {
+                    let exe = p.exe.as_deref()?;
+                    kabuk_win::shellitems::program_entry(exe).map(|a| a.id)
+                })
+            })
+            .map(|id| format!("shell:AppsFolder\\{id}"))
+            .collect()
+    }
+
+    fn ran_file(&self) -> Option<std::path::PathBuf> {
+        Some(wm::lock(&self.state).path().parent()?.join(RAN_FILE))
+    }
+
+    /// Remembers `target` as run now, in the state folder too.
+    fn remember_run(&mut self, target: &Target) {
+        let file = self.ran_file();
+        let Some(l) = self.launcher.as_mut() else { return };
+        crate::launcher::item::remember(&mut l.ran, target);
+        let text = serde_json::to_string(&l.ran).unwrap_or_default();
+        if let Some(f) = file {
+            if let Err(e) = kabuk_core::fsutil::write_atomic(&f, text.as_bytes()) {
+                tracing::debug!(error = %e, "launcher's recent runs not saved");
+            }
+        }
     }
 
     /// Starts the worker unless fresh entries are there (or `force`).
@@ -297,6 +406,32 @@ impl Shared {
         }
     }
 
+    /// Pictures the worker loaded: into the renderer's store, and an open launcher shows
+    /// them.
+    pub(super) fn launcher_pictures_arrived(&mut self) {
+        let Some(l) = self.launcher.as_mut() else { return };
+        let done: Vec<_> = l
+            .pictures
+            .done
+            .lock()
+            .map(|mut d| std::mem::take(&mut *d))
+            .unwrap_or_default();
+        for (source, side, px) in done {
+            match px {
+                Some(px) => {
+                    let key = picture_key(&source, side);
+                    self.gpu.images.set(key, side, px);
+                    l.pictures.loaded.insert(source, key);
+                }
+                // Not loadable: it keeps its kind's icon and is not asked again.
+                None => tracing::debug!(source = %source, "launcher picture unavailable"),
+            }
+        }
+        if l.open {
+            self.render_launcher();
+        }
+    }
+
     /// The monitor the user works on: the foreground window's, else the primary one.
     fn launcher_monitor() -> Option<kabuk_win::shell::Monitor> {
         let monitors = kabuk_win::shell::monitors();
@@ -342,9 +477,37 @@ impl Shared {
             l.model = Model::new(items, options(&cfg, &self.i18n, shape.bottom_up));
             l.model.key(Key::Text(query));
         }
+        let side = (style.icon * scale.0).ceil() as u32;
+        // Pictures the store let go of (a tray refresh keeps only its own) are asked again.
+        let (store, asked) = (&self.gpu.images, &mut l.pictures.asked);
+        l.pictures.loaded.retain(|source, key| {
+            let kept = store.contains(*key);
+            if !kept {
+                asked.remove(source);
+            }
+            kept
+        });
+        let wanted: Vec<String> = l
+            .model
+            .rows()
+            .iter()
+            .filter_map(|r| match r {
+                crate::launcher::model::Row::Item { index, .. } => l.model.item(*index)?.picture.clone(),
+                _ => None,
+            })
+            .filter(|p| !l.pictures.loaded.contains_key(p) && !l.pictures.asked.contains(p))
+            .collect();
+        for source in wanted {
+            if let Some(w) = &l.pictures.worker {
+                if w.send((source.clone(), side)).is_ok() {
+                    l.pictures.asked.insert(source);
+                }
+            }
+        }
         let frame = Frame {
             style: &style,
             i18n: &self.i18n,
+            pictures: &l.pictures.loaded,
             text_scale,
             width: shape.width,
             height: shape.height,
@@ -462,6 +625,7 @@ impl Shared {
 
     fn run_launcher_target(&mut self, target: Target) {
         tracing::info!(target = ?target, "launcher ran");
+        self.remember_run(&target);
         match target {
             Target::Shell(t) => {
                 // The shell can take a while (a network path, a slow program); never on

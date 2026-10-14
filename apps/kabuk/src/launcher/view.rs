@@ -17,6 +17,8 @@ pub const HIT_ROW: &str = "launcher-row";
 pub struct Frame<'a> {
     pub style: &'a LauncherStyle,
     pub i18n: &'a I18n,
+    /// The entries' own pictures loaded so far: their source and the renderer's key.
+    pub pictures: &'a std::collections::HashMap<String, u64>,
     /// The text size setting (SPEC §2.9).
     pub text_scale: f32,
     /// The launcher's width: the look's, or the monitor's for Çizgi under a bar.
@@ -242,7 +244,7 @@ fn row(cx: &Ctx, model: &Model, r: &Row, i: usize, width: f32) -> Node {
     let s = cx.f.style;
     let i18n = cx.f.i18n;
     let selected = i == model.selected();
-    let (title, positions, subtitle, kind, icon) = match r {
+    let (title, positions, subtitle, kind, icon, picture) = match r {
         Row::Item { index, positions } => {
             let item = model.item(*index).expect("rows point at items");
             (
@@ -251,6 +253,7 @@ fn row(cx: &Ctx, model: &Model, r: &Row, i: usize, width: f32) -> Node {
                 item.subtitle.clone(),
                 item.kind,
                 item.icon,
+                item.picture.as_ref().and_then(|p| cx.f.pictures.get(p).copied()),
             )
         }
         Row::Calc { value } => (
@@ -265,6 +268,7 @@ fn row(cx: &Ctx, model: &Model, r: &Row, i: usize, width: f32) -> Node {
             i18n.tr("l-calc-sub"),
             super::item::Kind::Calc,
             super::item::Kind::Calc.icon(),
+            None,
         ),
     };
     let text_color = if selected {
@@ -321,7 +325,11 @@ fn row(cx: &Ctx, model: &Model, r: &Row, i: usize, width: f32) -> Node {
         };
         children.push(Node::row(vec![mark_node]).size(Some(w), None));
     }
-    children.push(Node::row(vec![Node::icon(icon, s.icon, icon_color)]).size(Some(s.icon_column), None));
+    let icon = match picture {
+        Some(key) => Node::image(key, s.icon),
+        None => Node::icon(icon, s.icon, icon_color),
+    };
+    children.push(Node::row(vec![icon]).size(Some(s.icon_column), None));
     children.push(texts);
     children.push(cx.text(vec![span(kind_text, kind_color, 400)], FontRole::Ui, s.kind_size, None));
     let pad = Insets {
@@ -418,7 +426,7 @@ mod tests {
                 Target::Shell("a".into()),
             ),
             Item::new("milva-template", "C:\\src", Kind::Folder, Target::Shell("b".into())),
-            Item::new("Windows Terminal", "", Kind::App, Target::Shell("wt".into())),
+            Item::new("Windows Terminal", "", Kind::App, Target::Shell("wt".into())).with_picture("wt-picture"),
         ];
         let mut m = Model::new(
             items,
@@ -433,10 +441,39 @@ mod tests {
         m
     }
 
+    static NO_PICTURES: std::sync::LazyLock<std::collections::HashMap<String, u64>> =
+        std::sync::LazyLock::new(std::collections::HashMap::new);
+
+    /// An entry whose picture is loaded shows it instead of its kind's icon; until then,
+    /// and for entries without one, the kind's icon.
+    #[test]
+    fn an_entry_shows_its_own_picture_once_loaded() {
+        let style = LauncherStyle::of(Look::Ada);
+        let tr = I18n::new(Lang::Tr);
+        let images = |f: Frame| -> Vec<u64> {
+            layout(&view(&model("w"), f, &Fake), Point::default(), &Fake)
+                .draws
+                .iter()
+                .filter_map(|d| match d {
+                    Draw::Image { spec, .. } => Some(spec.key),
+                    _ => None,
+                })
+                .collect()
+        };
+        assert!(images(frame(&style, &tr)).is_empty(), "not loaded yet: the kind's icon");
+        let loaded: std::collections::HashMap<String, u64> = [("wt-picture".to_string(), 42u64)].into();
+        let f = Frame {
+            pictures: &loaded,
+            ..frame(&style, &tr)
+        };
+        assert_eq!(images(f), vec![42]);
+    }
+
     fn frame<'a>(style: &'a LauncherStyle, i18n: &'a I18n) -> Frame<'a> {
         Frame {
             style,
             i18n,
+            pictures: &NO_PICTURES,
             text_scale: 1.0,
             width: style.width,
             height: None,

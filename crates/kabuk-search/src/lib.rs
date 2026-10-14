@@ -19,7 +19,9 @@ pub struct Index {
 struct Prepared {
     folded: Vec<fold::Folded>,
     starts: Vec<bool>,
-    /// For ordering equal scores alphabetically.
+    /// For ordering equal scores: the shorter title first (more of it is what was
+    /// typed), then alphabetically.
+    len: usize,
     key: Vec<u32>,
 }
 
@@ -40,6 +42,7 @@ impl Index {
                 let t = t.as_ref();
                 let folded = fold::fold(t, casing);
                 Prepared {
+                    len: t.chars().count(),
                     key: fold::collation_key(&folded, casing),
                     starts: fuzzy::word_starts(t),
                     folded,
@@ -57,8 +60,8 @@ impl Index {
         self.items.is_empty()
     }
 
-    /// At most `limit` results, best first; equal scores alphabetically, then in list
-    /// order. An empty query gives the items in list order.
+    /// At most `limit` results, best first; equal scores the shorter title first, then
+    /// alphabetically, then in list order. An empty query gives the items in list order.
     pub fn search(&self, query: &str, limit: usize) -> Vec<Hit> {
         let q: Vec<char> = fold::fold(query.trim(), self.casing)
             .into_iter()
@@ -80,6 +83,7 @@ impl Index {
             hits.sort_by(|a, b| {
                 b.score
                     .cmp(&a.score)
+                    .then_with(|| self.items[a.index].len.cmp(&self.items[b.index].len))
                     .then_with(|| self.items[a.index].key.cmp(&self.items[b.index].key))
                     .then_with(|| a.index.cmp(&b.index))
             });
@@ -133,6 +137,22 @@ mod tests {
         assert_eq!(i.search("EKRANI", 2)[0].index, 1);
     }
 
+    /// Reported while using the launcher: "chro" put Stack Overflow bookmarks whose
+    /// letters fell on scattered word starts ("c# - How … reflection … Overflow") above
+    /// "Google Chrome", and "Chromebook" in a long title tied with it.
+    #[test]
+    fn a_word_typed_whole_beats_letters_scattered_over_a_long_title() {
+        let titles = [
+            "c# - How do I invoke an extension method using reflection? - Stack Overflow",
+            "An alternative for Cloud Print and Chromebook CUPS print system | directprint.io",
+            "Google Chrome",
+            "c# - How to restore a SQL Server backup in .NET Core - Stack Overflow",
+        ];
+        let i = Index::new(&titles, Casing::Turkish);
+        assert_eq!(titles[i.search("chro", 4)[0].index], "Google Chrome");
+        assert_eq!(titles[i.search("chrome", 4)[0].index], "Google Chrome");
+    }
+
     #[test]
     fn matched_positions_are_given_for_highlighting() {
         let i = Index::new(&ITEMS, Casing::Turkish);
@@ -143,15 +163,19 @@ mod tests {
 
     #[test]
     fn equal_scores_are_alphabetical_and_stable() {
-        let same = ["dut x", "alfa x", "çiçek x", "alfa x", "ilik x", "ılık x", "cam x"];
+        // Titles of one length: alphabetical, then in list order.
+        let same = ["dutt x", "alfa x", "çiçe x", "alfa x", "ilik x", "ılık x", "camm x"];
         let i = Index::new(&same, Casing::Turkish);
         let hits = i.search("x", 10);
         // Turkish alphabet: a b c ç d … h ı i j …
         let titles: Vec<&str> = hits.iter().map(|h| same[h.index]).collect();
         assert_eq!(
             titles,
-            vec!["alfa x", "alfa x", "cam x", "çiçek x", "dut x", "ılık x", "ilik x"]
+            vec!["alfa x", "alfa x", "camm x", "çiçe x", "dutt x", "ılık x", "ilik x"]
         );
+        // A shorter title first.
+        let i = Index::new(&["Chrome Remote Desktop x", "Chrome"], Casing::Turkish);
+        assert_eq!(i.search("chrome", 2)[0].index, 1);
         // Equal titles keep their list order.
         assert_eq!((hits[0].index, hits[1].index), (1, 3));
     }
@@ -178,7 +202,8 @@ mod tests {
 
     mod properties {
         //! TESTING §3: matched positions are right for highlighting, and ranking is
-        //! stable (equal scores alphabetical, then in list order).
+        //! stable (equal scores the shorter title first, then alphabetical, then in list
+        //! order).
         use super::super::*;
         use proptest::prelude::*;
 
@@ -216,9 +241,11 @@ mod tests {
                     let (a, b) = (&w[0], &w[1]);
                     prop_assert!(a.score >= b.score);
                     if a.score == b.score {
+                        let la = titles[a.index].chars().count();
+                        let lb = titles[b.index].chars().count();
                         let ka = fold::collation_key(&fold::fold(&titles[a.index], Casing::Turkish), Casing::Turkish);
                         let kb = fold::collation_key(&fold::fold(&titles[b.index], Casing::Turkish), Casing::Turkish);
-                        prop_assert!(ka < kb || (ka == kb && a.index < b.index));
+                        prop_assert!(la < lb || (la == lb && (ka < kb || (ka == kb && a.index < b.index))));
                     }
                 }
             }

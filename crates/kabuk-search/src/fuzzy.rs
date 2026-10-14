@@ -1,7 +1,7 @@
 //! Fuzzy matching: the query's letters must appear in the text in order; the best
 //! placement is chosen, rewarding letters next to each other, at the start of the text
-//! and at the start of words (as the design page's launcher does, without its greedy
-//! first-letter choice).
+//! and at the start of words, and costing each jump over other letters (as the design
+//! page's launcher does, without its greedy first-letter choice).
 
 use crate::fold::Folded;
 
@@ -15,6 +15,10 @@ pub const TEXT_START: i32 = 3;
 /// A letter starting a word (after a space or punctuation, or an upper-case letter after
 /// a lower-case one).
 pub const WORD_START: i32 = 2;
+/// A letter placed after a jump over other letters: so a word typed whole ("chro" in
+/// "Google Chrome") beats the same letters scattered over word starts of a long title
+/// ("c# - How … reflection … Overflow").
+pub const GAP: i32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Match {
@@ -91,10 +95,11 @@ pub fn fuzzy(query: &[char], text: &[Folded], starts: &[bool]) -> Option<Match> 
                 }
                 let left = score[prev_row + i - 1];
                 let adjacent = left.saturating_add(CONSECUTIVE);
-                let (prev, from) = if left > NONE && adjacent >= best_before.0 {
+                let jumped = best_before.0.saturating_sub(GAP);
+                let (prev, from) = if left > NONE && adjacent >= jumped {
                     (adjacent, (i - 1) as u32)
                 } else {
-                    best_before
+                    (jumped, best_before.1)
                 };
                 if prev > NONE {
                     score[row + i] = prev + base(i);
@@ -163,6 +168,13 @@ mod tests {
         assert!(m("mil", "Milvasoft").unwrap().score > m("mil", "Mxixl").unwrap().score);
         // 3 letters at the start, adjacent: (1+3) + (1+2) + (1+2) = 10.
         assert_eq!(m("mil", "milva").unwrap().score, 10);
+    }
+
+    #[test]
+    fn a_jump_over_other_letters_costs() {
+        // "ac" in "abc": a at the start (1+3), c after a jump (1 - 2).
+        assert_eq!(m("ac", "abc").unwrap().score, 3);
+        assert!(m("chro", "Google Chrome").unwrap().score > m("chro", "c# - How reflection Overflow").unwrap().score);
     }
 
     #[test]

@@ -109,9 +109,11 @@ fn main() {
     } else {
         style.width
     };
+    let pictures = std::collections::HashMap::new();
     let frame = Frame {
         style: &style,
         i18n: &i18n,
+        pictures: &pictures,
         text_scale: Style::of(look).text_scale,
         width,
         height: None,

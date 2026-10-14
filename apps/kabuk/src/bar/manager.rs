@@ -1188,6 +1188,10 @@ impl Shared {
                 self.start_saver_soon();
                 Some(0)
             }
+            launcher_host::MSG_LAUNCHER_PICTURES => {
+                self.launcher_pictures_arrived();
+                Some(0)
+            }
             launcher_host::MSG_LAUNCHER_ITEMS => {
                 self.launcher_items_arrived();
                 Some(0)
