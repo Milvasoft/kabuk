@@ -449,7 +449,7 @@ fn icons_beyond_tray_shown_are_clicked_from_the_overflow_panel() {
 #[test]
 fn a_forced_kill_gives_the_users_wallpaper_back() {
     kabuk_win::system::com_init();
-    let theirs = kabuk_win::wallpaper::current().expect("Windows' wallpaper readable");
+    let theirs = kabuk_win::wallpaper::backup().expect("Windows' wallpaper readable");
     let before = Desktop::now();
     let sandbox = Sandbox::new();
     std::fs::write(sandbox.config_file(), "schema = 1\n[wallpaper]\nkind = \"black\"\n").unwrap();

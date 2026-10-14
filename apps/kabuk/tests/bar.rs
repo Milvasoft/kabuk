@@ -1869,7 +1869,7 @@ fn the_power_menu_opens_and_closes() {
 #[test]
 fn a_still_wallpaper_is_set_and_the_users_own_comes_back() {
     kabuk_win::system::com_init();
-    let theirs = kabuk_win::wallpaper::current().expect("Windows' wallpaper readable");
+    let theirs = kabuk_win::wallpaper::backup().expect("Windows' wallpaper readable");
     assert!(
         !kabuk_win::wallpaper::slideshow_on(),
         "a slideshow runs: Kabuk would leave it alone"
@@ -1918,7 +1918,7 @@ fn a_still_wallpaper_is_set_and_the_users_own_comes_back() {
 fn a_still_picture_drifts_a_step_at_a_time() {
     use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_DRIFT};
     kabuk_win::system::com_init();
-    let theirs = kabuk_win::wallpaper::current().expect("Windows' wallpaper readable");
+    let theirs = kabuk_win::wallpaper::backup().expect("Windows' wallpaper readable");
     assert!(!kabuk_win::wallpaper::slideshow_on(), "a slideshow runs");
     let before = work_areas();
     let sandbox = Sandbox::new();
@@ -1994,7 +1994,7 @@ fn a_still_picture_drifts_a_step_at_a_time() {
 #[test]
 fn a_created_wallpaper_plays_behind_the_icons() {
     kabuk_win::system::com_init();
-    let theirs = kabuk_win::wallpaper::current().expect("Windows' wallpaper readable");
+    let theirs = kabuk_win::wallpaper::backup().expect("Windows' wallpaper readable");
     let before = work_areas();
     let sandbox = Sandbox::new();
     let wall = sandbox.state_dir().join("walls").join("gen-1");
@@ -2050,7 +2050,7 @@ fn the_animated_wallpaper_stops_in_game_mode() {
     use kabuk_win::msgloop::{post_message, Msg};
     const ABN_FULLSCREENAPP: usize = 2;
     kabuk_win::system::com_init();
-    let theirs = kabuk_win::wallpaper::current().expect("Windows' wallpaper readable");
+    let theirs = kabuk_win::wallpaper::backup().expect("Windows' wallpaper readable");
     let before = work_areas();
     let sandbox = Sandbox::new();
     std::fs::write(
@@ -2142,7 +2142,7 @@ fn the_animated_wallpaper_stops_in_game_mode() {
 #[test]
 fn an_animated_wallpaper_runs_while_chosen_and_ends_with_kabuk() {
     kabuk_win::system::com_init();
-    let theirs = kabuk_win::wallpaper::current().expect("Windows' wallpaper readable");
+    let theirs = kabuk_win::wallpaper::backup().expect("Windows' wallpaper readable");
     let before = work_areas();
     let sandbox = Sandbox::new();
     std::fs::write(sandbox.config_file(), "schema = 1\n[wallpaper]\nkind = \"circuit\"\n").unwrap();
