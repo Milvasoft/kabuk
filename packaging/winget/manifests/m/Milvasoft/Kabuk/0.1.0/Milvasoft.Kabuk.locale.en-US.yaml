@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.9.0.schema.json
+PackageIdentifier: Milvasoft.Kabuk
+PackageVersion: 0.1.0
+PackageLocale: en-US
+Publisher: Milvasoft
+PublisherUrl: https://github.com/Milvasoft
+PackageName: Kabuk
+PackageUrl: https://github.com/Milvasoft/kabuk
+License: PolyForm Noncommercial 1.0.0
+LicenseUrl: https://github.com/Milvasoft/kabuk/blob/main/LICENSE.md
+ShortDescription: A desktop shell for Windows with a bar, tiling windows and a launcher.
+Description: >-
+  Kabuk puts a bar on every monitor, tiles and floats your windows, opens apps from a
+  launcher and shows notifications, in seven looks. Windows' taskbar is hidden while it
+  runs and Windows is as it was when it exits. Installs for the current user without
+  administrator rights; "kabuk --restore" or Ctrl+Alt+Shift+End brings Windows back at any
+  time.
+Moniker: kabuk
+Tags:
+  - shell
+  - taskbar
+  - tiling
+  - window-manager
+  - launcher
+ReleaseNotesUrl: https://github.com/Milvasoft/kabuk/releases/tag/v0.1.0
+ManifestType: defaultLocale
+ManifestVersion: 1.9.0

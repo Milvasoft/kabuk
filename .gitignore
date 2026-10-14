@@ -1,0 +1,16 @@
+/target/
+**/*.rs.bk
+/node_modules/
+*.pdb
+/reference/OledSaver/src/bin/
+/reference/OledSaver/src/obj/
+.vs/
+.idea/
+*.log
+*.snap.new
+
+# Logo sources and renders; the build's copies are in assets/logo
+/design/
+
+# Built installers (tools/package.ps1)
+/dist/

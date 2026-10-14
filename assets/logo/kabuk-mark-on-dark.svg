@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="4 23 112 65" width="112" height="65" role="img" aria-label="Kabuk">
+<title>Kabuk</title>
+<g stroke-width="1.6" stroke-linejoin="round">
+<path d="M39.75 75.4L6.61 61.34A58 58 0 0 1 18.99 42.99L44.44 68.44A22 22 0 0 0 39.75 75.4Z" fill="#ECEAE4" stroke="#ECEAE4"/>
+<path d="M46.15 66.9L23.5 38.93A58 58 0 0 1 43.04 28.53L53.57 62.96A22 22 0 0 0 46.15 66.9Z" fill="#ECEAE4" stroke="#ECEAE4"/>
+<path d="M55.8 62.4L48.93 27.07A58 58 0 0 1 71.07 27.07L64.2 62.4A22 22 0 0 0 55.8 62.4Z" fill="#FF7A3D" stroke="#FF7A3D"/>
+<path d="M66.43 62.96L76.96 28.53A58 58 0 0 1 96.5 38.93L73.85 66.9A22 22 0 0 0 66.43 62.96Z" fill="#ECEAE4" stroke="#ECEAE4"/>
+<path d="M75.56 68.44L101.01 42.99A58 58 0 0 1 113.39 61.34L80.25 75.4A22 22 0 0 0 75.56 68.44Z" fill="#ECEAE4" stroke="#ECEAE4"/>
+</g>
+<rect x="44" y="80" width="32" height="6" rx="3" fill="#8A8F98"/>
+</svg>

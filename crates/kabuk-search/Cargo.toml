@@ -1,0 +1,18 @@
+[package]
+name = "kabuk-search"
+description = "Launcher fuzzy matching, ranking with Turkish case rules, and the calculator."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[features]
+# `cargo test --release -p kabuk-search --features perf --test perf -- --nocapture`
+perf = []

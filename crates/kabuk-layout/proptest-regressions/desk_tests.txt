@@ -1,0 +1,10 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 97b6c701a555cd0366a58fb7a2628878f21998db64436b971ce3cc20e3f4cc0d # shrinks to ops = [Add(0, false, Some(2))]
+cc 09a7be4bf02537871158314c8833fce978c6a875256c2ee7a48e5eff7457c885 # shrinks to ops = [ToggleScratch(false), Add(10, false, None), ToScratch(10), Minimise(10)]
+cc a53c1bff9b082d7c861e35f8b2a971183afba9468cbc2ba5fb0b25b97b059c6b # shrinks to ops = [Add(1, true, Some(5)), ToggleGroup(1), Switch(true, 5), Add(2, true, None), Refuse(1)]
+cc 8eda6caf707a1e8e25bf029d78ead14a4d43cfb18e7122189642a5d54e6b2a97 # shrinks to ops = [Add(6, true, None), Unplug, Switch(false, 2), Switch(false, 1), ToggleGroup(6), Add(0, false, None), Plug]

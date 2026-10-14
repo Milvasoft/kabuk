@@ -1,0 +1,27 @@
+[package]
+name = "kabuk-win"
+description = "Safe wrappers over the Win32 APIs Kabuk uses. Application code never calls the windows crate directly."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+
+[dependencies]
+kabuk-core.workspace = true
+kabuk-i18n.workspace = true
+windows.workspace = true
+windows-core.workspace = true
+tracing.workspace = true
+webview2-com = { workspace = true, optional = true }
+
+[features]
+# The settings app's WebView2 host; kabuk.exe does not need it.
+webview = ["dep:webview2-com"]
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+windows-future = "=0.3.2"
+tempfile.workspace = true

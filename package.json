@@ -1,0 +1,12 @@
+{
+  "name": "kabuk-tools",
+  "private": true,
+  "description": "Design-page tooling for Kabuk: contrast audit and fixture generation. Not part of the shipped app.",
+  "scripts": {
+    "audit:contrast": "node tools/contrast-audit.js docs/design/kabuk-tasarim.html",
+    "fixture:contrast": "node tools/contrast-fixture.js docs/design/kabuk-tasarim.html tests/fixtures/contrast.json"
+  },
+  "devDependencies": {
+    "playwright": "1.56.0"
+  }
+}

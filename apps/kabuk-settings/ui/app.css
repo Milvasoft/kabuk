@@ -1,0 +1,17 @@
+/* The settings screen fills the window instead of the design page's 1200 x 740 stage. */
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body { background: var(--desk, #000); }
+#app { height: 100%; }
+#app > .screen.settings-screen { width: 100%; height: 100%; }
+/* The window can be smaller than the design's screen: the page scrolls. */
+.set-main { overflow-y: auto; }
+/* Kabuk's logo mark in place of the design's coloured square (asked for by the user). */
+.set-brand img.mark { width: 28px; height: auto; display: block; }
+
+/* A setting's way back to its default, beside its control. */
+.linkish.reset { margin-left: 10px; font-size: 12.5px; }
+
+/* Cursor cards (DECISIONS D41): the theme cards' frame around the cursor previews. */
+.cursor-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.cursor-card .cp { height: 64px; display: flex; gap: 8px; align-items: center; justify-content: center; background: var(--desk); border: 1px solid var(--line-s); border-radius: 8px; }
+.cursor-card .cp-i, .cursor-card .cp-i svg { width: 32px; height: 32px; display: block; }

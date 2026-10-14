@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Design tooling
+        run: |
+          npm ci
+          npx playwright install chromium
+
+      # fmt, clippy -D warnings, all tests, Windows integration tests, contrast audit.
+      - name: tools/check.ps1
+        shell: pwsh
+        run: ./tools/check.ps1
+
+      - name: Release build
+        run: cargo build --workspace --release
+
+      - name: Binary sizes
+        shell: pwsh
+        run: |
+          Get-ChildItem target/release/*.exe |
+            ForEach-Object { "{0,-24} {1,8:N0} KB" -f $_.Name, ($_.Length / 1KB) } |
+            Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append

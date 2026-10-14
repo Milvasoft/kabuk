@@ -1,0 +1,8 @@
+---
+source: crates/kabuk-core/src/config/tests.rs
+assertion_line: 404
+expression: "text.join(\"\\n\")"
+---
+line 7, column 10: appearance.accent: `#12` is not a #rrggbb colour or "theme"
+line 5, column 13: shortcuts.launcher[0]: Win+Shift+Q is already bound by shortcuts.close_window[0]
+line 3, column 18: oled.dim_after_secs: must be between 10 and 3600

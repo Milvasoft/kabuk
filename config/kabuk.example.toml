@@ -1,0 +1,156 @@
+# Kabuk configuration: %APPDATA%\kabuk\kabuk.toml
+#
+# Every key is optional; a missing key keeps its default. The file is watched and
+# applied live. An invalid edit is rejected with the line and column, and the last
+# valid configuration stays in use. Unknown keys are reported and ignored.
+#
+# This example sets every key, most of them to their default value.
+
+schema = 1
+
+[appearance]
+look = "rihtim"           # ada, cizgi, devre, ray, konsol, rihtim, etkinlik
+accent = "theme"          # "theme" (the look's own colour) or "#rrggbb"
+mode = "dark"             # dark, light, system (follow Windows), time (light 07:00-19:00)
+text_size = "normal"      # small, normal, large
+animations = "full"       # full, reduced (opacity only), off
+cursors = "windows"       # windows (your own), kabuk (the look's set while Kabuk runs), custom (the three below)
+cursor_style = "round"    # with cursors = "custom": round, slim, circuit, bold, block, cartoon, comic
+cursor_color = "light"    # with cursors = "custom": light, dark, accent
+cursor_size = "normal"    # with Kabuk's sets: normal, large, huge
+
+[system_theme]
+colors = false            # Windows' mode and accent colour follow Kabuk's (recorded, given back on exit)
+
+[wallpaper]
+kind = "windows"          # windows (your own, untouched), black, gradient, image, circuit, constellation, generated
+brightness = 60           # peak brightness, 10-100 %
+pause_when_hidden = true  # stop animating when covered, in full screen, in game mode, on battery
+drift = true              # your own still picture drifts by two pixels, too slowly to see (OLED)
+drift_minutes = 10        # a step every this many minutes, 1-120
+
+# Per-monitor choice; monitors are numbered as Windows numbers them (1 is the main monitor).
+[[wallpaper.monitor]]
+index = 2
+kind = "image"
+image = "D:\\Pictures\\night.png"
+
+[screensaver]
+kind = "circuit"          # circuit, constellation, none (turn the display off)
+wait_minutes = 5          # 3, 5, 10, 15
+respect_video = true      # don't start while a video keeps the display on
+
+[bar]
+position = "default"      # default (the look's edge), top, bottom, left, right
+monitors = "all"          # all, main
+autohide = false
+background = "solid"      # behind the bar over the wallpaper: solid (desk colour), blur, off
+# height = 38              # bar thickness in px (24-72); unset: the look's own
+tray_shown = 3            # tray icons on the bar (0-12); the rest open from the overflow button
+
+[bar.modules]
+title = true
+taskbar = true            # pinned and open apps
+clock = true
+date = true
+media = true
+cpu = true
+ram = true
+gpu = true
+net = true
+vol = true
+tray = true
+notif = true
+power = true
+
+[windows]
+workspaces = 9            # per monitor, 1-9
+shown_workspaces = 4      # always shown on the bar; occupied and active ones are shown too
+default_layout = "tiling" # tiling, floating
+tiling_layout = "dwindle" # dwindle, master
+gap = 14                  # px, 0-32; remove the key to use the look's default
+new_window = "right"      # right, below, floating
+drag_to_float = true
+alt_drag = true
+double_click_to_tile = true
+active_border = true
+follow_look = true        # other programs' title bars and corners follow the look
+minimize_effect = "genie" # genie (into its icon on the bar, as on macOS) or windows (Windows' own)
+
+[rules]
+float_unfit = true        # float windows whose minimum size doesn't fit
+defaults = true           # dialogs float centred, splash screens ignored, Taskmgr.exe floats
+
+# Matchers that are set must all match; plain text is case-insensitive.
+[[rules.rule]]
+exe = "Discord.exe"
+workspace = 5
+monitor = 2
+
+[[rules.rule]]
+exe = "Spotify.exe"
+workspace = 5
+monitor = 2
+min_width = 940
+
+[[rules.rule]]
+title = "^Picture-in-picture$"
+regex = true
+float = true
+placement = "right"       # left, right, top, bottom, center
+
+[game]
+detect = true
+hide_bar = true
+pause_tiling = true
+silence_notifications = true
+other_monitors_normal = true
+
+[launcher]
+indexed_folders = ["%USERPROFILE%\\Documents", "C:\\src"]
+
+[launcher.sources]
+windows = true
+apps = true
+recent = true
+files = true
+bookmarks = true
+commands = true
+calculator = true
+
+# Ctrl+Alt+Shift+End is the fixed emergency exit and cannot be rebound.
+[shortcuts]
+launcher = ["Alt+Space"]
+workspace = "Alt"                 # + 1..9
+move_to_workspace = "Alt+Shift"   # + 1..9
+focus_left = ["Alt+H", "Alt+Left"]
+focus_down = ["Alt+J", "Alt+Down"]
+focus_up = ["Alt+K", "Alt+Up"]
+focus_right = ["Alt+L", "Alt+Right"]
+move_left = ["Alt+Shift+H", "Alt+Shift+Left"]
+move_down = ["Alt+Shift+J", "Alt+Shift+Down"]
+move_up = ["Alt+Shift+K", "Alt+Shift+Up"]
+move_right = ["Alt+Shift+L", "Alt+Shift+Right"]
+toggle_float = ["Alt+Shift+Space"]
+close_window = ["Alt+Shift+Q"]
+cycle_layout = ["Alt+Shift+T"]
+toggle_scratchpad = ["Alt+S"]       # show or hide the hidden workspace
+to_scratchpad = ["Alt+Shift+S"]     # send the focused window there
+toggle_group = ["Alt+G"]            # make the focused window a tabbed group, or break it up
+next_tab = ["Alt+Shift+G"]          # show the group's next tab
+overview = ["Alt+O"]                # every workspace at a glance
+start_saver = ["Win+Shift+L"]       # the screen saver now (the display off when none is chosen)
+drag = "Alt"                      # held while dragging: left button moves, right button resizes
+
+[language]
+language = "system"       # system, tr, en
+clock = "24h"             # 24h, 12h
+
+[oled]
+bar_shift = true
+idle_dim = true
+dim_after_secs = 60       # 10-3600
+
+[create]
+provider = "claude"       # claude, openai, ollama; API keys are kept in Windows Credential Manager
+ollama_url = "http://localhost:11434"

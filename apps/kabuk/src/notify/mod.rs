@@ -1,0 +1,142 @@
+//! Kabuk's own notices and the volume OSD (SPEC §2.6), drawn in each look's style from
+//! the design page (`.toast`, `.osd`). Pure: what a notice says and how it is drawn and
+//! placed; the windows live on the bar thread (`bar::manager::notify_host`).
+
+pub mod place;
+pub mod style;
+pub mod view;
+
+/// Something Kabuk tells the user.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Notice {
+    /// A workspace switched to floating, or back to tiling.
+    FloatingLayout,
+    TilingLayout,
+    /// A window dragged off its tile, or tiled again by a double click.
+    Floated,
+    Tiled,
+    /// The launcher copied a result.
+    Copied,
+    /// Game mode started (shown only when notices are not muted in it) or ended, with
+    /// how many notices it held back (SPEC §2.4: one summary afterwards).
+    GameOn,
+    GameOff {
+        missed: u32,
+    },
+}
+
+impl Notice {
+    /// The design's words (`locales/design`): title and line under it; `None` when the
+    /// line is built from `missed` instead.
+    pub fn keys(self) -> (&'static str, Option<&'static str>) {
+        match self {
+            Notice::FloatingLayout => ("t-float-on", Some("t-float-on-s")),
+            Notice::TilingLayout => ("t-tiled", Some("t-tiled-s")),
+            Notice::Floated => ("t-detached", Some("t-detached-s")),
+            Notice::Tiled => ("t-retiled", Some("t-retiled-s")),
+            Notice::Copied => ("t-copied", None),
+            Notice::GameOn => ("t-game-on", Some("t-game-on-s")),
+            Notice::GameOff { missed: 0 } => ("t-game-off", Some("t-game-off-s")),
+            Notice::GameOff { .. } => ("t-game-off", None),
+        }
+    }
+
+    /// The icon in its box (the design shows `check`; the layout ones show the layout's).
+    pub fn icon(self) -> &'static str {
+        match self {
+            Notice::FloatingLayout | Notice::TilingLayout | Notice::Floated | Notice::Tiled => "tile",
+            Notice::GameOn | Notice::GameOff { .. } => "pad",
+            Notice::Copied => "check",
+        }
+    }
+
+    /// The title and the line under it in the user's language.
+    pub fn words(self, i18n: &kabuk_i18n::I18n) -> (String, String) {
+        let (title, sub) = self.keys();
+        let sub = match (self, sub) {
+            (_, Some(key)) => i18n.tr(key),
+            (Notice::GameOff { missed }, None) => {
+                i18n.tr_args("notify-missed", &[("value", kabuk_i18n::Arg::Num(f64::from(missed)))])
+            }
+            _ => String::new(),
+        };
+        (i18n.tr(title), sub)
+    }
+}
+
+/// Notices while game mode holds them back (SPEC §2.4), then one summary.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Queue {
+    muted: bool,
+    missed: u32,
+}
+
+impl Queue {
+    /// What to show now for `n`: itself, or nothing while muted (counted for the summary).
+    pub fn offer(&mut self, n: Notice) -> Option<Notice> {
+        if self.muted {
+            self.missed += 1;
+            return None;
+        }
+        Some(n)
+    }
+
+    /// Game mode began (`mute`: notices held back) or ended; the summary when it ends.
+    pub fn game_mode(&mut self, on: bool, mute: bool) -> Option<Notice> {
+        if on {
+            self.muted = mute;
+            self.missed = 0;
+            return (!mute).then_some(Notice::GameOn);
+        }
+        let was = std::mem::replace(&mut self.muted, false);
+        let missed = std::mem::take(&mut self.missed);
+        (was || missed > 0).then_some(Notice::GameOff { missed })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Edge cases: every notice has words in both languages; the summary counts what
+    //! was held back; nothing is held without game mode; muting can be off.
+    use super::*;
+    use kabuk_i18n::{I18n, Lang};
+
+    #[test]
+    fn every_notice_has_words() {
+        for lang in [Lang::Tr, Lang::En] {
+            let i18n = I18n::new(lang);
+            for n in [
+                Notice::FloatingLayout,
+                Notice::TilingLayout,
+                Notice::Floated,
+                Notice::Tiled,
+                Notice::Copied,
+                Notice::GameOn,
+                Notice::GameOff { missed: 0 },
+                Notice::GameOff { missed: 3 },
+            ] {
+                let (title, _) = n.words(&i18n);
+                assert!(!title.is_empty() && !title.contains('-'), "{n:?} {lang:?}: {title}");
+            }
+        }
+        let tr = I18n::new(Lang::Tr);
+        assert!(Notice::GameOff { missed: 3 }.words(&tr).1.contains('3'));
+        assert_eq!(Notice::Copied.words(&I18n::new(Lang::En)).0, "Copied to clipboard");
+    }
+
+    #[test]
+    fn game_mode_holds_notices_back_and_sums_them_up() {
+        let mut q = Queue::default();
+        assert_eq!(q.offer(Notice::Floated), Some(Notice::Floated));
+        assert_eq!(q.game_mode(false, true), None, "no summary without game mode");
+        assert_eq!(q.game_mode(true, true), None);
+        assert_eq!(q.offer(Notice::Floated), None);
+        assert_eq!(q.offer(Notice::Copied), None);
+        assert_eq!(q.game_mode(false, true), Some(Notice::GameOff { missed: 2 }));
+        assert_eq!(q.offer(Notice::Tiled), Some(Notice::Tiled));
+        // With muting off, notices show and game mode says so.
+        assert_eq!(q.game_mode(true, false), Some(Notice::GameOn));
+        assert_eq!(q.offer(Notice::Tiled), Some(Notice::Tiled));
+        assert_eq!(q.game_mode(false, false), None);
+    }
+}

@@ -1,0 +1,19 @@
+[package]
+name = "kabuk-i18n"
+description = "Translations (Fluent), language selection, and later date/number formats and Turkish case rules."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+
+[dependencies]
+fluent-bundle.workspace = true
+unic-langid.workspace = true
+fluent-syntax = "0.12.0"
+
+[dev-dependencies]
+regex.workspace = true
+
+[lints]
+workspace = true

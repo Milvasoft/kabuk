@@ -1,0 +1,20 @@
+[package]
+name = "kabuk-theme"
+description = "Theme tokens of the seven looks, light/dark modes, and the contrast engine."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+
+
+[dependencies]
+serde.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <AssemblyName>OledSaver</AssemblyName>
+    <RootNamespace>OledSaver</RootNamespace>
+    <Version>1.0.0</Version>
+    <Product>OledSaver</Product>
+    <AssemblyTitle>OledSaver</AssemblyTitle>
+    <Description>OLED ekranlar için hareketli ekran koruyucu</Description>
+    <Copyright>Bugra Kosen</Copyright>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- Windows screen savers are plain executables with the .scr extension. -->
+  <Target Name="CopyAsScreenSaver" AfterTargets="Build">
+    <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(TargetDir)$(AssemblyName).scr" />
+  </Target>
+
+</Project>

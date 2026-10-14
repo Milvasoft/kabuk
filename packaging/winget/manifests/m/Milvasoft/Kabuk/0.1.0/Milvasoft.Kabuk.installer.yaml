@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.9.0.schema.json
+PackageIdentifier: Milvasoft.Kabuk
+PackageVersion: 0.1.0
+MinimumOSVersion: 10.0.22000.0
+InstallerType: exe
+Scope: user
+InstallModes:
+  - interactive
+  - silent
+InstallerSwitches:
+  Silent: /S
+  SilentWithProgress: /S
+InstallerSuccessCodes:
+  - 0
+ExpectedReturnCodes:
+  - InstallerReturnCode: 1602
+    ReturnResponse: cancelledByUser
+UpgradeBehavior: install
+Commands:
+  - kabuk
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/Milvasoft/kabuk/releases/download/v0.1.0/kabuk-setup.exe
+    InstallerSha256: 671AF80E1225B8C2912C414E7E357ACAAA37D75B991D609B7E79FB633ED57C89
+ManifestType: installer
+ManifestVersion: 1.9.0

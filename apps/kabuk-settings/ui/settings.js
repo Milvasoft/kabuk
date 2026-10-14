@@ -1,0 +1,683 @@
+// The settings screen: the design page's settings panel (docs/design/kabuk-tasarim.html,
+// `settingsPanel`) with its controls bound to kabuk.toml through the Rust bridge
+// (apps/kabuk-settings/src/bridge.rs). Markup and class names follow the design page so
+// its stylesheet (design.css) styles it; its drawings come from design-art.js. Every word
+// comes from the language files, which the bridge sends with the state.
+"use strict";
+(function () {
+  const webview = window.chrome.webview;
+  const post = (m) => webview.postMessage(JSON.stringify(m));
+
+  /* ---------- state ---------- */
+  let S = null; // the last state the bridge sent
+  let A = null; // the design's drawings
+  const ui = {
+    page: "look",
+    wallMon: "all",
+    wallTab: "pick",
+    dimCustom: null, // null: follow the value; true/false: chosen
+    ruleForm: null, // { exe, what } while adding a rule
+    apps: [],
+    capture: null, // { path, index, mods } while a shortcut is being pressed
+    refused: null,
+    pending: null, // what a picked file or folder is for
+    // The Create tab: the key being typed, Ollama's answer, the request and the run.
+    keyEntry: false,
+    ollama: null, // null: not asked; { ok, model }
+    prompt: "",
+    gen: { phase: "idle", step: 0, attempt: 1, ms: null, average: null, reason: "", name: "", preview: null },
+    update: null, // null: not asked; { state, version, page } from the bridge
+  };
+
+  // The design page's keys are camelCase; the language files use kebab-case
+  // (tools/extract-locales.js), so both spellings work here.
+  const kebab = (k) => String(k).replace(/^#/, "").replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase().replace(/[^a-z0-9-]/g, "-");
+  const t = (k) => (S && S.strings[kebab(k)]) ?? kebab(k);
+  const tv = (k, v) => t(k).split(S.mark).join(String(v));
+  const escapeHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const icon = (id, cls = "i") => `<svg class="${cls}" aria-hidden="true"><use href="#i-${id}"></use></svg>`;
+
+  const LOOK_NAMES = { a: "ada", b: "cizgi", c: "devre", d: "ray", e: "konsol", f: "rihtim", g: "etkinlik" };
+  const DIM_MIN = 10, DIM_MAX = 3600, DIM_PRESETS = [30, 60, 120];
+  const SAVER_WAITS = [3, 5, 10, 15];
+  const RANGES = { height: [24, 72], tray: [0, 12], gap: [0, 32], bright: [10, 100, 5] };
+
+  const cfg = () => S.config;
+  const at = (root, path) => path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), root);
+  const get = (path) => at(cfg(), path);
+  /** Whether a setting differs from Kabuk's default (asked for by the user: a way back to it). */
+  const changed = (path) => JSON.stringify(get(path) ?? null) !== JSON.stringify(at(S.defaults, path) ?? null);
+  const set = (path, value) => post({ op: "set", path, value });
+  const code = () => S.look;
+
+  /* ---------- building blocks (the design page's helpers) ---------- */
+  const head = (title, desc) => `<div><h3>${title}</h3><p>${desc}</p></div>`;
+  const row = (label, hint, control, extra = "") => `<div class="set-row${extra}"><span><b>${label}</b><span class="h">${hint}</span></span>${control}</div>`;
+  const tgl = (path, label, hint) => row(label, hint + resetIfChanged(path), `<button class="tgl" type="button" role="switch" aria-checked="${!!get(path)}" aria-label="${escapeHtml(label)}" data-tgl="${path}"></button>`);
+  const seg = (aria, buttons) => `<span class="seg" role="group" aria-label="${escapeHtml(aria)}">${buttons}</span>`;
+  const choice = (path, now, options) => options.map(([v, n]) => {
+    const on = now === v;
+    return `<button type="button" data-set="${path}" data-val='${escapeHtml(JSON.stringify(v))}' class="${on ? "on" : ""}" aria-pressed="${on}">${n}</button>`;
+  }).join("");
+  const segFor = (path, aria, options) => seg(aria, choice(path, get(path), options));
+  const range = (id, path, [min, max, step = 1], value, label) => `<span class="rng"><input type="range" id="${id}" data-range="${path}" min="${min}" max="${max}" step="${step}" value="${value}" aria-label="${escapeHtml(label)}"><span class="v" data-v="${id}">${tv("setPx", value)}</span></span>`;
+  const resetLink = (path) => ` · <button type="button" class="linkish" data-reset="${path}">${t("posReset")}</button>`;
+  const resetIfChanged = (path) => (changed(path) ? resetLink(path) : "");
+  // A row for setting `path`: its "Use default" sits at the end of its hint, as a switch's
+  // does, never between the label and the control (found by the user).
+  const rowFor = (path, label, hint, control) =>
+    row(label, hint + (changed(path) ? (hint ? resetLink(path) : resetLink(path).replace(" · ", "")) : ""), control);
+
+  /* ---------- shortcuts ---------- */
+  const MODS = [["ctrlKey", "Ctrl"], ["altKey", "Alt"], ["shiftKey", "Shift"], ["metaKey", "Win"]];
+  const NAMED = { Space: "Space", Enter: "Enter", Tab: "Tab", Escape: "Esc", Backspace: "Backspace", Delete: "Delete", Insert: "Insert", Home: "Home", End: "End", PageUp: "PageUp", PageDown: "PageDown", ArrowLeft: "Left", ArrowRight: "Right", ArrowUp: "Up", ArrowDown: "Down" };
+  function keyName(e) {
+    if (/^Key[A-Z]$/.test(e.code)) return e.code.slice(3);
+    if (/^Digit[0-9]$/.test(e.code)) return e.code.slice(5);
+    if (/^F([1-9]|1[0-9]|2[0-4])$/.test(e.code)) return e.code;
+    return NAMED[e.code] || null;
+  }
+  const modsOf = (e) => MODS.filter(([k]) => e[k]).map(([, n]) => n);
+  const kbds = (chord) => chord.split("+").map((x) => `<kbd>${escapeHtml(x)}</kbd>`).join(" ");
+  function chordEditor(path) {
+    const value = get(path);
+    const list = Array.isArray(value) ? value : [value];
+    const capturing = (i) => ui.capture && ui.capture.path === path && ui.capture.index === i;
+    const chips = list.map((c, i) => capturing(i)
+      ? `<kbd>${Array.isArray(value) ? t("setKeyPress") : t("setKeyMods")}</kbd>`
+      : `<button type="button" class="linkish" data-chord="${path}" data-index="${i}">${kbds(c)}</button>`);
+    if (Array.isArray(value)) {
+      chips.push(capturing(list.length) ? `<kbd>${t("setKeyPress")}</kbd>` : `<button type="button" class="linkish" data-chord="${path}" data-index="${list.length}">${t("setAdd")}</button>`);
+      if (list.length > 1) chips.push(`<button type="button" class="linkish" data-chord-drop="${path}">${t("setRemove")}</button>`);
+    }
+    if (changed(path)) chips.push(`<button type="button" class="linkish" data-reset="${path}">${t("posReset")}</button>`);
+    return `<span class="keys" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">${chips.join(" ")}</span>`;
+  }
+  function onKey(e) {
+    const c = ui.capture;
+    if (!c) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const mods = modsOf(e);
+    if (e.type === "keydown" && e.code === "Escape" && mods.length === 0) { ui.capture = null; capture(false); render(); return; }
+    if (c.mods) {
+      // Modifier-only settings: what is held when the last key is released.
+      if (e.type === "keydown") { c.held = mods.length >= (c.held || []).length ? mods : c.held; return; }
+      if (mods.length === 0 && c.held && c.held.length) { save(c.path, c.held.join("+")); }
+      return;
+    }
+    if (e.type !== "keydown") return;
+    const key = keyName(e);
+    if (!key) return;
+    const chord = [...mods, key].join("+");
+    const list = [...get(c.path)];
+    list[c.index] = chord;
+    save(c.path, list);
+  }
+  function save(path, value) { ui.capture = null; capture(false); set(path, value); }
+  /* While the recorder waits for a chord, Rust takes the keys (Win chords never reach the
+     page: Kabuk and Windows take them first) and sends each chord as {"op":"chord"}. */
+  let capturingKeys = false;
+  function capture(on) {
+    if (on === capturingKeys) return;
+    capturingKeys = on;
+    post({ op: "capture-keys", on });
+  }
+  function onChord(chord) {
+    const c = ui.capture;
+    if (!c || c.mods) return;
+    if (chord === "Esc") { ui.capture = null; capture(false); render(); return; }
+    const list = [...get(c.path)];
+    list[c.index] = chord;
+    save(c.path, list);
+  }
+  document.addEventListener("keydown", onKey, true);
+  // Away from the window, the keys are the other programs' again.
+  window.addEventListener("blur", () => { if (ui.capture) { ui.capture = null; capture(false); render(); } });
+  document.addEventListener("keyup", onKey, true);
+
+  /* ---------- pages ---------- */
+  const navItems = [["look", "app"], ["wall", "image"], ["saver", "lock"], ["bar", "tile"], ["windows", "tile"], ["rules", "file"], ["game", "pad"], ["launcher", "search"], ["keys", "term"], ["lang", "globe"], ["oled", "shield"], ["about", "cube"]];
+
+  function lookPage() {
+    const c = code();
+    const accent = cfg().appearance.accent;
+    const own = accent === "theme";
+    const accentNow = own ? A.lookDefaults[c] : accent;
+    const cards = A.looks.map((d) => {
+      const on = d === c;
+      return `<button class="theme-card${on ? " on" : ""}" type="button" data-set="appearance.look" data-val='"${LOOK_NAMES[d]}"' aria-pressed="${on}"><span class="tp">${A.miniLook[d].replaceAll("VAR", on ? accentNow : A.lookDefaults[d])}</span><span class="tn">${t("looks-" + d)}<span>${on ? t("inUse") : t("apply")}</span></span></button>`;
+    }).join("");
+    const swatches = `<button class="swatch def${own ? " on" : ""}" type="button" data-set="appearance.accent" data-val='"theme"' aria-label="${t("themeAccent")}" title="${t("themeAccent")}"></button>` + A.accentList.map((x) => `<button class="swatch${accent === x ? " on" : ""}" type="button" data-set="appearance.accent" data-val='"${x}"' style="background:${x}" aria-label="${t("accents-" + x.slice(1))}" title="${t("accents-" + x.slice(1))}"></button>`).join("");
+    const adapted = S.accent_adapted ? `<span class="sw-adapt">${tv("accentAdapted", S.accent_adapted)}</span>` : "";
+    return head(t("navLook"), t("lookDesc")) + `
+      <div class="set-grp"><span class="gl">${t("theme")}</span><div class="themes">${cards}</div></div>
+      <div class="set-grp"><span class="gl">${t("accent")}</span><div class="swatches">${swatches}<span class="sw-label">${own ? t("themeAccent") : t("accents-" + accent.slice(1))}</span></div>${adapted}</div>
+      <div class="set-grp">${rowFor("appearance.mode", t("modeLbl"), t("modeH"), segFor("appearance.mode", t("modeLbl"), [["dark", t("dark")], ["light", t("light")], ["system", t("modeSystem")], ["time", t("modeSun")]]))}
+      ${rowFor("appearance.text_size", t("textSize"), "", segFor("appearance.text_size", t("textSize"), [["small", t("small")], ["normal", t("normal")], ["large", t("large")]]))}
+      ${rowFor("appearance.animations", t("setAnimations"), t("setAnimationsH"), segFor("appearance.animations", t("setAnimations"), [["full", t("setAnimationsFull")], ["reduced", t("setAnimationsReduced")], ["off", t("setAnimationsOff")]]))}
+      ${rowFor("appearance.cursors", t("setCursors"), t("setCursorsH"), segFor("appearance.cursors", t("setCursors"), [["windows", t("setCursorsWindows")], ["kabuk", t("setCursorsKabuk")], ["custom", t("setCursorsCustom")]]))}
+      ${cfg().appearance.cursors === "windows" ? "" : rowFor("appearance.cursor_size", t("setCursorSize"), t("setCursorSizeH"), segFor("appearance.cursor_size", t("setCursorSize"), [["normal", t("cursorSizeNormal")], ["large", t("cursorSizeLarge")], ["huge", t("cursorSizeHuge")]]))}</div>
+      ${cfg().appearance.cursors === "custom" ? cursorPicker() : ""}
+      <div class="set-grp"><span class="gl">${t("setSysTheme")}</span>
+      ${tgl("system_theme.colors", t("setSysColors"), cfg().appearance.mode === "system" ? t("setSysColorsFollow") : t("setSysColorsH"))}</div>
+      ${S.mode === "light" ? `<div class="note">${t("lightNote")}</div>` : ""}`;
+  }
+
+  /* Cursors picked apart from the look (DECISIONS D41): a style and a colour, each card
+     previewed by the shell's own drawings (`state.cursor_previews`). */
+  const CURSOR_STYLES = ["round", "slim", "circuit", "bold", "block", "cartoon", "comic"];
+  const CURSOR_COLORS = ["light", "dark", "accent"];
+  function cursorCards(path, now, list, previews, name) {
+    return list.map((v) => {
+      const on = v === now;
+      const pics = ((previews || {})[v] || []).map((svg) => `<span class="cp-i">${svg}</span>`).join("");
+      return `<button class="theme-card cursor-card${on ? " on" : ""}" type="button" data-set="${path}" data-val='"${v}"' aria-pressed="${on}"><span class="cp">${pics}</span><span class="tn">${t(name + v)}</span></button>`;
+    }).join("");
+  }
+  function cursorPicker() {
+    const a = cfg().appearance;
+    const p = S.cursor_previews || {};
+    return `<div class="set-grp"><span class="gl">${t("setCursorStyle")}</span><div class="cursor-cards">${cursorCards("appearance.cursor_style", a.cursor_style, CURSOR_STYLES, p.styles, "cursorStyle-")}</div></div>
+      <div class="set-grp"><span class="gl">${t("setCursorColor")}</span><div class="cursor-cards">${cursorCards("appearance.cursor_color", a.cursor_color, CURSOR_COLORS, p.colors, "cursorColor-")}</div></div>`;
+  }
+
+
+  /* Wallpaper: one choice for every monitor, or one per monitor (`[[wallpaper.monitor]]`). */
+  const WALLS = [["windows", "wWindows", "wWindowsH"], ["circuit", "wMilva", "wMilvaH"], ["constellation", "wStars", "wStarsH"], ["black", "wBlack", "wBlackH"], ["gradient", "wGrad", "wGradH"], ["image", "wImage", "wImageH"]];
+  const monitorEntry = (n) => (cfg().wallpaper.monitor || []).find((m) => m.index === n);
+  /** The created wallpaper chosen where the choice applies (`null` when another kind). */
+  function wallGenNow() {
+    const w = cfg().wallpaper;
+    if (ui.wallMon === "all") return (w.monitor || []).length ? null : w.generated;
+    const e = monitorEntry(Number(ui.wallMon));
+    return e ? e.generated : w.generated;
+  }
+  function wallNow() {
+    const w = cfg().wallpaper;
+    if (ui.wallMon === "all") return (w.monitor || []).length ? null : w.kind;
+    const e = monitorEntry(Number(ui.wallMon));
+    return e ? e.kind : w.kind;
+  }
+  function wallArt(kind) {
+    if (kind === "black") return "";
+    // The user's own picture is not drawn here; the card shows the picture icon.
+    if (kind === "windows") return `<div class="wall">${A.wallSvg("image", 400, 225, 5)}</div>`;
+    if (kind === "gradient") return `<div class="wall gradient"></div>`;
+    const scene = { circuit: ["milva", 7], constellation: ["stars", 11], image: ["image", 3] }[kind];
+    return `<div class="wall">${A.wallSvg(scene[0], 400, 225, scene[1])}</div>`;
+  }
+  function chooseWall(kind, image, generated) {
+    const w = cfg().wallpaper;
+    if (ui.wallMon === "all") {
+      if (image) set("wallpaper.image", image);
+      if (generated) set("wallpaper.generated", generated);
+      set("wallpaper.kind", kind);
+      if ((w.monitor || []).length) set("wallpaper.monitor", null);
+      return;
+    }
+    const n = Number(ui.wallMon);
+    const others = (w.monitor || []).filter((m) => m.index !== n);
+    const old = monitorEntry(n) || {};
+    const entry = { index: n, kind };
+    const img = image || (kind === "image" ? old.image : "");
+    if (img) entry.image = img;
+    const gen = generated || (kind === "generated" ? old.generated : "");
+    if (gen) entry.generated = gen;
+    set("wallpaper.monitor", [...others, entry].sort((a, b) => a.index - b.index));
+  }
+  const genSeed = (id) => Number(String(id).replace(/\D/g, "").slice(-6)) || 7;
+  const num = (v, digits) => Number(v).toLocaleString(S.lang, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+
+  /* The Create tab (crate::create in the bridge). */
+  function genConnected(p) {
+    return p === "ollama" ? !!(ui.ollama && ui.ollama.ok) : !!S.create.keys[p];
+  }
+  function genPanel() {
+    const p = cfg().create.provider, connected = genConnected(p), g = ui.gen;
+    let status, button;
+    if (p === "ollama") {
+      status = ui.ollama ? (ui.ollama.ok ? tv("genOllamaModel", escapeHtml(ui.ollama.model)) : tv("genOllamaMissing", escapeHtml(cfg().create.ollama_url))) : t("gConnLocal");
+      button = `<button class="set-btn ghost" type="button" data-genconnect>${t("gConnect")}</button>`;
+    } else if (ui.keyEntry) {
+      status = `<span class="num"><input type="password" id="gen-key" autocomplete="off" spellcheck="false" style="width:260px;font-family:var(--num)" placeholder="${t("genKeyPh")}" aria-label="${t("genKeyPh")}"></span>`;
+      button = `<button class="set-btn" type="button" data-genkeysave disabled>${t("genKeySave")}</button><button class="set-btn ghost" type="button" data-genkeycancel>${t("setCancel")}</button>`;
+    } else {
+      status = connected ? t("gConnYes") : t("gConnNo");
+      button = connected ? `<button class="set-btn ghost" type="button" data-genforget>${t("gDisconnect")}</button>` : `<button class="set-btn ghost" type="button" data-genkey>${t("gAddKey")}</button>`;
+    }
+    const running = g.phase === "running";
+    const runBtn = running
+      ? `<button class="set-btn ghost" type="button" data-genstop>${t("genStop")}</button>`
+      : `<button class="set-btn" type="button" data-genrun ${connected && ui.prompt.trim() ? "" : "disabled"}>${t("gRun")}</button>`;
+    const texts = [t("gS1"), t("gS2"), g.ms == null ? t("gS3").split(":")[0] : tv("genStepPerf", num(g.ms, 2)), g.average == null ? t("gS4").split(":")[0] : tv("genStepOled", num(g.average, 1))];
+    const steps = texts.map((txt, i) => {
+      const cls = i < g.step ? "ok" : i === g.step && running ? "run" : "";
+      return `<li class="${cls}"><span class="dot">${cls === "ok" ? icon("check") : cls === "run" ? "●" : "·"}</span>${txt}</li>`;
+    }).join("");
+    const tries = g.phase === "idle" ? "" : `<p class="gen-note" data-gentries>${tv("genTry", g.attempt)}${g.reason && g.phase !== "failed" ? " · " + escapeHtml(g.reason) : ""}</p>`;
+    const failed = g.phase === "failed" ? `<div class="note" role="alert" style="color:var(--err-fg)" data-genfailed>${escapeHtml(g.reason)}</div>` : "";
+    const result = g.phase === "done" ? `<div class="saver gen-res"><span class="sp">${g.preview ? `<img src="${g.preview}" alt="" style="width:100%;height:100%;object-fit:cover">` : A.wallSvg("waves", 400, 225, 7)}</span><span class="sn">${escapeHtml(g.name)}<span>${t("wGenH")}</span></span><span class="acts"><button class="set-btn" type="button" data-genapply>${t("gApply")}</button><button class="set-btn ghost" type="button" data-genrun>${t("gRetry")}</button></span></div>` : "";
+    return `<div class="set-grp">${rowFor("create.provider", t("gProv"), t("gProvH"), segFor("create.provider", t("gProv"), [["claude", "Claude"], ["openai", "OpenAI"], ["ollama", t("gOllama")]]))}
+        ${row(t("gConn"), "", `<span class="conn"><span class="st${connected ? " yes" : ""}">${status}</span>${button}</span>`)}</div>
+        <div class="set-grp"><span class="gl">${t("gPrompt")}</span><textarea class="gen-in" id="gen-prompt" rows="2" placeholder="${t("gPromptPh")}" aria-label="${t("gPrompt")}" ${running ? "disabled" : ""}>${escapeHtml(ui.prompt)}</textarea>
+        <div class="gen-run">${runBtn}<span class="gen-note">${t("genNote")}</span></div></div>
+        ${failed}${g.phase === "idle" ? "" : `<div class="gen-grid"><div><ul class="gen-steps">${steps}</ul>${tries}</div>${result}</div>`}`;
+  }
+  function wallPage() {
+    const tabs = seg(t("navWall"), [["pick", t("wTabPick")], ["gen", t("wTabGen")]].map(([v, n]) => `<button type="button" data-walltab="${v}" class="${ui.wallTab === v ? "on" : ""}" aria-pressed="${ui.wallTab === v}">${n}</button>`).join(""));
+    const top = `<div class="wall-tabs"><div><h3>${t("navWall")}</h3><p>${t("wallDesc")}</p></div>${tabs}</div>`;
+    if (ui.wallTab === "gen") return top + genPanel();
+    const count = Math.max(1, (S.info && S.info.monitors) || 1);
+    const mons = [["all", t("wMonAll")], ...Array.from({ length: count }, (_, i) => [String(i + 1), i === 0 ? t("wMon1") : i === 1 ? t("wMon2") : tv("setRuleMonitor", i + 1)])];
+    const monSeg = seg(t("wMon"), mons.map(([v, n]) => `<button type="button" data-wallmon="${v}" class="${ui.wallMon === v ? "on" : ""}" aria-pressed="${ui.wallMon === v}">${n}</button>`).join(""));
+    const now = wallNow();
+    const cards = WALLS.map(([k, name, hint]) => `<button class="saver${now === k ? " on" : ""}" type="button" data-wall="${k}" aria-pressed="${now === k}"><span class="sp">${wallArt(k)}</span><span class="sn">${t(name)}<span>${t(hint)}</span></span></button>`).join("")
+      + S.create.walls.map((c) => {
+        const on = now === "generated" && wallGenNow() === c.id;
+        return `<button class="saver${on ? " on" : ""}" type="button" data-wall="generated" data-gen="${escapeHtml(c.id)}" aria-pressed="${on}"><span class="sp"><div class="wall">${A.wallSvg("waves", 400, 225, genSeed(c.id))}</div></span><span class="sn">${escapeHtml(c.name)}<span>${t("wGenH")}</span></span></button>`;
+      }).join("");
+    const w = cfg().wallpaper;
+    const image = ui.wallMon === "all" ? w.image : (monitorEntry(Number(ui.wallMon)) || {}).image;
+    return top + `
+      <div class="set-grp">${row(t("wMon"), t("wMonH"), monSeg)}</div>
+      <div class="walls">${cards}</div>
+      <div class="set-grp">${now === "image" ? row(t("wPick"), image ? escapeHtml(image) : t("wPickH"), `<button class="set-btn ghost" type="button" data-pick="image">${t("wPick")}</button>`) : ""}
+        ${row(t("wBright"), t("wBrightH"), `<span class="rng"><input type="range" id="wall-bright" data-range="wallpaper.brightness" data-unit="%" min="${RANGES.bright[0]}" max="${RANGES.bright[1]}" step="${RANGES.bright[2]}" value="${w.brightness}" aria-label="${t("wBright")}"><span class="v" data-v="wall-bright">${w.brightness}%</span></span>`)}
+        ${tgl("wallpaper.pause_when_hidden", t("wPause"), t("wPauseH"))}</div>`;
+  }
+
+  function saverPage() {
+    const art = A.saverArt();
+    const kind = cfg().screensaver.kind;
+    const savers = [["circuit", "milva", "Milvasoft", t("sMilvaH")], ["constellation", "stars", t("sStars"), t("sStarsH")], ["none", "off", t("sOff"), t("sOffH")]];
+    return head(t("navSaver"), t("saverDesc")) + `
+      <div class="set-grp"><span class="gl">${t("saverPick")}</span><div class="savers">${savers.map(([k, a, n, h]) => `<button class="saver${kind === k ? " on" : ""}" type="button" data-set="screensaver.kind" data-val='"${k}"' aria-pressed="${kind === k}"><span class="sp">${art[a]}</span><span class="sn">${n}<span>${h}</span></span></button>`).join("")}</div></div>
+      <div class="set-grp">${rowFor("screensaver.wait_minutes", t("wait"), t("waitH"), segFor("screensaver.wait_minutes", t("wait"), SAVER_WAITS.map((m) => [m, `${m} ${t("min")}`])))}
+      ${tgl("screensaver.respect_video", t("video"), t("videoH"))}
+      ${row(t("preview"), t("previewH"), `<button class="set-btn ghost" type="button" data-preview-saver ${kind === "none" ? "disabled" : ""}>${t("previewBtn")}</button>`)}</div>`;
+  }
+
+  // The design's order, with the apps after the title (DECISIONS D25).
+  const MODULES = ["title", "taskbar", "clock", "date", "media", "cpu", "ram", "gpu", "net", "vol", "tray", "notif", "power"];
+  function barPage() {
+    const b = cfg().bar;
+    const own = A.lookPos[code()];
+    const current = b.position === "default" ? own : b.position;
+    const posHint = tv("posDefault", t("positions-" + own)) + (b.position !== "default" ? resetLink("bar.position") : "");
+    const vertical = current === "left" || current === "right";
+    const ownHeight = parseFloat(S.tokens[vertical ? "rail" : "bar-h"]) || RANGES.height[0];
+    const height = b.height ?? ownHeight;
+    const heightHint = tv("setHeightDefault", ownHeight) + (b.height != null ? resetLink("bar.height") : "");
+    const trayRange = `<span class="rng"><input type="range" id="tray-shown" data-range="bar.tray_shown" data-unit="" min="${RANGES.tray[0]}" max="${RANGES.tray[1]}" value="${b.tray_shown}" aria-label="${t("setTrayShown")}"><span class="v" data-v="tray-shown">${b.tray_shown}</span></span>`;
+    const chips = MODULES.map((k) => `<button type="button" class="chip${b.modules[k] ? " on" : ""}" data-tgl="bar.modules.${k}" aria-pressed="${b.modules[k]}">${icon("check")}${t("mod-" + k)}</button>`).join("");
+    return head(t("navBar"), t("barDesc")) + `
+      <div class="set-grp">${row(t("pos"), posHint, seg(t("pos"), choice("bar.position", current, ["top", "bottom", "left", "right"].map((p) => [p, t("positions-" + p)]))))}
+      ${rowFor("bar.monitors", t("monitors"), t("monitorsH"), segFor("bar.monitors", t("monitors"), [["all", t("allMon")], ["main", t("mainMon")]]))}
+      ${tgl("bar.autohide", t("autohide"), t("autohideH"))}
+      ${rowFor("bar.background", t("setBg"), t("setBgH"), segFor("bar.background", t("setBg"), [["solid", t("setBgSolid")], ["blur", t("setBgBlur")], ["off", t("setBgOff")]]))}
+      ${row(t("setHeight"), heightHint, range("bar-height", "bar.height", RANGES.height, height, t("setHeight")))}
+      ${row(t("setTrayShown"), t("setTrayShownH"), trayRange)}</div>
+      <div class="set-grp"><span class="gl">${t("modules")}. ${t("modulesH")}</span>
+        <div class="chips" role="group" aria-label="${t("modules")}">${chips}</div></div>`;
+  }
+
+  function windowsPage() {
+    const w = cfg().windows;
+    const gap = w.gap ?? A.lookGaps[code()];
+    const gapHint = t("gapH") + (w.gap != null ? resetLink("windows.gap") : "");
+    return head(t("navWindows"), t("winDesc")) + `
+      <div class="set-grp">${rowFor("windows.default_layout", t("layoutDef"), t("layoutDefH"), segFor("windows.default_layout", t("layoutDef"), [["tiling", t("tiling")], ["floating", t("floating")]]))}
+      ${tgl("windows.drag_to_float", t("dragFloat"), t("dragFloatH"))}
+      ${tgl("windows.alt_drag", t("altDrag"), t("altDragH"))}
+      ${row(t("gap"), gapHint, range("gap-range", "windows.gap", RANGES.gap, gap, t("gap")))}
+      ${rowFor("windows.new_window", t("newWin"), t("newWinH"), segFor("windows.new_window", t("newWin"), [["right", t("right")], ["below", t("below")], ["floating", t("floating")]]))}
+      ${tgl("windows.active_border", t("border"), t("borderH"))}
+      ${tgl("windows.follow_look", t("setFollowLook"), t("setFollowLookH"))}
+      ${rowFor("windows.minimize_effect", t("setMinimize"), t("setMinimizeH"), segFor("windows.minimize_effect", t("setMinimize"), [["genie", t("setMinimizeGenie")], ["windows", t("setMinimizeWindows")]]))}</div>`;
+  }
+
+  function ruleText(r) {
+    const parts = [];
+    if (r.ignore) parts.push(t("setRuleIgnore"));
+    if (r.float) parts.push(t("setRuleFloat"));
+    if (r.workspace) parts.push(tv("setRuleWorkspace", r.workspace));
+    if (r.monitor) parts.push(tv("setRuleMonitor", r.monitor));
+    if (r.min_width) parts.push(tv("setRuleMinWidth", r.min_width));
+    if (r.no_grab) parts.push(t("setRuleNoGrab"));
+    return parts.join(", ");
+  }
+  // The built-in rules' programs that keep their Alt + clicks (kabuk-core rules::NO_GRAB_PROGRAMS).
+  const NO_GRAB = ["blender.exe", "Code.exe", "Photoshop.exe"];
+  function rulesPage() {
+    const rules = cfg().rules.rule || [];
+    const defaults = cfg().rules.defaults ? [[t("rDialogs"), t("rDialogsR")], [t("rSplash"), t("rSplashR")], ["<code>Taskmgr.exe</code>", t("rTaskmgr")], ...NO_GRAB.map((exe) => [`<code>${exe}</code>`, t("setRuleNoGrab")])].map(([a, r]) => `<div>${a}</div><div>${r}</div><div class="src">${t("srcDefault")}</div>`).join("") : "";
+    const mine = rules.map((r, i) => `<div><code>${escapeHtml(r.exe || r.class || r.title)}</code></div><div>${ruleText(r)}</div><div class="src mine">${t("srcMine")} · <button type="button" class="linkish" data-rule-drop="${i}">${t("setRemove")}</button></div>`).join("");
+    const f = ui.ruleForm;
+    const workspaces = Array.from({ length: cfg().windows.workspaces }, (_, i) => [`ws${i + 1}`, tv("setRuleWorkspace", i + 1)]);
+    const form = f ? `<div class="set-grp">
+        ${row(t("setRuleExe"), ui.apps.length ? `${t("setRuleOpen")}: ${ui.apps.map((a) => `<button type="button" class="linkish" data-rule-app="${escapeHtml(a)}">${escapeHtml(a)}</button>`).join(" ")}` : "", `<span class="num"><input type="text" id="rule-exe" style="width:220px;font-family:var(--num)" value="${escapeHtml(f.exe)}" placeholder="${t("setRuleExePh")}" aria-label="${t("setRuleExe")}"></span>`)}
+        ${row(t("setRuleWhat"), "", `<span class="num"><select id="rule-what" aria-label="${t("setRuleWhat")}">${[["float", t("setRuleFloat")], ["ignore", t("setRuleIgnore")], ["nograb", t("setRuleNoGrab")], ...workspaces].map(([v, n]) => `<option value="${v}"${f.what === v ? " selected" : ""}>${n}</option>`).join("")}</select></span>`)}
+        <div><button class="set-btn" type="button" data-rule-save ${f.exe.trim() ? "" : "disabled"}>${t("setAdd")}</button> <button class="set-btn ghost" type="button" data-rule-cancel>${t("setCancel")}</button></div></div>` : `<div><button class="set-btn" type="button" data-rule-new>${t("addRule")}</button> <button class="set-btn ghost" type="button" data-rule-new="apps">${t("pickWin")}</button></div>`;
+    return head(t("navRules"), t("rulesDesc")) + `
+      <div class="set-grp">${tgl("rules.float_unfit", t("autofloat"), t("autofloatH"))}</div>
+      <div class="rules-t"><div class="h">${t("colApp")}</div><div class="h">${t("colRule")}</div><div class="h src">${t("colSrc")}</div>${defaults}${mine}</div>
+      ${rules.length ? "" : `<div class="note">${t("setRuleNone")}</div>`}
+      ${form}`;
+  }
+
+  function gamePage() {
+    return head(t("navGame"), t("gameDesc")) + `
+      <div class="set-grp">${tgl("game.detect", t("gDetect"), t("gDetectH"))}
+      ${tgl("game.hide_bar", t("gBar"), t("gBarH"))}
+      ${tgl("game.pause_tiling", t("gPause"), t("gPauseH"))}
+      ${tgl("game.silence_notifications", t("gQuiet"), t("gQuietH"))}
+      ${tgl("game.other_monitors_normal", t("gOther"), t("gOtherH"))}</div>
+      <div class="note">${t("setGameNote")}</div>`;
+  }
+
+  const SOURCES = ["windows", "apps", "recent", "files", "bookmarks", "commands", "calculator"];
+  function launcherPage() {
+    const l = cfg().launcher;
+    const chips = SOURCES.map((k) => `<button type="button" class="chip${l.sources[k] ? " on" : ""}" data-tgl="launcher.sources.${k}" aria-pressed="${l.sources[k]}">${icon("check")}${t("setSrc-" + k)}</button>`).join("");
+    const folders = l.indexed_folders.map((f, i) => `<div class="set-row"><span><b style="font-family:var(--num);font-weight:400">${escapeHtml(f)}</b></span><button type="button" class="linkish" data-folder-drop="${i}">${t("setRemove")}</button></div>`).join("");
+    return head(t("navLauncher"), t("lpDesc")) + `
+      <div class="set-grp">${row(t("lpKey"), t("lpKeyH"), chordEditor("shortcuts.launcher"))}</div>
+      <div class="set-grp"><span class="gl">${t("lpSrc")}. ${t("lpSrcH")}</span><div class="chips" role="group" aria-label="${t("lpSrc")}">${chips}</div></div>
+      <div class="set-grp"><span class="gl">${t("lpDirs")}. ${t("lpDirsH")}</span>${folders}
+        <div><button class="set-btn ghost" type="button" data-pick="folder">${t("setFolderAdd")}</button></div></div>`;
+  }
+
+  const KEYS = ["launcher", "workspace", "move_to_workspace", "focus_left", "focus_down", "focus_up", "focus_right", "move_left", "move_down", "move_up", "move_right", "toggle_float", "close_window", "cycle_layout", "toggle_scratchpad", "to_scratchpad", "toggle_group", "next_tab", "overview", "start_saver", "drag"];
+  function keysPage() {
+    const any = KEYS.some((k) => changed("shortcuts." + k));
+    return head(t("navKeys"), t("keysDesc")) + (any ? `<div><button class="set-btn ghost" type="button" data-reset-keys>${t("setResetKeys")}</button></div>` : "") + `
+      <div class="keys">${KEYS.map((k) => `<div>${t("setKey-" + k.replaceAll("_", "-"))}</div><div>${chordEditor("shortcuts." + k)}</div>`).join("")}</div>`;
+  }
+
+  function langPage() {
+    const sys = S.lang_names[S.system_lang];
+    const now = new Date();
+    const date = `${t("days-" + now.getDay())} ${now.getDate()} ${t("months-" + now.getMonth())}`;
+    return head(t("navLang"), t("langDesc")) + `
+      <div class="set-grp">${rowFor("language.language", t("langLbl"), "", segFor("language.language", t("langLbl"), [["system", `${t("system")} (${sys})`], ["tr", S.lang_names.tr], ["en", S.lang_names.en]]))}
+      ${rowFor("language.clock", t("timeFmt"), "", segFor("language.clock", t("timeFmt"), [["24h", t("h24")], ["12h", t("h12")]]))}
+      ${row(t("dateLbl"), t("dateH"), `<span class="h" style="color:var(--fg-s);font-family:var(--num)">${date}</span>`)}
+      ${row(t("decimal"), "", `<span class="h" style="color:var(--fg-s);font-family:var(--num)">${t("decimalV")}</span>`)}</div>
+      <div class="note">${t("langNote")}</div>`;
+  }
+
+  const dimLabel = (sec) => sec % 60 === 0 ? `${sec / 60} ${t("unitM")}` : `${sec} ${t("unitS")}`;
+  function dimRow() {
+    const o = cfg().oled;
+    const value = o.dim_after_secs;
+    const custom = ui.dimCustom ?? !DIM_PRESETS.includes(value);
+    const unitM = value % 60 === 0 && value >= 60;
+    const presets = [[30, t("s30")], [60, t("m1")], [120, t("m2")]].map(([v, n]) => {
+      const on = !custom && value === v;
+      return `<button type="button" data-dim="${v}" class="${on ? "on" : ""}" aria-pressed="${on}">${n}</button>`;
+    }).join("") + `<button type="button" data-dim="custom" class="${custom ? "on" : ""}" aria-pressed="${custom}">${t("custom")}</button>`;
+    const inputs = custom ? `
+      <input type="number" id="dim-value" inputmode="numeric" min="1" max="${unitM ? 60 : DIM_MAX}" step="1" value="${unitM ? value / 60 : value}" aria-label="${t("dimValue")}" aria-describedby="dim-hint">
+      <select id="dim-unit" aria-label="${t("dimUnit")}"><option value="s"${unitM ? "" : " selected"}>${t("unitS")}</option><option value="m"${unitM ? " selected" : ""}>${t("unitM")}</option></select>` : "";
+    const hint = custom ? `<span class="num-h" id="dim-hint" aria-live="polite">${t("dimRange")} · ${tv("dimNow", dimLabel(value))}</span>` : "";
+    return `<div class="set-row${o.idle_dim ? "" : " off"}"><span><b>${t("dimAfter")}</b><span class="h">${t("dimAfterH")}</span></span><span class="num">${seg(t("dimAfter"), presets)}${inputs}</span>${hint}</div>`;
+  }
+  /* The custom dimming delay: a whole number, 10 s to 60 min; anything else is an error. */
+  function readDim() {
+    const input = document.getElementById("dim-value");
+    const unit = document.getElementById("dim-unit");
+    const hint = document.getElementById("dim-hint");
+    if (!input || !unit || !hint) return;
+    const raw = input.value.trim();
+    const n = /^\d+$/.test(raw) ? Number(raw) : NaN;
+    const sec = unit.value === "m" ? n * 60 : n;
+    const ok = Number.isInteger(sec) && sec >= DIM_MIN && sec <= DIM_MAX;
+    input.setAttribute("aria-invalid", String(!ok));
+    input.max = unit.value === "m" ? 60 : DIM_MAX;
+    hint.classList.toggle("err", !ok);
+    hint.textContent = ok ? `${t("dimRange")} · ${tv("dimNow", dimLabel(sec))}` : t("dimBad");
+    return ok ? sec : null;
+  }
+  function oledPage() {
+    return head(t("navOled"), t("oledDesc")) + `
+      <div class="set-grp">${tgl("oled.bar_shift", t("shift"), t("shiftH"))}
+      ${tgl("wallpaper.drift", t("setDrift"), tv("setDriftH", cfg().wallpaper.drift_minutes))}
+      ${tgl("oled.idle_dim", t("dim"), t("dimH"))}
+      ${dimRow()}</div>`;
+  }
+
+  function aboutPage() {
+    const i = S.info || {};
+    const meters = [[i.components ?? 0, t("mComp")], [i.monitors ?? 0, t("mMon")], [i.windows ?? 0, t("mWin")], [i.memory_mb ?? "–", t("setMem")]];
+    return head(t("navAbout"), tv("setVersion", S.version)) + `
+      <div class="meter" style="grid-template-columns:repeat(4,1fr)">${meters.map(([v, n]) => `<div><b>${escapeHtml(v)}</b><span>${n}</span></div>`).join("")}</div>
+      ${i.running ? row(t("setQuit"), t("setQuitH"), `<button class="set-btn ghost" type="button" data-quit>${t("setQuitBtn")}</button>`) : `<div class="note">${t("setNotRunning")}</div>`}
+      ${updateRow()}`;
+  }
+  /** "Check for updates" and what Kabuk's latest GitHub release said. */
+  function updateRow() {
+    const u = ui.update || {};
+    const checking = u.state === "checking";
+    const check = `<button class="set-btn" type="button" data-update-check ${checking ? "disabled" : ""}>${t("update")}</button>`;
+    const said = {
+      checking: t("setUpdateChecking"),
+      latest: t("setUpdateLatest"),
+      failed: t("setUpdateFailed"),
+      newer: u.version ? tv("setUpdateNewer", u.version) : "",
+    }[u.state];
+    const open = u.state === "newer" ? ` <button class="set-btn ghost" type="button" data-update-open>${t("setUpdateGet")}</button>` : "";
+    return `<div>${check}${open}</div>${said ? `<div class="note" data-update-said="${u.state}">${escapeHtml(said)}</div>` : ""}`;
+  }
+
+  const PAGES = { look: lookPage, wall: wallPage, saver: saverPage, bar: barPage, windows: windowsPage, rules: rulesPage, game: gamePage, launcher: launcherPage, keys: keysPage, lang: langPage, oled: oledPage, about: aboutPage };
+
+  /* ---------- drawing ---------- */
+  function render() {
+    if (!S) return;
+    const app = document.getElementById("app");
+    const scrolled = app.querySelector(".set-main")?.scrollTop || 0;
+    const focused = document.activeElement?.id;
+    const refused = ui.refused ? `<div class="note" role="alert" style="color:var(--err-fg)">${t("setRefused")}</div>` : "";
+    app.innerHTML = `<div class="screen settings-screen" data-dir="${code()}" data-mode="${S.mode}">
+      <div class="set-win">
+        <nav class="set-side" aria-label="${t("setNav")}"><div class="set-brand"><img class="mark" src="mark-${S.mode === "light" ? "light" : "dark"}.svg" alt="">${t("setBrand")}</div>
+          ${navItems.map(([k, ic]) => `<button class="set-nav${ui.page === k ? " on" : ""}" type="button" data-page="${k}" aria-current="${ui.page === k ? "page" : "false"}">${icon(ic)}${t("nav-" + k)}</button>`).join("")}
+        </nav>
+        <div class="set-main">${refused}${PAGES[ui.page]()}</div>
+      </div></div>`;
+    const screen = app.querySelector(".screen");
+    for (const [k, v] of Object.entries(S.tokens)) {
+      screen.style.setProperty("--" + k, v);
+      document.documentElement.style.setProperty("--" + k, v);
+    }
+    app.querySelector(".set-main").scrollTop = scrolled;
+    if (focused) document.getElementById(focused)?.focus({ preventScroll: true });
+    document.title = t("setBrand");
+  }
+
+  /* ---------- input ---------- */
+  document.addEventListener("click", (e) => {
+    const on = (sel) => e.target.closest(sel);
+    let el;
+    if ((el = on("[data-page]"))) {
+      ui.page = el.dataset.page; ui.refused = null; ui.capture = null; capture(false); ui.ruleForm = null; ui.dimCustom = null;
+      if (ui.page === "about" || ui.page === "wall") post({ op: "info" });
+      render();
+      document.querySelector(`[data-page="${ui.page}"]`)?.focus({ preventScroll: true });
+      return;
+    }
+    if ((el = on("[data-set]"))) { set(el.dataset.set, JSON.parse(el.dataset.val)); return; }
+    if ((el = on("[data-tgl]"))) { set(el.dataset.tgl, !get(el.dataset.tgl)); return; }
+    if ((el = on("[data-reset]"))) { set(el.dataset.reset, el.dataset.reset === "bar.position" ? "default" : null); return; }
+    if (on("[data-reset-keys]")) { KEYS.filter((k) => changed("shortcuts." + k)).forEach((k) => set("shortcuts." + k, null)); return; }
+    if ((el = on("[data-walltab]"))) { ui.wallTab = el.dataset.walltab; render(); return; }
+    if ((el = on("[data-wallmon]"))) { ui.wallMon = el.dataset.wallmon; render(); return; }
+    if ((el = on("[data-wall]"))) {
+      if (el.dataset.wall === "image") { ui.pending = "wall"; post({ op: "pick", what: "image" }); }
+      else chooseWall(el.dataset.wall, null, el.dataset.gen);
+      return;
+    }
+    if (on("[data-genkey]")) { ui.keyEntry = true; render(); document.getElementById("gen-key")?.focus(); return; }
+    if (on("[data-genkeycancel]")) { ui.keyEntry = false; render(); return; }
+    if (on("[data-genkeysave]")) {
+      const input = document.getElementById("gen-key");
+      const key = input ? input.value.trim() : "";
+      if (input) input.value = "";
+      ui.keyEntry = false;
+      if (key) post({ op: "gen-key", provider: cfg().create.provider, key });
+      return;
+    }
+    if (on("[data-genforget]")) { post({ op: "gen-forget", provider: cfg().create.provider }); return; }
+    if (on("[data-genconnect]")) { post({ op: "gen-connect" }); return; }
+    if (on("[data-genrun]")) {
+      if (!ui.prompt.trim()) return;
+      ui.gen = { phase: "running", step: 0, attempt: 1, ms: null, average: null, reason: "", name: "", preview: null };
+      post({ op: "gen-run", prompt: ui.prompt });
+      render();
+      return;
+    }
+    if (on("[data-genstop]")) { post({ op: "gen-cancel" }); return; }
+    if (on("[data-genapply]")) { post({ op: "gen-apply" }); return; }
+    if ((el = on("[data-pick]"))) { ui.pending = el.dataset.pick === "image" ? "wall" : "folder"; post({ op: "pick", what: el.dataset.pick }); return; }
+    if (on("[data-preview-saver]")) { post({ op: "preview-saver" }); return; }
+    if (on("[data-quit]")) { post({ op: "quit" }); return; }
+    if (on("[data-update-check]")) { post({ op: "update-check" }); return; }
+    if (on("[data-update-open]")) { if (ui.update && ui.update.page) post({ op: "update-open", page: ui.update.page }); return; }
+    if ((el = on("[data-folder-drop]"))) { set("launcher.indexed_folders", cfg().launcher.indexed_folders.filter((_, i) => i !== Number(el.dataset.folderDrop))); return; }
+    if ((el = on("[data-dim]"))) {
+      if (el.dataset.dim === "custom") { ui.dimCustom = true; render(); document.getElementById("dim-value")?.focus(); return; }
+      ui.dimCustom = false;
+      set("oled.dim_after_secs", Number(el.dataset.dim));
+      return;
+    }
+    if ((el = on("[data-chord]"))) {
+      const path = el.dataset.chord;
+      ui.capture = { path, index: Number(el.dataset.index), mods: !Array.isArray(get(path)) };
+      capture(!ui.capture.mods);
+      render();
+      return;
+    }
+    if ((el = on("[data-chord-drop]"))) { set(el.dataset.chordDrop, get(el.dataset.chordDrop).slice(0, -1)); return; }
+    if ((el = on("[data-rule-new]"))) { ui.ruleForm = { exe: "", what: "float" }; if (el.dataset.ruleNew === "apps") post({ op: "apps" }); render(); document.getElementById("rule-exe")?.focus(); return; }
+    if ((el = on("[data-rule-app]"))) { ui.ruleForm.exe = el.dataset.ruleApp; render(); return; }
+    if (on("[data-rule-cancel]")) { ui.ruleForm = null; render(); return; }
+    if (on("[data-rule-save]")) {
+      const f = ui.ruleForm;
+      const rule = { exe: f.exe.trim() };
+      if (f.what === "float") rule.float = true;
+      else if (f.what === "ignore") rule.ignore = true;
+      else if (f.what === "nograb") rule.no_grab = true;
+      else rule.workspace = Number(f.what.slice(2));
+      ui.ruleForm = null;
+      set("rules.rule", [...(cfg().rules.rule || []), rule]);
+      return;
+    }
+    if ((el = on("[data-rule-drop]"))) {
+      const left = (cfg().rules.rule || []).filter((_, i) => i !== Number(el.dataset.ruleDrop));
+      set("rules.rule", left.length ? left : null);
+      return;
+    }
+    // A click elsewhere ends a shortcut capture.
+    if (ui.capture) { ui.capture = null; capture(false); render(); }
+  });
+  document.addEventListener("input", (e) => {
+    const el = e.target;
+    if (el.dataset.range) {
+      const unit = el.dataset.unit;
+      document.querySelector(`[data-v="${el.id}"]`).textContent = unit === undefined ? tv("setPx", el.value) : el.value + unit;
+    }
+    if (el.id === "dim-value" || el.id === "dim-unit") readDim();
+    if (el.id === "gen-prompt") {
+      ui.prompt = el.value;
+      const run = document.querySelector("[data-genrun]");
+      if (run) run.disabled = !(genConnected(cfg().create.provider) && el.value.trim());
+    }
+    if (el.id === "gen-key") {
+      const save = document.querySelector("[data-genkeysave]");
+      if (save) save.disabled = !el.value.trim();
+    }
+    if (el.id === "rule-exe") {
+      ui.ruleForm.exe = el.value;
+      document.querySelector("[data-rule-save]").disabled = !el.value.trim();
+    }
+  });
+  document.addEventListener("change", (e) => {
+    const el = e.target;
+    if (el.dataset.range) set(el.dataset.range, Number(el.value));
+    if (el.id === "dim-value" || el.id === "dim-unit") { const sec = readDim(); if (sec != null) set("oled.dim_after_secs", sec); }
+    if (el.id === "rule-what") ui.ruleForm.what = el.value;
+  });
+
+  /* ---------- messages from Rust ---------- */
+  webview.addEventListener("message", (e) => {
+    const m = JSON.parse(e.data);
+    switch (m.op) {
+      case "state":
+        S = m;
+        A = A || window.kabukDesignArt(t, escapeHtml);
+        ui.refused = null;
+        if (m.applied_wall) {
+          ui.gen = { ...ui.gen, phase: "idle" };
+          ui.wallTab = "pick";
+          chooseWall("generated", null, m.applied_wall);
+        }
+        render();
+        break;
+      case "gen-connected":
+        ui.ollama = { ok: m.ok, model: m.model || "" };
+        render();
+        break;
+      case "gen-started":
+      case "capturing":
+        break;
+      case "chord":
+        onChord(m.chord);
+        break;
+      case "gen-step": {
+        const g = ui.gen;
+        if (m.step === "asking") { g.attempt = m.attempt; g.step = 0; g.ms = null; g.average = null; }
+        else if (m.step === "wrote") g.step = 1;
+        else if (m.step === "compiled") g.step = 2;
+        else if (m.step === "performance") { g.step = 3; g.ms = m.ms; }
+        else if (m.step === "oled") { g.step = 4; g.average = m.average; }
+        else if (m.step === "refused") g.reason = m.reason;
+        render();
+        break;
+      }
+      case "gen-done":
+        ui.gen = { ...ui.gen, phase: "done", step: 4, name: m.name, preview: m.preview, ms: m.ms, average: m.average, reason: "" };
+        render();
+        break;
+      case "gen-failed":
+        ui.gen = { ...ui.gen, phase: "failed", reason: m.reason };
+        render();
+        break;
+      case "refused":
+        ui.refused = m.path;
+        if (String(m.path).startsWith("gen-") && ui.gen.phase === "running") ui.gen = { ...ui.gen, phase: "idle" };
+        render();
+        break;
+      case "info":
+        if (S) { S.info = m.info; render(); }
+        break;
+      case "update":
+        // "opened" only says the browser was asked; what was found stays shown.
+        if (m.state !== "opened") { ui.update = m; render(); }
+        break;
+      case "apps":
+        ui.apps = m.apps;
+        render();
+        break;
+      case "picked":
+        if (!m.path) break;
+        if (ui.pending === "wall") chooseWall("image", m.path);
+        else if (ui.pending === "folder") set("launcher.indexed_folders", [...cfg().launcher.indexed_folders, m.path]);
+        ui.pending = null;
+        break;
+    }
+  });
+
+  fetch("sprite.svg").then((r) => r.text()).then((svg) => { document.getElementById("sprite").innerHTML = svg; });
+  post({ op: "load" });
+})();

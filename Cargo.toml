@@ -1,0 +1,127 @@
+[workspace]
+resolver = "2"
+members = ["crates/*", "apps/*"]
+
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license-file = "LICENSE.md"
+repository = "https://github.com/Milvasoft/kabuk"
+publish = false
+
+[workspace.dependencies]
+kabuk-core = { path = "crates/kabuk-core" }
+kabuk-i18n = { path = "crates/kabuk-i18n" }
+kabuk-layout = { path = "crates/kabuk-layout" }
+kabuk-scenes = { path = "crates/kabuk-scenes" }
+kabuk-search = { path = "crates/kabuk-search" }
+kabuk-theme = { path = "crates/kabuk-theme" }
+kabuk-ui = { path = "crates/kabuk-ui" }
+kabuk-wallgen = { path = "crates/kabuk-wallgen" }
+kabuk-win = { path = "crates/kabuk-win" }
+
+# The windows crate is pinned exactly: its API changes between minor releases.
+windows = { version = "=0.62.2", features = [
+    "Foundation",
+    "Foundation_Collections",
+    "Graphics",
+    "Graphics_Capture",
+    "Graphics_DirectX",
+    "Graphics_DirectX_Direct3D11",
+    "Security_Authorization_AppCapabilityAccess",
+    "Win32_System_WinRT",
+    "Win32_System_WinRT_Graphics_Capture",
+    "Win32_System_WinRT_Direct3D11",
+    "Media_Control",
+    "Wdk_Graphics_Direct3D",
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_Graphics_Direct2D",
+    "Win32_Graphics_Direct2D_Common",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D_Fxc",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_DirectComposition",
+    "Win32_Graphics_DirectWrite",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Imaging",
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_Endpoints",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Networking_WinHttp",
+    "Win32_Storage_EnhancedStorage",
+    "Win32_Storage_FileSystem",
+    "Win32_Storage_Packaging_Appx",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Security_Credentials",
+    "Win32_System_Console",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+    "Win32_System_Pipes",
+    "Win32_System_IO",
+    "Win32_System_Power",
+    "Win32_System_Shutdown",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Registry",
+    "Win32_System_SystemInformation",
+    "Win32_System_Variant",
+    "Win32_System_WindowsProgramming",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Threading",
+    "Win32_UI_Accessibility",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
+    "Win32_UI_Shell_PropertiesSystem",
+    "Win32_UI_WindowsAndMessaging",
+    "UI_Notifications",
+    "UI_Notifications_Management",
+] }
+windows-numerics = "=0.3.1"
+# The settings app's WebView2 (DECISIONS D3); built on the same windows 0.62.
+webview2-com = "=0.39.1"
+# Needed by the `implement` macro for COM callbacks.
+windows-core = "=0.62.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+serde_ignored = "0.1.14"
+toml = "1.1.8"
+toml_edit = "0.25.17"
+thiserror = "2.0.21"
+regex = "1.13.1"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+tracing-appender = "0.2.5"
+fluent-bundle = "0.16.0"
+unic-langid = "0.9.6"
+embed-manifest = "1.5.1"
+# Kabuk's logo as the programs' icon (a Windows resource).
+embed-resource = "=3.0.12"
+proptest = "1.12.0"
+insta = "1.49.0"
+tempfile = "3.27.0"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "deny"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
+strip = "symbols"

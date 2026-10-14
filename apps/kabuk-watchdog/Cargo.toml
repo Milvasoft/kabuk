@@ -1,0 +1,21 @@
+[package]
+name = "kabuk-watchdog"
+description = "Starts the Kabuk shell, restores the desktop if it crashes and restarts it."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+
+[dependencies]
+kabuk-core.workspace = true
+kabuk-i18n.workspace = true
+kabuk-win.workspace = true
+tracing.workspace = true
+
+[build-dependencies]
+embed-manifest.workspace = true
+embed-resource.workspace = true
+
+[lints]
+workspace = true

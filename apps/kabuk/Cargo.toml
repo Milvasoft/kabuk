@@ -1,0 +1,39 @@
+[package]
+name = "kabuk"
+description = "The Kabuk shell: bar, window manager, launcher, notifications, IPC."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+
+[features]
+# Windows integration tests (`cargo test -p kabuk --features integration`). Also
+# enables the `--debug-*` switches the tests use to drive the shell.
+integration = []
+# The long idle measurement (docs/TESTING.md "Performance"), run at milestone end.
+perf = ["integration"]
+
+[dependencies]
+kabuk-core.workspace = true
+kabuk-i18n.workspace = true
+kabuk-layout.workspace = true
+kabuk-search.workspace = true
+kabuk-theme.workspace = true
+kabuk-ui.workspace = true
+kabuk-wallgen.workspace = true
+kabuk-win.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[build-dependencies]
+embed-manifest.workspace = true
+embed-resource.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

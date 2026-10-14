@@ -1,0 +1,11 @@
+[package]
+name = "kabuk-scenes"
+description = "The animated scenes of the wallpaper and the screen saver (ported from OledSaver), as pure simulations drawing through a small canvas."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
