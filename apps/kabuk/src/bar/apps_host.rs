@@ -388,25 +388,24 @@ impl Shared {
             .collect()
     }
 
-    /// A click on app `i`, as on Windows' taskbar: the app's window in front (`front`)
-    /// is minimized; otherwise its front window is shown, or the pinned app started.
-    pub(super) fn app_click(&mut self, i: usize, front: Option<u64>) {
+    /// A click on app `i` with `front` the window in front ([`apps::click_action`]);
+    /// `new_window` for a middle or Shift click.
+    pub(super) fn app_click(&mut self, i: usize, front: Option<u64>, new_window: bool) {
         let Some(app) = self.apps.list.get(i).cloned() else {
             return;
         };
-        if let Some(hwnd) = front.filter(|f| app.windows.contains(f)) {
-            tracing::info!(hwnd, source = %app.source, "app minimized from the bar");
-            match &self.wm {
-                // So its genie is on screen before it goes.
-                Some(link) => link.send(wm::Command::Minimize(hwnd)),
-                None => {
-                    Hwnd(hwnd).minimize_async();
+        match apps::click_action(&app, front, new_window) {
+            apps::ClickAction::Minimize(hwnd) => {
+                tracing::info!(hwnd, source = %app.source, "app minimized from the bar");
+                match &self.wm {
+                    // So its genie is on screen before it goes.
+                    Some(link) => link.send(wm::Command::Minimize(hwnd)),
+                    None => {
+                        Hwnd(hwnd).minimize_async();
+                    }
                 }
             }
-            return;
-        }
-        match (app.windows.first(), &app.link) {
-            (Some(&hwnd), _) => {
+            apps::ClickAction::Show(hwnd) => {
                 tracing::info!(hwnd, source = %app.source, "app shown from the bar");
                 match &self.wm {
                     Some(link) => link.send(wm::Command::Reveal(hwnd)),
@@ -415,20 +414,19 @@ impl Shared {
                     }
                 }
             }
-            (None, Some(link)) => {
-                tracing::info!(link = %link, "pinned app started from the bar");
-                let link = link.clone();
+            apps::ClickAction::Start(target) => {
+                tracing::info!(target = %target, new_window, "app started from the bar");
                 let started = std::thread::Builder::new().name("app-start".into()).spawn(move || {
                     kabuk_win::system::com_init();
-                    if let Err(e) = kabuk_win::shellitems::open(&link) {
-                        tracing::warn!(link = %link, error = %e, "pinned app not started");
+                    if let Err(e) = kabuk_win::shellitems::open(&target) {
+                        tracing::warn!(target = %target, error = %e, "app not started");
                     }
                 });
                 if let Err(e) = started {
-                    tracing::warn!(error = %e, "pinned app not started");
+                    tracing::warn!(error = %e, "app not started");
                 }
             }
-            (None, None) => {}
+            apps::ClickAction::Nothing => {}
         }
     }
 
@@ -439,7 +437,7 @@ impl Shared {
     pub(super) fn test_app_click(&mut self, hwnd: u64, in_front: bool) {
         self.refresh_apps();
         if let Some(i) = self.apps.list.iter().position(|a| a.windows.contains(&hwnd)) {
-            self.app_click(i, in_front.then_some(hwnd));
+            self.app_click(i, in_front.then_some(hwnd), false);
         }
     }
 }

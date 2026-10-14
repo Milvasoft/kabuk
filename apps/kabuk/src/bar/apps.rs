@@ -48,6 +48,42 @@ pub struct App {
     pub app_id: Option<String>,
 }
 
+/// What a click on an app does.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ClickAction {
+    Minimize(u64),
+    Show(u64),
+    /// Start the pinned app, or another window of the program (`target` for the shell).
+    Start(String),
+    Nothing,
+}
+
+/// A click on `app` with `front` the window in front, as on Windows' taskbar: a middle
+/// or Shift click (`new_window`) starts another window; a click on the app in front
+/// minimises its window, or, with several windows, shows the next one (in a fixed
+/// order, so repeated clicks go through all of them); otherwise its front window is
+/// shown, or the pinned app started.
+pub fn click_action(app: &App, front: Option<u64>, new_window: bool) -> ClickAction {
+    let target = || app.link.clone().unwrap_or_else(|| app.source.clone());
+    if new_window {
+        return ClickAction::Start(target());
+    }
+    if let Some(f) = front.filter(|f| app.windows.contains(f)) {
+        if app.windows.len() == 1 {
+            return ClickAction::Minimize(f);
+        }
+        let mut ring = app.windows.clone();
+        ring.sort_unstable();
+        let at = ring.iter().position(|w| *w == f).unwrap_or(0);
+        return ClickAction::Show(ring[(at + 1) % ring.len()]);
+    }
+    match (app.windows.first(), &app.link) {
+        (Some(&w), _) => ClickAction::Show(w),
+        (None, Some(_)) => ClickAction::Start(target()),
+        (None, None) => ClickAction::Nothing,
+    }
+}
+
 /// One pin as Windows' taskbar lists it (`Taskband\Favorites`): a shortcut in its pin
 /// folder, by file name, or a packaged app, by its app id.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -829,5 +865,33 @@ mod tests {
         // An old pins file without ids still reads.
         let old: Vec<Pin> = serde_json::from_str(r#"[{"link":"a.lnk","exe":null}]"#).unwrap();
         assert_eq!(old[0].app_id, None);
+    }
+
+    /// Found using the bar: a middle click did nothing (Windows starts another window),
+    /// and a click on a program in front with several windows minimised it instead of
+    /// going to its next window.
+    #[test]
+    fn clicks_on_an_app_do_what_windows_taskbar_does() {
+        let one = app(CODE, None, vec![5]);
+        assert_eq!(click_action(&one, Some(5), false), ClickAction::Minimize(5));
+        assert_eq!(click_action(&one, Some(9), false), ClickAction::Show(5));
+        assert_eq!(click_action(&one, Some(5), true), ClickAction::Start(CODE.into()));
+        // Several windows: the next one each time, through all of them, front order aside.
+        let three = app(CHROME, Some(r"C:\L\Chrome.lnk"), vec![30, 10, 20]);
+        assert_eq!(click_action(&three, Some(30), false), ClickAction::Show(10));
+        assert_eq!(click_action(&three, Some(10), false), ClickAction::Show(20));
+        assert_eq!(click_action(&three, Some(20), false), ClickAction::Show(30));
+        // A middle click starts it again from its pin.
+        assert_eq!(
+            click_action(&three, None, true),
+            ClickAction::Start(r"C:\L\Chrome.lnk".into())
+        );
+        // A pin with no window starts; nothing to do for an app with neither.
+        let pin = app(CHROME, Some("p.lnk"), Vec::new());
+        assert_eq!(click_action(&pin, None, false), ClickAction::Start("p.lnk".into()));
+        assert_eq!(
+            click_action(&app(CODE, None, Vec::new()), None, false),
+            ClickAction::Nothing
+        );
     }
 }

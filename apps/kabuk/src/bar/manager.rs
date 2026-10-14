@@ -2238,6 +2238,7 @@ impl Shared {
                     Some((dock::hit::APP, i)) => self.app_click(
                         usize::try_from(i).unwrap_or(usize::MAX),
                         kabuk_win::events::foreground().map(|h| h.0),
+                        msgloop::shift_held(),
                     ),
                     // With the keyboard for the user; tests never take it from the user's window.
                     Some((dock::hit::LAUNCHER, _)) => self.open_launcher(self.shortcuts),
@@ -2256,6 +2257,18 @@ impl Shared {
                 if let Some(h) = d.layout.hit_test(p).filter(|h| h.module == dock::hit::APP) {
                     let i = usize::try_from(h.value).unwrap_or(usize::MAX);
                     self.toggle_app_menu(app_menu_host::MenuHost::Dock, i);
+                }
+                Some(0)
+            }
+            // Another window of the app, as Windows' taskbar does on a middle click.
+            msg::MBUTTONUP => {
+                let (x, y) = msg::point(m.lparam);
+                let p = Point {
+                    x: d.scale.dips(x) - d.origin.x,
+                    y: d.scale.dips(y) - d.origin.y,
+                };
+                if let Some(h) = d.layout.hit_test(p).filter(|h| h.module == dock::hit::APP) {
+                    self.app_click(usize::try_from(h.value).unwrap_or(usize::MAX), None, true);
                 }
                 Some(0)
             }
@@ -2549,6 +2562,14 @@ impl Shared {
                 self.click(index, x, y, Click::Right);
                 Some(0)
             }
+            // Another window of the app, as Windows' taskbar does on a middle click.
+            msg::MBUTTONUP => {
+                let (x, y) = msg::point(m.lparam);
+                if let Some((view::hit::APP, i)) = self.hit(index, x, y) {
+                    self.app_click(usize::try_from(i).unwrap_or(usize::MAX), None, true);
+                }
+                Some(0)
+            }
             msg::LBUTTONDBLCLK => {
                 let (x, y) = msg::point(m.lparam);
                 self.click(index, x, y, Click::Double);
@@ -2703,6 +2724,7 @@ impl Shared {
             Some((view::hit::APP, i)) => self.app_click(
                 usize::try_from(i).unwrap_or(usize::MAX),
                 kabuk_win::events::foreground().map(|h| h.0),
+                msgloop::shift_held(),
             ),
             Some((view::hit::MEDIA, _)) => {
                 if let Some(media) = &self.media {

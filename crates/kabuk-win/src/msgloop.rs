@@ -471,6 +471,14 @@ pub mod vk {
     pub const V: usize = b'V' as usize;
 }
 
+/// Whether Shift was down when the message being handled was sent (the queue's key state).
+pub fn shift_held() -> bool {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_SHIFT};
+    // SAFETY: reads this thread's key state.
+    let state = unsafe { GetKeyState(i32::from(VK_SHIFT.0)) };
+    state < 0
+}
+
 /// Whether Ctrl was down when the message being handled was sent (the queue's key state).
 pub fn ctrl_held() -> bool {
     use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL};
@@ -925,6 +933,7 @@ pub mod msg {
     pub const LBUTTONDOWN: u32 = w::WM_LBUTTONDOWN;
     pub const RBUTTONDOWN: u32 = w::WM_RBUTTONDOWN;
     pub const MBUTTONDOWN: u32 = w::WM_MBUTTONDOWN;
+    pub const MBUTTONUP: u32 = w::WM_MBUTTONUP;
     pub const CHAR: u32 = w::WM_CHAR;
     /// `WM_ACTIVATE`'s `wparam` low word when the window loses activation.
     pub const WA_INACTIVE: usize = w::WA_INACTIVE as usize;
