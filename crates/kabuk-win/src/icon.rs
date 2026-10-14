@@ -103,6 +103,25 @@ pub fn shell_item_icon_pixels(name: &str, size: u32) -> Option<Vec<u8>> {
     Some(px)
 }
 
+/// Icon `index` of a file (an `.ico`, a program's resources) at `size`×`size`, as
+/// [`icon_pixels`] gives it (a jump list entry's own icon).
+pub fn icon_in_file_pixels(path: &std::path::Path, index: i32, size: u32) -> Option<Vec<u8>> {
+    use windows::Win32::UI::Shell::SHDefExtractIconW;
+    use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, HICON};
+    let mut large = HICON::default();
+    let wide = windows::core::HSTRING::from(path.as_os_str());
+    // SAFETY: a valid path and an out handle; the icon is destroyed below. The size goes
+    // in the low word, as the call asks.
+    let r = unsafe { SHDefExtractIconW(&wide, index, 0, Some(&mut large), None, size & 0xFFFF) };
+    if r.is_err() || large.is_invalid() {
+        return None;
+    }
+    let px = icon_pixels(large.0 as usize as u64, size);
+    // SAFETY: the icon SHDefExtractIconW made for us.
+    let _ = unsafe { DestroyIcon(large) };
+    px
+}
+
 /// The icon the shell shows for a file (a program, a shortcut) at `size`×`size`, as
 /// [`icon_pixels`] gives it. COM must be initialised on this thread.
 pub fn file_icon_pixels(path: &std::path::Path, size: u32) -> Option<Vec<u8>> {
@@ -235,6 +254,18 @@ mod tests {
             assert!(px.chunks_exact(4).all(|p| p[0] <= p[3] && p[1] <= p[3] && p[2] <= p[3]));
         }
         assert_eq!(icon_pixels(0x1234_5678, 16), None);
+    }
+
+    #[test]
+    fn an_icon_in_a_file_is_drawn_by_its_index() {
+        let shell32 = std::path::PathBuf::from(std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into()))
+            .join("System32")
+            .join("shell32.dll");
+        let side = 20;
+        let px = icon_in_file_pixels(&shell32, 3, side).expect("shell32's folder icon");
+        assert_eq!(px.len(), (side * side * 4) as usize);
+        assert!(px.chunks_exact(4).any(|p| p[3] > 0), "something drawn");
+        assert!(icon_in_file_pixels(std::path::Path::new(r"C:\no\such.ico"), 0, side).is_none());
     }
 
     #[test]

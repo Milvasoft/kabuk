@@ -310,6 +310,19 @@ pub fn recent(entries: &[Destination]) -> Vec<String> {
 pub struct Entry {
     pub title: String,
     pub launch: Launch,
+    /// The icon its link names (a file and the icon's index in it: a site's favicon, the
+    /// program's own); `None`: the shell's icon for what it opens.
+    pub icon: Option<(String, i32)>,
+}
+
+impl Entry {
+    /// Where its picture comes from: its own icon, else what it opens.
+    pub fn picture(&self) -> (&str, Option<i32>) {
+        match (&self.icon, &self.launch) {
+            (Some((file, index)), _) => (file, Some(*index)),
+            (None, Launch::File(path)) | (None, Launch::Run { path, .. }) => (path, None),
+        }
+    }
 }
 
 /// What an entry starts.
@@ -564,6 +577,7 @@ mod tests {
         Entry {
             title: p.into(),
             launch: Launch::File(p.into()),
+            icon: None,
         }
     }
 
@@ -575,6 +589,7 @@ mod tests {
                 args: t.into(),
                 dir: String::new(),
             },
+            icon: None,
         }
     }
 

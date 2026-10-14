@@ -332,7 +332,7 @@ impl Shared {
     }
 
     /// The key of an app's picture at the current size.
-    fn picture_key(&self, icon: &str) -> u64 {
+    pub(super) fn picture_key(&self, icon: &str) -> u64 {
         apps::image_key(&format!("{icon}@{}", self.apps.side))
     }
 

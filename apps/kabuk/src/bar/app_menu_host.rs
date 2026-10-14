@@ -135,11 +135,13 @@ impl Shared {
         let Some(app) = self.apps.list.get(index).cloned() else {
             return;
         };
-        let subject = Subject {
+        let mut subject = Subject {
             name: display_name(&app),
             pinned: app.link.is_some(),
             windows: app.windows.len(),
             groups: kabuk_win::jumplist::jump_list(&self.app_ids_of(&app), app_menu::MAX_PER_GROUP),
+            pictures: Vec::new(),
+            app_picture: Some(self.picture_key(&app.icon)).filter(|k| self.gpu.images.contains(*k)),
         };
         let weak = self.me.clone();
         let window = match Window::input_surface(MENU_CLASS, "", PxRect::default(), move |m| {
@@ -155,6 +157,7 @@ impl Shared {
         };
         let Some(a) = self.menu_anchor(host, index) else { return };
         let scale = a.scale;
+        subject.pictures = self.jump_pictures(&subject, scale);
         let node = app_menu::view(&self.i18n, self.look.style.text_scale, &TIP, &subject);
         let layout = kabuk_ui::node::layout(&node, Point::default(), &self.gpu.text);
         let size = (
@@ -187,6 +190,31 @@ impl Shared {
             app: index,
             entries,
         });
+    }
+
+    /// Each jump list entry's picture, as Windows' taskbar shows it (a site's favicon, a
+    /// task's program, a file's or folder's own icon), made once per picture and size.
+    fn jump_pictures(&mut self, subject: &Subject, scale: kabuk_ui::geom::Scale) -> Vec<Option<u64>> {
+        let side = (app_menu::PICTURE * scale.0).ceil() as u32;
+        subject
+            .groups
+            .iter()
+            .flat_map(|g| g.entries.iter().take(app_menu::MAX_PER_GROUP))
+            .map(|e| {
+                let (file, index) = e.picture();
+                let key = crate::bar::apps::image_key(&format!("jump|{file}|{index:?}|{side}"));
+                if self.gpu.images.contains(key) {
+                    return Some(key);
+                }
+                let path = std::path::Path::new(file);
+                let px = match index {
+                    Some(i) => kabuk_win::icon::icon_in_file_pixels(path, i, side),
+                    None => kabuk_win::icon::file_icon_pixels(path, side),
+                }?;
+                self.gpu.images.set(key, side, px);
+                Some(key)
+            })
+            .collect()
     }
 
     /// The ids Windows may keep the app's jump list by: its window's, else its pin's, else

@@ -93,6 +93,7 @@ pub fn jump_list(ids: &[String], max: usize) -> Vec<Group> {
                 title: title.unwrap_or_else(|| p.clone()),
                 // A known folder as its path, so it opens and shows once.
                 launch: Launch::File(path.unwrap_or(p)),
+                icon: None,
             }
         })
         .collect();
@@ -112,6 +113,7 @@ pub fn jump_list(ids: &[String], max: usize) -> Vec<Group> {
                 .map(|p| Entry {
                     title: shell_names(&p).0.unwrap_or_else(|| p.clone()),
                     launch: Launch::File(p),
+                    icon: None,
                 })
                 .take(max)
                 .collect()
@@ -192,9 +194,13 @@ fn link_entry(bytes: &[u8]) -> Option<Entry> {
                     .file_stem()
                     .map_or_else(|| path.clone(), |s| s.to_string_lossy().into_owned())
             });
+        let mut index = 0;
+        let icon = buffer_text(|b| link.GetIconLocation(b, &mut index).is_ok());
+        let expand = |s: &str| kabuk_core::paths::expand_env(s, |k| std::env::var(k).ok());
         Some(Entry {
             title: resolve_resource(&title),
             launch: Launch::Run { path, args, dir },
+            icon: (!icon.is_empty()).then(|| (expand(&icon), index)),
         })
     }
 }
@@ -309,6 +315,7 @@ pub fn documents(id: &str, kind: Known, max: usize) -> Vec<Entry> {
                 Some(Entry {
                     launch: Launch::File(text(&item, SIGDN_FILESYSPATH)?),
                     title: text(&item, SIGDN_NORMALDISPLAY)?,
+                    icon: None,
                 })
             })
             .take(max)
@@ -361,6 +368,8 @@ mod tests {
                 .unwrap();
             link.SetArguments(&HSTRING::from("--task")).unwrap();
             link.SetDescription(&HSTRING::from("A task")).unwrap();
+            link.SetIconLocation(&HSTRING::from(r"C:\Windows\System32\shell32.dll"), 3)
+                .unwrap();
             let stream: IStream = SHCreateMemStream(None).unwrap();
             link.cast::<IPersistStream>().unwrap().Save(&stream, true).unwrap();
             let mut stat = Default::default();
@@ -402,6 +411,8 @@ mod tests {
                 dir: String::new()
             }
         );
+        assert_eq!(e.icon, Some((r"C:\Windows\System32\shell32.dll".to_string(), 3)));
+        assert_eq!(e.picture(), (r"C:\Windows\System32\shell32.dll", Some(3)));
     }
 
     #[test]

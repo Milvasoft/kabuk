@@ -47,7 +47,15 @@ pub struct Subject {
     pub windows: usize,
     /// Its jump list, in Windows' order.
     pub groups: Vec<Group>,
+    /// The pictures of the jump list's entries in [`entries`]' order (a key of the
+    /// renderer's pictures); an entry without one shows a plain icon.
+    pub pictures: Vec<Option<u64>>,
+    /// The app's own picture, for its name's entry (as on Windows' taskbar).
+    pub app_picture: Option<u64>,
 }
+
+/// The side of an entry's picture (DIPs).
+pub const PICTURE: f32 = ICON;
 
 /// An entry's icon: a file or folder, or a program run.
 fn launch_icon(l: &Launch) -> &'static str {
@@ -131,6 +139,11 @@ pub fn view(i18n: &I18n, text_scale: f32, s: &TipStyle, subject: &Subject) -> No
         at += g.entries.len().min(MAX_PER_GROUP);
     }
     for (i, (icon, text, action)) in entries(subject).iter().enumerate() {
+        let own = (*action == Action::Open).then_some(subject.app_picture).flatten();
+        let picture = match own.or_else(|| subject.pictures.get(i).copied().flatten()) {
+            Some(key) => Node::image(key, ICON),
+            None => Node::icon(icon, ICON, Role::Dim),
+        };
         for (_, h) in starts.iter().filter(|(start, _)| *start == i) {
             rows.push(
                 line(h.clone(), Role::Dim, s.text * text_scale * HEADING_SIZE)
@@ -140,7 +153,7 @@ pub fn view(i18n: &I18n, text_scale: f32, s: &TipStyle, subject: &Subject) -> No
         }
         rows.push(
             Node::row(vec![
-                Node::icon(icon, ICON, Role::Dim),
+                picture,
                 line(
                     words(i18n, text, action, subject.windows),
                     Role::Fg,
@@ -195,6 +208,7 @@ mod tests {
                 .map(|i| Entry {
                     title: format!("f{i}.txt"),
                     launch: Launch::File(format!(r"C:\f{i}.txt")),
+                    icon: None,
                 })
                 .collect(),
         };
@@ -207,6 +221,8 @@ mod tests {
             } else {
                 vec![recent]
             },
+            pictures: Vec::new(),
+            app_picture: None,
         }
     }
 
@@ -246,6 +262,7 @@ mod tests {
                 args: t.into(),
                 dir: String::new(),
             },
+            icon: None,
         };
         let s = Subject {
             name: "Google Chrome".into(),
@@ -261,6 +278,9 @@ mod tests {
                     entries: vec![run("New window"), run("New Incognito window")],
                 },
             ],
+            // A favicon for the first site; the rest show a plain icon.
+            pictures: vec![Some(77), None, None, None],
+            app_picture: Some(99),
         };
         let t = texts(&view(&i18n, 1.0, &TIP, &s));
         let expected = [
@@ -276,6 +296,15 @@ mod tests {
         ];
         assert_eq!(t, expected);
         assert_eq!(entries(&s)[3].2, Action::Launch(run("New Incognito window").launch));
+        let images: Vec<u64> = layout(&view(&i18n, 1.0, &TIP, &s), Point::default(), &Fake)
+            .draws
+            .iter()
+            .filter_map(|d| match d {
+                Draw::Image { spec, .. } => Some(spec.key),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(images, vec![77, 99], "the first site's and the app's own pictures");
     }
 
     #[test]
