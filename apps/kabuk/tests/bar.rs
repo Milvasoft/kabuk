@@ -1869,7 +1869,7 @@ fn the_power_menu_opens_and_closes() {
 #[test]
 fn a_still_wallpaper_is_set_and_the_users_own_comes_back() {
     kabuk_win::system::com_init();
-    let theirs = kabuk_win::wallpaper::backup().expect("Windows' wallpaper readable");
+    let theirs = kabuk_win::wallpaper::current().expect("Windows' wallpaper readable");
     assert!(
         !kabuk_win::wallpaper::slideshow_on(),
         "a slideshow runs: Kabuk would leave it alone"
@@ -1887,7 +1887,7 @@ fn a_still_wallpaper_is_set_and_the_users_own_comes_back() {
     );
     // Recorded before it was changed, exactly as it was.
     assert_eq!(sandbox.state().wallpaper.as_ref(), Some(&theirs));
-    let now = kabuk_win::wallpaper::backup().unwrap();
+    let now = kabuk_win::wallpaper::current().unwrap();
     assert!(
         now.monitors
             .iter()
@@ -1897,14 +1897,14 @@ fn a_still_wallpaper_is_set_and_the_users_own_comes_back() {
     // "Windows" again: the user's own is back while Kabuk runs, and nothing is recorded.
     std::fs::write(sandbox.config_file(), "schema = 1\n[wallpaper]\nkind = \"windows\"\n").unwrap();
     assert!(wait_until(SETTLE, || sandbox.log_lines("the user's wallpaper is back") == 1).is_some());
-    assert_eq!(kabuk_win::wallpaper::backup().as_ref(), Some(&theirs));
+    assert_eq!(kabuk_win::wallpaper::current().as_ref(), Some(&theirs));
     assert!(wait_until(SETTLE, || sandbox.state().wallpaper.is_none()).is_some());
     // Set again, then given back by --restore.
     std::fs::write(sandbox.config_file(), "schema = 1\n[wallpaper]\nkind = \"black\"\n").unwrap();
     assert!(wait_until(SETTLE, || sandbox.log_lines("wallpaper set") == 2 * monitors).is_some());
     assert_eq!(sandbox.restore().0, 0);
     assert_eq!(
-        kabuk_win::wallpaper::backup().as_ref(),
+        kabuk_win::wallpaper::current().as_ref(),
         Some(&theirs),
         "the user's wallpaper did not come back"
     );
@@ -1918,7 +1918,7 @@ fn a_still_wallpaper_is_set_and_the_users_own_comes_back() {
 fn a_still_picture_drifts_a_step_at_a_time() {
     use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_DRIFT};
     kabuk_win::system::com_init();
-    let theirs = kabuk_win::wallpaper::backup().expect("Windows' wallpaper readable");
+    let theirs = kabuk_win::wallpaper::current().expect("Windows' wallpaper readable");
     assert!(!kabuk_win::wallpaper::slideshow_on(), "a slideshow runs");
     let before = work_areas();
     let sandbox = Sandbox::new();
@@ -1943,7 +1943,7 @@ fn a_still_picture_drifts_a_step_at_a_time() {
         sandbox.last_log_line(&["wallpaper", "drift"])
     );
     let places = || -> Vec<String> {
-        kabuk_win::wallpaper::backup()
+        kabuk_win::wallpaper::current()
             .unwrap()
             .monitors
             .iter()
@@ -1981,7 +1981,7 @@ fn a_still_picture_drifts_a_step_at_a_time() {
     assert_eq!(sandbox.log_lines("the user's wallpaper is back"), 0);
     assert_eq!(sandbox.restore().0, 0);
     assert_eq!(
-        kabuk_win::wallpaper::backup().as_ref(),
+        kabuk_win::wallpaper::current().as_ref(),
         Some(&theirs),
         "the user's wallpaper did not come back"
     );
@@ -1994,7 +1994,7 @@ fn a_still_picture_drifts_a_step_at_a_time() {
 #[test]
 fn a_created_wallpaper_plays_behind_the_icons() {
     kabuk_win::system::com_init();
-    let theirs = kabuk_win::wallpaper::backup().expect("Windows' wallpaper readable");
+    let theirs = kabuk_win::wallpaper::current().expect("Windows' wallpaper readable");
     let before = work_areas();
     let sandbox = Sandbox::new();
     let wall = sandbox.state_dir().join("walls").join("gen-1");
@@ -2034,7 +2034,7 @@ fn a_created_wallpaper_plays_behind_the_icons() {
     assert!(sandbox.log_lines("created wallpaper not loaded") >= 1);
     assert_eq!(sandbox.restore().0, 0);
     assert_eq!(
-        kabuk_win::wallpaper::backup().as_ref(),
+        kabuk_win::wallpaper::current().as_ref(),
         Some(&theirs),
         "the user's wallpaper did not come back"
     );
@@ -2050,7 +2050,7 @@ fn the_animated_wallpaper_stops_in_game_mode() {
     use kabuk_win::msgloop::{post_message, Msg};
     const ABN_FULLSCREENAPP: usize = 2;
     kabuk_win::system::com_init();
-    let theirs = kabuk_win::wallpaper::backup().expect("Windows' wallpaper readable");
+    let theirs = kabuk_win::wallpaper::current().expect("Windows' wallpaper readable");
     let before = work_areas();
     let sandbox = Sandbox::new();
     std::fs::write(
@@ -2129,7 +2129,7 @@ fn the_animated_wallpaper_stops_in_game_mode() {
     );
     assert_eq!(sandbox.restore().0, 0);
     assert_eq!(
-        kabuk_win::wallpaper::backup().as_ref(),
+        kabuk_win::wallpaper::current().as_ref(),
         Some(&theirs),
         "the user's wallpaper did not come back"
     );
@@ -2142,7 +2142,7 @@ fn the_animated_wallpaper_stops_in_game_mode() {
 #[test]
 fn an_animated_wallpaper_runs_while_chosen_and_ends_with_kabuk() {
     kabuk_win::system::com_init();
-    let theirs = kabuk_win::wallpaper::backup().expect("Windows' wallpaper readable");
+    let theirs = kabuk_win::wallpaper::current().expect("Windows' wallpaper readable");
     let before = work_areas();
     let sandbox = Sandbox::new();
     std::fs::write(sandbox.config_file(), "schema = 1\n[wallpaper]\nkind = \"circuit\"\n").unwrap();
@@ -2165,7 +2165,7 @@ fn an_animated_wallpaper_runs_while_chosen_and_ends_with_kabuk() {
     std::fs::write(sandbox.config_file(), "schema = 1\n[wallpaper]\nkind = \"windows\"\n").unwrap();
     assert!(player.wait(Some(SETTLE)), "the player kept running");
     assert!(wait_until(SETTLE, || sandbox.log_lines("animated wallpaper stopped") == 1).is_some());
-    assert_eq!(kabuk_win::wallpaper::backup().as_ref(), Some(&theirs));
+    assert_eq!(kabuk_win::wallpaper::current().as_ref(), Some(&theirs));
     // Chosen again, then Kabuk is killed: the player sees it and ends within its look.
     std::fs::write(
         sandbox.config_file(),
@@ -2178,7 +2178,7 @@ fn an_animated_wallpaper_runs_while_chosen_and_ends_with_kabuk() {
     assert!(second.wait(Some(Duration::from_secs(5))), "the player outlived Kabuk");
     assert_eq!(sandbox.restore().0, 0);
     assert_eq!(
-        kabuk_win::wallpaper::backup().as_ref(),
+        kabuk_win::wallpaper::current().as_ref(),
         Some(&theirs),
         "the user's wallpaper did not come back"
     );

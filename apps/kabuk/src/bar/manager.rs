@@ -1784,7 +1784,7 @@ impl Shared {
         let calls: Vec<IconCall> = std::mem::take(&mut *self.tray_calls.borrow_mut()).into();
         let mut changed = false;
         for c in &calls {
-            tracing::debug!(op = ?c.op, hwnd = c.hwnd, uid = c.uid, tip = ?c.tip, "tray call");
+            tracing::debug!(op = ?c.op, hwnd = c.hwnd, uid = c.uid, version = ?c.version, tip = ?c.tip, "tray call");
             changed |= self.tray.apply(c);
         }
         if changed {

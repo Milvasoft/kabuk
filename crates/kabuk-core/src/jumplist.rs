@@ -23,6 +23,42 @@ pub const DEST_LIST_STREAM: &str = "DestList";
 /// CRC-64 (ECMA-182, reflected) Windows names a program's jump list files by.
 const HASH_POLY: u64 = 0x92C6_4265_D321_39A4;
 
+/// The known folders Windows names a program's folder by in the app id it makes up for a
+/// program that sets none (System, SystemX86, Windows, the program files folders and
+/// their common files), as `FOLDERID`s in the form the id carries.
+pub const IMPLICIT_FOLDERS: [&str; 7] = [
+    "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}",
+    "{D65231B0-B2F1-4857-A4CE-A8E7C6EA7D27}",
+    "{F38BF404-1D43-42F2-9305-67DE0B28FC23}",
+    "{6D809377-6AF0-444B-8957-A3773F02200E}",
+    "{7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}",
+    "{6365D5A7-0F0D-45E5-87F6-0DA56B6A4F7D}",
+    "{DE974D24-D9C6-4D3E-BF91-F4455120B917}",
+];
+
+/// The ids Windows may have made up for the program at `exe` when it sets none, most
+/// likely first: its path with the deepest of `folders` (a folder's path and its id from
+/// [`IMPLICIT_FOLDERS`]) it lies in replaced by that folder's id
+/// (`{1AC14E77-…}\notepad.exe`), then the path as it is.
+pub fn implicit_app_ids(exe: &str, folders: &[(String, &str)]) -> Vec<String> {
+    let lower = exe.to_lowercase();
+    let mut inside: Vec<&(String, &str)> = folders
+        .iter()
+        .filter(|(path, _)| {
+            let p = path.trim_end_matches('\\').to_lowercase();
+            !p.is_empty() && lower.starts_with(&format!("{p}\\"))
+        })
+        .collect();
+    inside.sort_by_key(|(path, _)| std::cmp::Reverse(path.trim_end_matches('\\').len()));
+    let mut out: Vec<String> = inside
+        .first()
+        .map(|(path, id)| format!("{id}{}", &exe[path.trim_end_matches('\\').len()..]))
+        .into_iter()
+        .collect();
+    out.push(exe.to_string());
+    out
+}
+
 /// The file name (without extension) of the jump lists of the program with app id `id`:
 /// the CRC-64 of the id upper-cased, in UTF-16, as hexadecimal without leading zeros.
 pub fn file_stem(app_id: &str) -> String {
@@ -209,11 +245,14 @@ pub struct Destination {
     pub path: String,
     /// Its place among the pinned ones; `None` when it is not pinned.
     pub pin: Option<u32>,
+    /// When it was last used (a `FILETIME`).
+    pub used: u64,
 }
 
 const DEST_HEADER: usize = 32;
 /// Windows 7's entries; later versions add fields before the path and after it.
 const DEST_VERSION_OLD: u32 = 1;
+const DEST_USED_AT: usize = 100;
 const DEST_PIN_AT: usize = 108;
 const DEST_PATH_AT_OLD: usize = 112;
 const DEST_PATH_AT: usize = 128;
@@ -234,6 +273,8 @@ pub fn dest_list(bytes: &[u8]) -> Option<Vec<Destination>> {
     let mut out = Vec::new();
     for _ in 0..count {
         let start = r.at;
+        r.at = start.checked_add(DEST_USED_AT)?;
+        let used = u64::from(r.u32()?) | (u64::from(r.u32()?) << 32);
         r.at = start.checked_add(DEST_PIN_AT)?;
         let pin = r.u32()? as i32;
         r.at = start.checked_add(path_at)?;
@@ -243,6 +284,7 @@ pub fn dest_list(bytes: &[u8]) -> Option<Vec<Destination>> {
         out.push(Destination {
             path,
             pin: (pin != NOT_PINNED).then(|| u32::try_from(pin).ok()).flatten(),
+            used,
         });
     }
     Some(out)
@@ -253,6 +295,14 @@ pub fn pinned(entries: &[Destination]) -> Vec<String> {
     let mut pins: Vec<(u32, &str)> = entries.iter().filter_map(|d| Some((d.pin?, d.path.as_str()))).collect();
     pins.sort_by_key(|(at, _)| *at);
     pins.into_iter().map(|(_, p)| p.to_string()).collect()
+}
+
+/// The entries that are not pinned, last used first (Windows' recent files for a program
+/// it gives no other list of).
+pub fn recent(entries: &[Destination]) -> Vec<String> {
+    let mut rest: Vec<&Destination> = entries.iter().filter(|d| d.pin.is_none()).collect();
+    rest.sort_by_key(|d| std::cmp::Reverse(d.used));
+    rest.into_iter().map(|d| d.path.clone()).collect()
 }
 
 /// An entry of the menu.
@@ -458,6 +508,33 @@ mod tests {
         assert_eq!(link_len(&[0u8; 8], 0), None);
     }
 
+    #[test]
+    fn a_program_without_an_id_goes_by_its_folders_id_then_its_path() {
+        let folders = [
+            (r"C:\Windows".to_string(), IMPLICIT_FOLDERS[2]),
+            (r"C:\Windows\System32\".to_string(), IMPLICIT_FOLDERS[0]),
+        ];
+        let ids = implicit_app_ids(r"C:\WINDOWS\system32\WindowsPowerShell\v1.0\powershell.exe", &folders);
+        assert_eq!(
+            ids,
+            [
+                r"{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe",
+                r"C:\WINDOWS\system32\WindowsPowerShell\v1.0\powershell.exe"
+            ]
+        );
+        // Found on Windows: Notepad's list, from the deepest folder's id.
+        assert_eq!(
+            file_stem(&implicit_app_ids(r"C:\Windows\System32\notepad.exe", &folders)[0]),
+            "9b9cdc69c1c24e2b"
+        );
+        // Outside every folder: the path only; a folder's name as a prefix is not inside.
+        assert_eq!(implicit_app_ids(r"D:\Tools\x.exe", &folders), [r"D:\Tools\x.exe"]);
+        assert_eq!(
+            implicit_app_ids(r"C:\WindowsApps\x.exe", &folders),
+            [r"C:\WindowsApps\x.exe"]
+        );
+    }
+
     fn dest(version: u32, entries: &[(&str, i32)]) -> Vec<u8> {
         let mut b = u32s(&[version, entries.len() as u32]);
         b.resize(DEST_HEADER, 0);
@@ -470,6 +547,9 @@ mod tests {
             };
             b.resize(start + path_at, 0);
             b[start + DEST_PIN_AT..start + DEST_PIN_AT + 4].copy_from_slice(&pin.to_le_bytes());
+            // Used: later for each entry, so the last one is the newest.
+            let used = 1000u64 + start as u64;
+            b[start + DEST_USED_AT..start + DEST_USED_AT + 8].copy_from_slice(&used.to_le_bytes());
             let u: Vec<u16> = path.encode_utf16().collect();
             b.extend_from_slice(&(u.len() as u16).to_le_bytes());
             b.extend(u.iter().flat_map(|c| c.to_le_bytes()));
@@ -540,6 +620,8 @@ mod tests {
             assert_eq!(list.len(), 3);
             assert_eq!(list[0].pin, None);
             assert_eq!(pinned(&list), vec![r"C:\b.txt".to_string(), r"C:\Work".to_string()]);
+            assert_eq!(recent(&list), vec![r"C:\a.txt".to_string()], "the unpinned one");
+            assert!(list[2].used > list[0].used);
             assert_eq!(dest_list(&b[..b.len() - 3]), None, "cut short");
         }
     }

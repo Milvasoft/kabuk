@@ -63,6 +63,11 @@ pub fn known_folder(f: Folder) -> Option<PathBuf> {
         Folder::RoamingAppData => &FOLDERID_RoamingAppData,
         Folder::Desktop => &windows::Win32::UI::Shell::FOLDERID_Desktop,
     };
+    known_folder_path(id)
+}
+
+/// The path of the known folder `id` (a `FOLDERID_…`); `None` for one this machine lacks.
+pub fn known_folder_path(id: &windows::core::GUID) -> Option<PathBuf> {
     // SAFETY: a known folder id; the returned string is taken and freed by `take`.
     let p = unsafe { SHGetKnownFolderPath(id, KF_FLAG_DEFAULT, None) }.ok()?;
     let s = take(p);

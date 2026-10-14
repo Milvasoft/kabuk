@@ -134,10 +134,7 @@ impl Shared {
             name: display_name(&app),
             pinned: app.link.is_some(),
             windows: app.windows.len(),
-            groups: self
-                .app_id_of(&app)
-                .map(|id| kabuk_win::jumplist::jump_list(&id, app_menu::MAX_PER_GROUP))
-                .unwrap_or_default(),
+            groups: kabuk_win::jumplist::jump_list(&self.app_ids_of(&app), app_menu::MAX_PER_GROUP),
         };
         let weak = self.me.clone();
         let window = match Window::input_surface(MENU_CLASS, "", PxRect::default(), move |m| {
@@ -187,9 +184,11 @@ impl Shared {
         });
     }
 
-    /// The id Windows keeps the app's jump list by: its window's, else its pin's.
-    fn app_id_of(&self, app: &crate::bar::apps::App) -> Option<String> {
-        app.windows
+    /// The ids Windows may keep the app's jump list by: its window's, else its pin's, else
+    /// the ones Windows makes up for a program that sets none.
+    fn app_ids_of(&self, app: &crate::bar::apps::App) -> Vec<String> {
+        let own = app
+            .windows
             .first()
             .and_then(|h| kabuk_win::shellitems::window_app_id(Hwnd(*h)))
             .or_else(|| {
@@ -200,7 +199,11 @@ impl Shared {
                     .find(|p| p.link.eq_ignore_ascii_case(link))?
                     .app_id
                     .clone()
-            })
+            });
+        match own {
+            Some(id) => vec![id],
+            None => kabuk_win::jumplist::implicit_app_ids(&app.source),
+        }
     }
 
     fn app_action(&mut self, index: usize, action: Action) {

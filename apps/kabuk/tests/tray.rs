@@ -449,7 +449,7 @@ fn icons_beyond_tray_shown_are_clicked_from_the_overflow_panel() {
 #[test]
 fn a_forced_kill_gives_the_users_wallpaper_back() {
     kabuk_win::system::com_init();
-    let theirs = kabuk_win::wallpaper::backup().expect("Windows' wallpaper readable");
+    let theirs = kabuk_win::wallpaper::current().expect("Windows' wallpaper readable");
     let before = Desktop::now();
     let sandbox = Sandbox::new();
     std::fs::write(sandbox.config_file(), "schema = 1\n[wallpaper]\nkind = \"black\"\n").unwrap();
@@ -465,6 +465,6 @@ fn a_forced_kill_gives_the_users_wallpaper_back() {
     );
     // The watchdog starts the shell again, which sets black again; restore ends that.
     assert_eq!(sandbox.restore().0, 0);
-    assert_eq!(kabuk_win::wallpaper::backup().as_ref(), Some(&theirs));
+    assert_eq!(kabuk_win::wallpaper::current().as_ref(), Some(&theirs));
     assert!(wait_until(SETTLE, || before.is_back()).is_some(), "desktop not back");
 }

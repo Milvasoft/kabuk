@@ -51,8 +51,17 @@ fn history() -> Vec<String> {
 /// run that did not give the user's back) is recorded as the user's newest own picture
 /// instead. COM must be initialised on this thread.
 pub fn backup() -> Option<WallpaperBackup> {
-    let dw = wallpapers()?;
     let history = history();
+    let mut b = current()?;
+    for (_, path) in &mut b.monitors {
+        *path = kabuk_core::wallpaper::users_own(path.as_deref(), &history);
+    }
+    Some(b)
+}
+
+/// What Windows shows now, Kabuk's pictures included. COM must be initialised.
+pub fn current() -> Option<WallpaperBackup> {
+    let dw = wallpapers()?;
     let monitors = monitor_ids(&dw)
         .into_iter()
         .map(|(id, _)| {
@@ -64,7 +73,7 @@ pub fn backup() -> Option<WallpaperBackup> {
                     s
                 })
             };
-            (id, kabuk_core::wallpaper::users_own(path.as_deref(), &history))
+            (id, path.filter(|p| !p.is_empty()))
         })
         .collect();
     // SAFETY: COM calls on a live object.

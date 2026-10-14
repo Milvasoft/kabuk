@@ -29,22 +29,63 @@ use crate::shellitems::{known_folder, Folder};
 /// Longest path, arguments or description a link holds that is read.
 const TEXT: usize = 2048;
 
-/// The program with app id `app_id`'s jump list, each group with at most `max` entries.
-/// COM must be initialised on this thread.
-pub fn jump_list(app_id: &str, max: usize) -> Vec<Group> {
+/// The jump list files of app id `id`: (its own list, Windows' record).
+fn files(recent: &Path, id: &str) -> (PathBuf, PathBuf) {
+    let stem = jumplist::file_stem(id);
+    (
+        recent
+            .join(jumplist::CUSTOM_FOLDER)
+            .join(format!("{stem}.{}", jumplist::CUSTOM_EXTENSION)),
+        recent
+            .join(jumplist::AUTOMATIC_FOLDER)
+            .join(format!("{stem}.{}", jumplist::AUTOMATIC_EXTENSION)),
+    )
+}
+
+/// The ids Windows may have made up for the program at `exe` when it sets none
+/// ([`jumplist::implicit_app_ids`], with this machine's folders).
+pub fn implicit_app_ids(exe: &str) -> Vec<String> {
+    use windows::Win32::UI::Shell::{
+        FOLDERID_ProgramFilesCommonX64, FOLDERID_ProgramFilesCommonX86, FOLDERID_ProgramFilesX64,
+        FOLDERID_ProgramFilesX86, FOLDERID_System, FOLDERID_SystemX86, FOLDERID_Windows,
+    };
+    let ids = [
+        FOLDERID_System,
+        FOLDERID_SystemX86,
+        FOLDERID_Windows,
+        FOLDERID_ProgramFilesX64,
+        FOLDERID_ProgramFilesX86,
+        FOLDERID_ProgramFilesCommonX64,
+        FOLDERID_ProgramFilesCommonX86,
+    ];
+    let folders: Vec<(String, &str)> = ids
+        .iter()
+        .zip(jumplist::IMPLICIT_FOLDERS)
+        .filter_map(|(id, name)| Some((crate::shellitems::known_folder_path(id)?.display().to_string(), name)))
+        .collect();
+    jumplist::implicit_app_ids(exe, &folders)
+}
+
+/// The jump list of the program going by the first of `ids` Windows keeps a list for (the
+/// first when it keeps none), each group with at most `max` entries. COM must be
+/// initialised on this thread.
+pub fn jump_list(ids: &[String], max: usize) -> Vec<Group> {
     let Some(recent) = known_folder(Folder::Recent) else {
         return Vec::new();
     };
-    let stem = jumplist::file_stem(app_id);
-    let custom = recent
-        .join(jumplist::CUSTOM_FOLDER)
-        .join(format!("{stem}.{}", jumplist::CUSTOM_EXTENSION));
-    let automatic = recent
-        .join(jumplist::AUTOMATIC_FOLDER)
-        .join(format!("{stem}.{}", jumplist::AUTOMATIC_EXTENSION));
-    let pinned: Vec<Entry> = dest_list(&automatic)
-        .map(|d| jumplist::pinned(&d))
-        .unwrap_or_default()
+    let Some(app_id) = ids
+        .iter()
+        .find(|id| {
+            let (c, a) = files(&recent, id);
+            c.exists() || a.exists()
+        })
+        .or_else(|| ids.first())
+    else {
+        return Vec::new();
+    };
+    let (custom, automatic) = files(&recent, app_id);
+    let record = dest_list(&automatic).unwrap_or_default();
+    let pinned: Vec<Entry> = jumplist::pinned(&record)
         .into_iter()
         .map(|p| {
             let (title, path) = shell_names(&p);
@@ -56,7 +97,27 @@ pub fn jump_list(app_id: &str, max: usize) -> Vec<Group> {
         })
         .collect();
     let own = own_list(&custom);
-    jumplist::arrange(pinned, own, |k| documents(app_id, k, max), max)
+    jumplist::arrange(
+        pinned,
+        own,
+        |k| {
+            // Windows' call knows only ids programs set; the record has the rest.
+            let listed = documents(app_id, k, max);
+            if !listed.is_empty() {
+                return listed;
+            }
+            jumplist::recent(&record)
+                .into_iter()
+                .filter(|p| Path::new(p).exists())
+                .map(|p| Entry {
+                    title: shell_names(&p).0.unwrap_or_else(|| p.clone()),
+                    launch: Launch::File(p),
+                })
+                .take(max)
+                .collect()
+        },
+        max,
+    )
 }
 
 /// The program's own categories with their links read; `None` without a list of its own
@@ -286,6 +347,10 @@ mod tests {
     //! failing (File Explorer's has a `DestList` whenever its file exists).
     use super::*;
 
+    fn file_stem_of(id: &str) -> String {
+        jumplist::file_stem(id)
+    }
+
     #[test]
     fn a_link_saved_by_windows_reads_back_as_an_entry() {
         crate::system::com_init_mta();
@@ -342,7 +407,11 @@ mod tests {
     #[test]
     fn this_machines_lists_read_without_failing() {
         crate::system::com_init_mta();
-        assert!(jump_list("Kabuk.Test.NoSuchApp", 5).is_empty());
+        assert!(jump_list(&["Kabuk.Test.NoSuchApp".to_string()], 5).is_empty());
+        assert!(jump_list(&[], 5).is_empty());
+        // The known folders' ids are the ones the pure list names.
+        let ids = implicit_app_ids(r"C:\Windows\System32\notepad.exe");
+        assert_eq!(file_stem_of(&ids[0]), "9b9cdc69c1c24e2b");
         let explorer = known_folder(Folder::Recent).map(|r| {
             r.join(jumplist::AUTOMATIC_FOLDER).join(format!(
                 "{}.{}",
@@ -353,7 +422,11 @@ mod tests {
         if let Some(f) = explorer.filter(|f| f.exists()) {
             assert!(dest_list(&f).is_some(), "File Explorer's DestList read");
         }
-        let _ = jump_list("Microsoft.Windows.Explorer", 5);
-        let _ = jump_list("Chrome", 5);
+        let _ = jump_list(&["Microsoft.Windows.Explorer".to_string()], 5);
+        let _ = jump_list(&["Chrome".to_string()], 5);
+        let _ = jump_list(
+            &implicit_app_ids(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"),
+            5,
+        );
     }
 }
