@@ -775,6 +775,8 @@ impl BarManager {
             s.control = Some(control);
             s.count_notifications();
             s.create_launcher();
+            // The app menus' names and ids, read ahead (it takes a few hundred ms).
+            kabuk_win::shellitems::refresh_installed_apps();
             s.bind_overview_keys();
             s.bind_saver_keys();
             s.load_pins();

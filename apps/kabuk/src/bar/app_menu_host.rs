@@ -53,8 +53,9 @@ pub(super) struct AppMenu {
     entries: Vec<Action>,
 }
 
-/// The name an app goes by: a packaged app's own name, else its pin's or program's file
-/// name without the extension.
+/// The name an app goes by, as Windows' taskbar names it: a packaged app's own name, a
+/// program's name in the Start menu ("Google Chrome", not "chrome"), else its pin's or
+/// program's file name without the extension.
 fn display_name(app: &crate::bar::apps::App) -> String {
     let path = app.link.as_deref().unwrap_or(&app.source);
     /// How the shell names a packaged app by its app id.
@@ -64,11 +65,15 @@ fn display_name(app: &crate::bar::apps::App) -> String {
         .strip_prefix(APPS_FOLDER)
         .or_else(|| path.strip_prefix(APPS_FOLDER))
     {
-        if let Some(a) = kabuk_win::shellitems::installed_apps()
-            .unwrap_or_default()
-            .into_iter()
+        if let Some(a) = kabuk_win::shellitems::installed_apps_cached()
+            .iter()
             .find(|a| a.id.eq_ignore_ascii_case(id))
         {
+            return a.name.clone();
+        }
+    }
+    if path.eq_ignore_ascii_case(&app.source) {
+        if let Some(a) = kabuk_win::shellitems::program_entry(&app.source) {
             return a.name;
         }
     }
@@ -200,6 +205,9 @@ impl Shared {
                     .app_id
                     .clone()
             });
+        // A program pinned by its path (from a window): its Start menu entry's id, as the
+        // id it sets itself is that one ("Chrome").
+        let own = own.or_else(|| kabuk_win::shellitems::program_entry(&app.source).map(|a| a.id));
         match own {
             Some(id) => vec![id],
             None => kabuk_win::jumplist::implicit_app_ids(&app.source),

@@ -20,8 +20,11 @@ use crate::sync::io_error;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct App {
     pub name: String,
-    /// The shell's parsing name; `shell:AppsFolder\<id>` opens it.
+    /// The shell's parsing name; `shell:AppsFolder\<id>` opens it. For a program it is
+    /// the app id Windows groups its windows and keeps its jump list by.
     pub id: String,
+    /// The program it starts, for a program's entry (not a packaged app's).
+    pub target: Option<String>,
 }
 
 impl App {
@@ -76,6 +79,8 @@ pub fn known_folder_path(id: &windows::core::GUID) -> Option<PathBuf> {
 
 /// The installed apps, in the shell's order.
 pub fn installed_apps() -> std::io::Result<Vec<App>> {
+    use windows::Win32::Storage::EnhancedStorage::PKEY_Link_TargetParsingPath;
+    use windows::Win32::UI::Shell::IShellItem2;
     // SAFETY: (whole block) COM calls on interfaces the shell returned; strings are
     // taken and freed by `take`; the enumerator is read until it reports no more items.
     unsafe {
@@ -95,11 +100,74 @@ pub fn installed_apps() -> std::io::Result<Vec<App>> {
                 .map(take)
                 .unwrap_or_default();
             if !name.is_empty() && !id.is_empty() {
-                out.push(App { name, id });
+                let target = item
+                    .cast::<IShellItem2>()
+                    .ok()
+                    .and_then(|i| i.GetString(&PKEY_Link_TargetParsingPath).ok())
+                    .map(take)
+                    .filter(|t| !t.is_empty());
+                out.push(App { name, id, target });
             }
         }
         Ok(out)
     }
+}
+
+/// How long [`installed_apps_cached`] keeps the list before it reads it again (in the
+/// background), and the list kept.
+const INSTALLED_KEPT: std::time::Duration = std::time::Duration::from_secs(600);
+type Installed = Option<(std::time::Instant, std::sync::Arc<Vec<App>>)>;
+static INSTALLED: std::sync::Mutex<Installed> = std::sync::Mutex::new(None);
+static INSTALLED_READING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Reads the installed apps again on a thread of its own (once at a time).
+pub fn refresh_installed_apps() {
+    use std::sync::atomic::Ordering;
+    if INSTALLED_READING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let spawned = std::thread::Builder::new().name("installed-apps".into()).spawn(|| {
+        crate::system::com_init();
+        if let Ok(apps) = installed_apps() {
+            if let Ok(mut c) = INSTALLED.lock() {
+                *c = Some((std::time::Instant::now(), std::sync::Arc::new(apps)));
+            }
+        }
+        INSTALLED_READING.store(false, Ordering::Release);
+    });
+    if spawned.is_err() {
+        INSTALLED_READING.store(false, Ordering::Release);
+    }
+}
+
+/// The installed apps as last read (reading them takes a few hundred milliseconds, too
+/// long for a click): read here the first time, then again in the background when older
+/// than [`INSTALLED_KEPT`]. COM must be initialised on this thread.
+pub fn installed_apps_cached() -> std::sync::Arc<Vec<App>> {
+    let kept = INSTALLED.lock().ok().and_then(|c| c.clone());
+    match kept {
+        Some((at, apps)) => {
+            if at.elapsed() > INSTALLED_KEPT {
+                refresh_installed_apps();
+            }
+            apps
+        }
+        None => {
+            let apps = std::sync::Arc::new(installed_apps().unwrap_or_default());
+            if let Ok(mut c) = INSTALLED.lock() {
+                *c = Some((std::time::Instant::now(), apps.clone()));
+            }
+            apps
+        }
+    }
+}
+
+/// The Start menu's entry for the program at `exe`, if it has one.
+pub fn program_entry(exe: &str) -> Option<App> {
+    installed_apps_cached()
+        .iter()
+        .find(|a| a.target.as_deref().is_some_and(|t| t.eq_ignore_ascii_case(exe)))
+        .cloned()
 }
 
 /// The path a `.lnk` shortcut points at (environment variables left unexpanded only if

@@ -13,8 +13,8 @@ pub struct Pin {
     /// The id Windows groups its windows by (`AppUserModelID`), when the shortcut or the
     /// packaged app has one: a web app's pin starts `chrome_proxy.exe` while its windows
     /// are `chrome.exe`'s, so only this tells them from the browser's. Read again from
-    /// the shortcut at each start, never saved.
-    #[serde(skip)]
+    /// the shortcut at each start; saved for a program pinned from its window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app_id: Option<String>,
 }
 
@@ -43,6 +43,9 @@ pub struct App {
     /// Its windows, front first.
     pub windows: Vec<u64>,
     pub focused: bool,
+    /// The id Windows groups it by (its pin's, else its first window's), kept when it is
+    /// pinned.
+    pub app_id: Option<String>,
 }
 
 /// One pin as Windows' taskbar lists it (`Taskband\Favorites`): a shortcut in its pin
@@ -193,6 +196,12 @@ pub fn apps(pins: &[Pin], running: &[Running], order: &[String], focused: Option
             None => same(&r.icon, &p.link),
         }
     };
+    // The app id of an app's first window that has one.
+    let id_of = |windows: &[u64]| -> Option<String> {
+        windows
+            .iter()
+            .find_map(|h| running.iter().find(|r| r.hwnd == *h)?.app_id.clone())
+    };
     // A window goes to the first pin of its program only (Chrome and its profiles' pins
     // share chrome.exe).
     let mut taken: Vec<u64> = Vec::new();
@@ -210,6 +219,7 @@ pub fn apps(pins: &[Pin], running: &[Running], order: &[String], focused: Option
                 icon: p.link.clone(),
                 link: Some(p.link.clone()),
                 focused: focused.is_some_and(|f| windows.contains(&f)),
+                app_id: p.app_id.clone().or_else(|| id_of(&windows)),
                 windows,
             }
         })
@@ -229,6 +239,7 @@ pub fn apps(pins: &[Pin], running: &[Running], order: &[String], focused: Option
             icon,
             link: None,
             focused: focused.is_some_and(|f| windows.contains(&f)),
+            app_id: id_of(&windows),
             windows,
         });
     }
@@ -310,7 +321,7 @@ pub fn pinned(pins: &[Pin], app: &App) -> Vec<Pin> {
     let mut out = pins.to_vec();
     if app.link.is_none() {
         out.push(Pin {
-            app_id: None,
+            app_id: app.app_id.clone(),
             link: app.source.clone(),
             exe: Some(app.source.clone()),
         });
@@ -465,6 +476,7 @@ mod tests {
             link: link.map(Into::into),
             windows,
             focused: false,
+            app_id: None,
         }
     }
 
@@ -792,5 +804,30 @@ mod tests {
         let windows: Vec<Vec<u64>> = list.iter().map(|a| a.windows.clone()).collect();
         assert_eq!(windows, [vec![1], vec![2]]);
         assert_eq!(list[1].source, CHROME);
+    }
+
+    /// Pinned from its window, a program keeps the id its windows go by, in the pins file
+    /// too: its menu finds its jump list with no window open (found on the user's
+    /// machine: Chrome pinned from a window showed no jump list once closed).
+    #[test]
+    fn a_program_pinned_from_its_window_keeps_its_app_id() {
+        let running = vec![Running {
+            app_id: Some("Chrome".into()),
+            ..run(4, CHROME)
+        }];
+        let order = vec![CHROME.to_string()];
+        let list = apps(&[], &running, &order, None);
+        assert_eq!(list[0].app_id.as_deref(), Some("Chrome"));
+        let pins = pinned(&[], &list[0]);
+        assert_eq!(pins[0].app_id.as_deref(), Some("Chrome"));
+        let text = serde_json::to_string(&pins).unwrap();
+        let back: Vec<Pin> = serde_json::from_str(&text).unwrap();
+        assert_eq!(back, pins);
+        // Closed, its pin still says it.
+        let list = apps(&pins, &[], &order, None);
+        assert_eq!(list[0].app_id.as_deref(), Some("Chrome"));
+        // An old pins file without ids still reads.
+        let old: Vec<Pin> = serde_json::from_str(r#"[{"link":"a.lnk","exe":null}]"#).unwrap();
+        assert_eq!(old[0].app_id, None);
     }
 }
