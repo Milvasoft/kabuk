@@ -8,6 +8,9 @@ No open decisions (the user decided D39, D43, D44 and the still pictures' drift 
 
 ## Decided and proposed
 
+### D64 · Theme files to share — Decided by the user (2026-10-15)
+Suggested as a feature (themes shared grow a community) and asked for by the user: Settings › Appearance exports the look's settings to a `.kabuktheme` file (TOML: `[kabuk-theme] format = 1, name`, then `[theme.…]` with the look, mode, accent, text size, cursors, the bar's place, height, background and colour, the gap, a gallery wallpaper and screen saver and the wallpaper's brightness) and imports one. Only those settings are read from a file (`kabuk_core::theme_file::KEYS`): a theme from someone else never changes shortcuts, rules, programs to run or anything else. A picture of the user's or a wallpaper created on this machine stays home. The configuration must still be valid after the import, else nothing changes (a theme from a newer Kabuk may name a look this one lacks).
+
 ### D63 · Window rules from the app's menu — Decided by the user (2026-10-15)
 Suggested as a feature (a rule made where the window is, not typed in) and asked for by the user: a program's menu on the bar offers "always open floating" and "always open on workspace n" (the workspace its window is on now), each saying when it is on and taking it off again. They are the program's own rule in `[[rules.rule]]` (its file name alone, no other matcher), made, changed or removed once it says nothing, in the configuration file as the settings write it; the settings' rules page lists it, and Kabuk opens the program's next windows by it.
 

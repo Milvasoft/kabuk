@@ -29,6 +29,11 @@
 //! - `{"op":"app-grid-show","open":…}` and `{"op":"app-grid-reset"}` → `state`: an app
 //!   hidden from the app grid shown again, and the grid's order back to alphabetical
 //!   (`kabuk_core::app_grid`; the shell reads the arrangement each time the grid opens).
+//! - `{"op":"theme-export"}` and `{"op":"theme-import"}` (DECISIONS D64): Windows' own
+//!   dialog asks where (a test passes `"path"` instead); the export answers
+//!   `{"op":"theme","done":"exported","path":…}`, the import a fresh `state` with
+//!   `"theme_imported"` (the theme's name), either `{"op":"theme","done":"cancelled"}`
+//!   or `{"op":"theme","done":"failed"}`.
 //! - `gen-…`: the Create tab ([`crate::create`]).
 
 use std::path::PathBuf;
@@ -137,6 +142,8 @@ impl Bridge {
                 self.arrange_app_grid(|a| a.show(open))
             }
             "app-grid-reset" => self.arrange_app_grid(Arrangement::reset_order),
+            "theme-export" => self.export_theme(m.get("path").and_then(Value::as_str)),
+            "theme-import" => self.import_theme(m.get("path").and_then(Value::as_str)),
             "capture-keys" => self.capture_keys(m.get("on").and_then(Value::as_bool).unwrap_or(false)),
             "pick" => {
                 let what = m.get("what").and_then(Value::as_str)?;
@@ -168,6 +175,86 @@ impl Bridge {
             Err(e) => {
                 tracing::warn!(path, value = %value, error = %e, "setting refused");
                 json!({ "op": "refused", "path": path })
+            }
+        }
+    }
+
+    /// The look's settings into a theme file (DECISIONS D64), at `path` or where the user
+    /// says.
+    fn export_theme(&self, path: Option<&str>) -> Value {
+        use kabuk_core::theme_file::{export, EXTENSION};
+        let cfg = self.config();
+        let i18n = kabuk_win::system::i18n(Some(&cfg));
+        let name = i18n.tr(&format!("looks-{}", cfg.appearance.look.code()));
+        let target = match path {
+            Some(p) => Some(PathBuf::from(p)),
+            None => kabuk_win::shellitems::pick_save(
+                &i18n.tr("th-files"),
+                &format!("*.{EXTENSION}"),
+                EXTENSION,
+                &name,
+                &i18n.tr("th-export"),
+            ),
+        };
+        let Some(target) = target else {
+            return json!({ "op": "theme", "done": "cancelled" });
+        };
+        let text = export(&serde_json::to_value(&cfg).unwrap_or(Value::Null), &name);
+        match kabuk_core::fsutil::write_atomic(&target, text.as_bytes()) {
+            Ok(()) => {
+                tracing::info!(path = %target.display(), "theme exported");
+                json!({ "op": "theme", "done": "exported", "path": target.display().to_string() })
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "theme not exported");
+                json!({ "op": "theme", "done": "failed" })
+            }
+        }
+    }
+
+    /// A theme file's settings into the configuration, at `path` or where the user says;
+    /// only the look's settings are read from it (DECISIONS D64).
+    fn import_theme(&self, path: Option<&str>) -> Value {
+        use kabuk_core::theme_file::{import, EXTENSION};
+        let cfg = self.config();
+        let i18n = kabuk_win::system::i18n(Some(&cfg));
+        let source = match path {
+            Some(p) => Some(PathBuf::from(p)),
+            None => kabuk_win::shellitems::pick(
+                kabuk_win::shellitems::Pick::File {
+                    kind: &i18n.tr("th-files"),
+                    patterns: &format!("*.{EXTENSION}"),
+                },
+                &i18n.tr("th-import"),
+            ),
+        };
+        let Some(source) = source else {
+            return json!({ "op": "theme", "done": "cancelled" });
+        };
+        let applied = std::fs::read_to_string(&source)
+            .map_err(|e| e.to_string())
+            .and_then(|text| import(&text).map_err(|e| e.to_string()))
+            .and_then(|(name, sets)| {
+                let mut text = self.read();
+                for (path, value) in &sets {
+                    text = config::edit::set(&text, path, value).map_err(|e| e.to_string())?;
+                }
+                // The whole file must still be valid (a theme from a newer Kabuk may
+                // name a look this one lacks).
+                config::parse(&text).map_err(|e| format!("{e:?}"))?;
+                kabuk_core::fsutil::write_atomic(&self.config_file, text.as_bytes()).map_err(|e| e.to_string())?;
+                Ok(name)
+            });
+        match applied {
+            Ok(name) => {
+                tracing::info!(path = %source.display(), %name, "theme imported");
+                let mut state = self.state();
+                state["theme_imported"] = json!(name);
+                state
+            }
+            Err(e) => {
+                tracing::warn!(path = %source.display(), error = %e, "theme not imported");
+                json!({ "op": "theme", "done": "failed" })
             }
         }
     }
@@ -607,5 +694,73 @@ mod tests {
             ["latest", "newer", "failed"].contains(&later["state"].as_str().unwrap()),
             "{later}"
         );
+    }
+
+    /// DECISIONS D64: a theme goes out to a file and into another configuration; a
+    /// file asking for more than the look's settings changes only those; a file that is
+    /// no theme leaves the configuration as it was.
+    #[test]
+    fn a_theme_goes_out_and_comes_in() {
+        let from = tempfile::tempdir().unwrap();
+        let b = bridge(
+            &from,
+            Some(
+                "schema = 1
+[appearance]
+look = \"devre\"
+accent = \"#ff8f6b\"
+",
+            ),
+        );
+        let file = from.path().join("mine.kabuktheme");
+        let out = reply(&b, json!({ "op": "theme-export", "path": file.display().to_string() }));
+        assert_eq!(out["done"], "exported", "{out}");
+        assert!(std::fs::read_to_string(&file).unwrap().contains("devre"));
+
+        let to = tempfile::tempdir().unwrap();
+        let b = bridge(
+            &to,
+            Some(
+                "schema = 1
+# the user's own comment
+[launcher.sources]
+recent = true
+",
+            ),
+        );
+        let state = reply(&b, json!({ "op": "theme-import", "path": file.display().to_string() }));
+        assert_eq!(state["op"], "state");
+        assert!(state["theme_imported"].is_string(), "{}", state["theme_imported"]);
+        let text = std::fs::read_to_string(to.path().join("kabuk.toml")).unwrap();
+        assert!(text.contains("look = \"devre\"") && text.contains("#ff8f6b"), "{text}");
+        assert!(
+            text.contains("# the user's own comment") && text.contains("recent = true"),
+            "{text}"
+        );
+
+        // A theme asking to run a program: only its look is taken.
+        let sly = to.path().join("sly.kabuktheme");
+        std::fs::write(
+            &sly,
+            "[kabuk-theme]
+format = 1
+name = \"sly\"
+[theme.appearance]
+look = \"ada\"
+[theme.dropdown]
+command = \"evil.exe\"
+",
+        )
+        .unwrap();
+        reply(&b, json!({ "op": "theme-import", "path": sly.display().to_string() }));
+        let text = std::fs::read_to_string(to.path().join("kabuk.toml")).unwrap();
+        assert!(text.contains("look = \"ada\"") && !text.contains("evil.exe"), "{text}");
+
+        // Not a theme: refused, the file unchanged.
+        let junk = to.path().join("junk.kabuktheme");
+        std::fs::write(&junk, "hello").unwrap();
+        let refused = reply(&b, json!({ "op": "theme-import", "path": junk.display().to_string() }));
+        assert_eq!(refused["done"], "failed");
+        assert_eq!(std::fs::read_to_string(to.path().join("kabuk.toml")).unwrap(), text);
     }
 }

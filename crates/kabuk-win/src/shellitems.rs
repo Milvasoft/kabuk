@@ -273,6 +273,41 @@ pub fn pick(what: Pick, title: &str) -> Option<PathBuf> {
     }
 }
 
+/// Asks the user where to save a file with Windows' own dialog: `kind` names the files
+/// `patterns` matches, `name` is offered, `extension` added when the user types none;
+/// `None` when cancelled.
+pub fn pick_save(kind: &str, patterns: &str, extension: &str, name: &str, title: &str) -> Option<PathBuf> {
+    use windows::core::PCWSTR;
+    use windows::Win32::UI::Input::KeyboardAndMouse::GetActiveWindow;
+    use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
+    use windows::Win32::UI::Shell::{
+        FileSaveDialog, IFileSaveDialog, FOS_FORCEFILESYSTEM, FOS_OVERWRITEPROMPT, SIGDN_FILESYSPATH,
+    };
+    // SAFETY: (whole block) the shell's dialog object; the strings outlive the calls
+    // that copy them; the result's name is freed after it is copied.
+    unsafe {
+        let dialog: IFileSaveDialog = CoCreateInstance(&FileSaveDialog, None, CLSCTX_INPROC_SERVER).ok()?;
+        let options = dialog.GetOptions().ok()? | FOS_FORCEFILESYSTEM | FOS_OVERWRITEPROMPT;
+        dialog.SetOptions(options).ok()?;
+        let (kind, patterns) = (HSTRING::from(kind), HSTRING::from(patterns));
+        dialog
+            .SetFileTypes(&[COMDLG_FILTERSPEC {
+                pszName: PCWSTR(kind.as_ptr()),
+                pszSpec: PCWSTR(patterns.as_ptr()),
+            }])
+            .ok()?;
+        dialog.SetDefaultExtension(&HSTRING::from(extension)).ok()?;
+        dialog.SetFileName(&HSTRING::from(name)).ok()?;
+        dialog.SetTitle(&HSTRING::from(title)).ok()?;
+        let owner = GetActiveWindow();
+        dialog.Show((!owner.is_invalid()).then_some(owner)).ok()?;
+        let result = dialog.GetResult().ok()?.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+        let path = result.to_string().ok();
+        CoTaskMemFree(Some(result.0 as *const core::ffi::c_void));
+        path.map(PathBuf::from)
+    }
+}
+
 /// Opens a path, URL or `shell:` name as Explorer would (the default program, the
 /// browser, the app).
 pub fn open(target: &str) -> std::io::Result<()> {

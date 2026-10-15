@@ -163,7 +163,15 @@
       ${cfg().appearance.cursors === "custom" ? cursorPicker() : ""}
       <div class="set-grp"><span class="gl">${t("setSysTheme")}</span>
       ${tgl("system_theme.colors", t("setSysColors"), cfg().appearance.mode === "system" ? t("setSysColorsFollow") : t("setSysColorsH"))}</div>
-      ${S.mode === "light" ? `<div class="note">${t("lightNote")}</div>` : ""}`;
+      ${S.mode === "light" ? `<div class="note">${t("lightNote")}</div>` : ""}
+      ${themeFileGroup()}`;
+  }
+
+  // Theme files (DECISIONS D64): the look's settings out to a file to share, and in.
+  function themeFileGroup() {
+    return `<div class="set-grp"><span class="gl">${t("th")}. ${t("thH")}</span>
+      <div style="display:flex;gap:8px"><button class="set-btn ghost" type="button" data-theme-file="export">${t("thExport")}</button><button class="set-btn ghost" type="button" data-theme-file="import">${t("thImport")}</button></div>
+      ${ui.themeMsg ? `<div class="note" role="status">${escapeHtml(ui.themeMsg)}</div>` : ""}</div>`;
   }
 
   /* Cursors picked apart from the look (DECISIONS D41): a style and a colour, each card
@@ -652,6 +660,7 @@
     }
     if (on("[data-genstop]")) { post({ op: "gen-cancel" }); return; }
     if (on("[data-genapply]")) { post({ op: "gen-apply" }); return; }
+    if ((el = on("[data-theme-file]"))) { ui.themeMsg = ""; post({ op: "theme-" + el.dataset.themeFile }); return; }
     if ((el = on("[data-grid-show]"))) { post({ op: "app-grid-show", open: el.dataset.gridShow }); return; }
     if ((el = on("[data-grid-reset]"))) { post({ op: "app-grid-reset" }); return; }
     if ((el = on("[data-pick]"))) { ui.pending = el.dataset.pick === "image" ? "wall" : "folder"; post({ op: "pick", what: el.dataset.pick }); return; }
@@ -733,6 +742,7 @@
     switch (m.op) {
       case "state":
         S = m;
+        if (m.theme_imported != null) ui.themeMsg = tv("thImported", m.theme_imported);
         A = A || window.kabukDesignArt(t, escapeHtml);
         ui.refused = null;
         if (m.applied_wall) {
@@ -790,6 +800,10 @@
       case "gallery-preview":
         ui.previews[m.key] = m.url;
         document.querySelectorAll("img[data-gprev]").forEach((img) => { if (img.dataset.gprev === m.key) img.src = m.url; });
+        break;
+      case "theme":
+        ui.themeMsg = m.done === "exported" ? tv("thExported", m.path) : m.done === "failed" ? t("thFailed") : "";
+        render();
         break;
       case "picked":
         if (!m.path) break;

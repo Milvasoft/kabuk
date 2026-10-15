@@ -22,6 +22,7 @@ pub mod paths;
 pub mod restart;
 pub mod rules;
 pub mod state;
+pub mod theme_file;
 pub mod tray;
 pub mod update;
 pub mod wallpaper;
