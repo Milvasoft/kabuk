@@ -109,6 +109,8 @@ pub struct Grid {
     page: usize,
     /// A place in `shown`, once an arrow key was pressed or something was typed.
     selected: Option<usize>,
+    /// The search field was clicked or typed into: it shows that it takes the keys.
+    searching: bool,
 }
 
 impl Grid {
@@ -124,6 +126,7 @@ impl Grid {
             shape,
             page: 0,
             selected: None,
+            searching: false,
         }
     }
 
@@ -161,14 +164,53 @@ impl Grid {
         (start..end).map(|at| (at, self.shown[at])).collect()
     }
 
+    /// Every app shown, by what opening it runs, in order: the list the user's moves
+    /// rearrange.
+    pub fn shown_opens(&self) -> Vec<String> {
+        self.shown
+            .iter()
+            .filter_map(|i| self.entries.get(*i).map(|e| e.open.clone()))
+            .collect()
+    }
+
+    /// Page `p` while the app at place `from` is dragged to place `to`: the others close
+    /// up around the gap it will drop into (`None`), each with its place and entry.
+    pub fn on_page_dragging(&self, p: usize, from: usize, to: usize) -> Vec<Option<(usize, usize)>> {
+        let mut places: Vec<Option<(usize, usize)>> = self.shown.iter().copied().enumerate().map(Some).collect();
+        if from < places.len() {
+            places.remove(from);
+            places.insert(to.min(places.len()), None);
+        }
+        let per = self.shape.per_page();
+        places.into_iter().skip(p * per).take(per).collect()
+    }
+
+    /// The place cell `local` of the page on screen stands for, at most the last one.
+    pub fn place_of(&self, local: usize) -> usize {
+        (self.page * self.shape.per_page() + local).min(self.shown.len().saturating_sub(1))
+    }
+
     pub fn selected(&self) -> Option<usize> {
         self.selected
     }
 
     /// Adds typed text to the search.
     pub fn type_text(&mut self, text: &str) {
+        self.searching = true;
         self.query.push_str(text);
         self.refilter();
+    }
+
+    /// The search field was clicked: it shows it takes the keys (found by the user: a
+    /// click on it did nothing one could see, though typing worked). False when it did
+    /// already.
+    pub fn focus_search(&mut self) -> bool {
+        !std::mem::replace(&mut self.searching, true)
+    }
+
+    /// Whether the search field shows it takes the keys.
+    pub fn searching(&self) -> bool {
+        self.searching
     }
 
     pub fn backspace(&mut self) {
@@ -263,6 +305,11 @@ impl Grid {
     }
 
     /// The entry at place `at` among those shown.
+    /// The entry (index into the list) at place `at` of those shown.
+    pub fn index_at(&self, at: usize) -> Option<usize> {
+        self.shown.get(at).copied()
+    }
+
     pub fn shown_at(&self, at: usize) -> Option<&Entry> {
         self.shown.get(at).and_then(|i| self.entries.get(*i))
     }
@@ -367,6 +414,51 @@ mod tests {
     }
 
     const SHAPE: Shape = Shape { columns: 3, rows: 2 };
+
+    /// The user moving an app: its place leaves a gap where it will drop, the others close
+    /// up around it, on its page and the next; the cells past the last app stand for the
+    /// last place.
+    #[test]
+    fn a_dragged_app_leaves_a_gap_where_it_will_drop() {
+        let g = grid(8, SHAPE);
+        assert_eq!(g.shown_opens()[..3], ["open 0", "open 1", "open 2"].map(String::from));
+        let page = |p, from, to| -> Vec<Option<usize>> {
+            g.on_page_dragging(p, from, to)
+                .into_iter()
+                .map(|s| s.map(|(_, i)| i))
+                .collect()
+        };
+        // App 1 dragged to place 4: 0 2 3 4 _ 5 | 6 7.
+        assert_eq!(page(0, 1, 4), [Some(0), Some(2), Some(3), Some(4), None, Some(5)]);
+        assert_eq!(page(1, 1, 4), [Some(6), Some(7)]);
+        // App 7 dragged to the front.
+        assert_eq!(page(0, 7, 0), [None, Some(0), Some(1), Some(2), Some(3), Some(4)]);
+        assert_eq!(page(1, 7, 0), [Some(5), Some(6)]);
+        // Each cell keeps its place in the list.
+        assert_eq!(g.on_page_dragging(0, 1, 4)[1], Some((2, 2)));
+        assert_eq!(g.place_of(2), 2);
+        assert_eq!(g.place_of(40), 7, "past the last app");
+        let mut g = g;
+        g.go(1);
+        assert_eq!(g.place_of(1), 7);
+        assert_eq!(g.place_of(0), 6);
+    }
+
+    /// Found by the user: a click on the search field did nothing one could see. A click
+    /// or typing marks it as taking the keys; clearing it keeps it so.
+    #[test]
+    fn the_search_field_takes_the_keys_once_clicked_or_typed_into() {
+        let mut g = grid(4, SHAPE);
+        assert!(!g.searching());
+        assert!(g.focus_search());
+        assert!(g.searching());
+        assert!(!g.focus_search(), "already");
+        let mut g = grid(4, SHAPE);
+        g.type_text("a");
+        assert!(g.searching());
+        assert!(g.clear());
+        assert!(g.searching(), "cleared, still the field's");
+    }
 
     #[test]
     fn only_apps_are_listed() {

@@ -450,7 +450,18 @@
       <div class="set-grp">${row(t("lpKey"), t("lpKeyH"), chordEditor("shortcuts.launcher"))}</div>
       <div class="set-grp"><span class="gl">${t("lpSrc")}. ${t("lpSrcH")}</span><div class="chips" role="group" aria-label="${t("lpSrc")}">${chips}</div></div>
       <div class="set-grp"><span class="gl">${t("lpDirs")}. ${t("lpDirsH")}</span>${folders}
-        <div><button class="set-btn ghost" type="button" data-pick="folder">${t("setFolderAdd")}</button></div></div>`;
+        <div><button class="set-btn ghost" type="button" data-pick="folder">${t("setFolderAdd")}</button></div></div>
+      ${appGridGroup()}`;
+  }
+
+  // The all-apps grid's arrangement (asked for by the user): the apps hidden on the grid,
+  // each shown again by a click, and its order back to alphabetical.
+  function appGridGroup() {
+    const g = S.app_grid || { hidden: [], ordered: false };
+    const hidden = g.hidden.map((h) => `<div class="set-row"><span><b>${escapeHtml(h.name)}</b></span><button type="button" class="linkish" data-grid-show="${escapeHtml(h.open)}">${t("lpGridShow")}</button></div>`).join("")
+      || `<div class="set-row"><span>${t("lpGridNone")}</span></div>`;
+    return `<div class="set-grp"><span class="gl">${t("lpGrid")}. ${t("lpGridH")}</span>${hidden}
+        <div><button class="set-btn ghost" type="button" data-grid-reset ${g.ordered ? "" : "disabled"}>${t("lpGridReset")}</button></div></div>`;
   }
 
   const KEYS = ["launcher", "workspace", "move_to_workspace", "focus_left", "focus_down", "focus_up", "focus_right", "move_left", "move_down", "move_up", "move_right", "toggle_float", "close_window", "cycle_layout", "toggle_scratchpad", "to_scratchpad", "toggle_group", "next_tab", "overview", "start_saver", "app_grid", "drag"];
@@ -615,6 +626,8 @@
     }
     if (on("[data-genstop]")) { post({ op: "gen-cancel" }); return; }
     if (on("[data-genapply]")) { post({ op: "gen-apply" }); return; }
+    if ((el = on("[data-grid-show]"))) { post({ op: "app-grid-show", open: el.dataset.gridShow }); return; }
+    if ((el = on("[data-grid-reset]"))) { post({ op: "app-grid-reset" }); return; }
     if ((el = on("[data-pick]"))) { ui.pending = el.dataset.pick === "image" ? "wall" : "folder"; post({ op: "pick", what: el.dataset.pick }); return; }
     if (on("[data-preview-saver]")) { post({ op: "preview-saver" }); return; }
     if (on("[data-quit]")) { post({ op: "quit" }); return; }

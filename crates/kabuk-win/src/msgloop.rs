@@ -494,6 +494,17 @@ pub fn ctrl_held() -> bool {
     state < 0
 }
 
+/// Shows the text cursor (I-beam) until the pointer moves on, in answer to
+/// `WM_SETCURSOR` over a text field.
+pub fn show_text_cursor() {
+    use windows::Win32::UI::WindowsAndMessaging::{LoadCursorW, SetCursor, IDC_IBEAM};
+    // SAFETY: a shared system cursor, never destroyed.
+    if let Ok(c) = unsafe { LoadCursorW(None, IDC_IBEAM) } {
+        // SAFETY: as above; this thread's cursor.
+        unsafe { SetCursor(Some(c)) };
+    }
+}
+
 /// Posts a message to a window of any process on this desktop.
 pub fn post_message(to: Hwnd, msg: Msg) -> std::io::Result<()> {
     // SAFETY: PostMessageW only queues the message; invalid handles fail cleanly.
@@ -946,6 +957,9 @@ pub mod msg {
     pub const MBUTTONDOWN: u32 = w::WM_MBUTTONDOWN;
     pub const MBUTTONUP: u32 = w::WM_MBUTTONUP;
     pub const CHAR: u32 = w::WM_CHAR;
+    /// The window may choose the cursor: [`super::show_text_cursor`] and `Some(1)`, or
+    /// `None` for the class's arrow.
+    pub const SETCURSOR: u32 = w::WM_SETCURSOR;
     /// `WM_ACTIVATE`'s `wparam` low word when the window loses activation.
     pub const WA_INACTIVE: usize = w::WA_INACTIVE as usize;
     pub const MOUSEACTIVATE: u32 = w::WM_MOUSEACTIVATE;

@@ -1,6 +1,7 @@
 //! Platform-independent core of Kabuk: configuration, persisted state, clock,
 //! restart policy, instance naming and command lines. No Windows dependencies.
 
+pub mod app_grid;
 pub mod cli;
 pub mod clock;
 pub mod config;

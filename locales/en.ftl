@@ -108,6 +108,13 @@ app-tasks = Tasks
 
 grid-search = Search
 grid-empty = No app matches
+grid-done = Done
+lp-grid = All apps grid
+lp-grid-h = Apps you hid with the − badge; hold an app on the grid, or right-click it, to move or hide apps
+lp-grid-none = No hidden apps
+lp-grid-show = Show
+lp-grid-reset = Back to alphabetical order
+grid-edit-h = Drag an app to move it · − hides it · Settings › Launcher shows it again
 
 ## Gallery (DECISIONS D58): each design's name and words
 

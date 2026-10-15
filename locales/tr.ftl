@@ -107,6 +107,13 @@ app-tasks = Görevler
 
 grid-search = Ara
 grid-empty = Eşleşen uygulama yok
+grid-done = Bitti
+lp-grid = Tüm uygulamalar ızgarası
+lp-grid-h = − ile gizlediğin uygulamalar; uygulamaları taşımak ya da gizlemek için ızgarada birine basılı tut ya da sağ tıkla
+lp-grid-none = Gizlenmiş uygulama yok
+lp-grid-show = Göster
+lp-grid-reset = Alfabetik sıraya dön
+grid-edit-h = Taşımak için sürükle · − gizler · Ayarlar › Başlatıcı geri getirir
 
 ## Galeri (DECISIONS D58): her tasarımın adı ve sözleri
 

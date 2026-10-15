@@ -26,11 +26,15 @@
 //! - `{"op":"gallery-previews"}` → `{"op":"gallery-previews","started":true}`, then from a
 //!   thread one `{"op":"gallery-preview","key":…,"url":…}` per design of the gallery
 //!   (DECISIONS D58; [`crate::gallery`]).
+//! - `{"op":"app-grid-show","open":…}` and `{"op":"app-grid-reset"}` → `state`: an app
+//!   hidden from the app grid shown again, and the grid's order back to alphabetical
+//!   (`kabuk_core::app_grid`; the shell reads the arrangement each time the grid opens).
 //! - `gen-…`: the Create tab ([`crate::create`]).
 
 use std::path::PathBuf;
 use std::time::Duration;
 
+use kabuk_core::app_grid::Arrangement;
 use kabuk_core::config::{self, Config, Mode};
 use kabuk_core::instance::Instance;
 use kabuk_i18n::Lang;
@@ -128,6 +132,11 @@ impl Bridge {
                 let page = m.get("page").and_then(Value::as_str)?;
                 open_release_page(page)?
             }
+            "app-grid-show" => {
+                let open = m.get("open").and_then(Value::as_str)?;
+                self.arrange_app_grid(|a| a.show(open))
+            }
+            "app-grid-reset" => self.arrange_app_grid(Arrangement::reset_order),
             "capture-keys" => self.capture_keys(m.get("on").and_then(Value::as_bool).unwrap_or(false)),
             "pick" => {
                 let what = m.get("what").and_then(Value::as_str)?;
@@ -163,8 +172,35 @@ impl Bridge {
         }
     }
 
+    /// The app grid's arrangement in the state folder; none without its file.
+    fn app_grid(&self) -> Arrangement {
+        std::fs::read_to_string(self.state_dir.join(kabuk_core::app_grid::FILE))
+            .ok()
+            .and_then(|t| Arrangement::read(&t))
+            .unwrap_or_default()
+    }
+
+    /// Changes the app grid's arrangement with `change` and writes it when it changed;
+    /// a fresh `state` either way.
+    fn arrange_app_grid(&self, change: impl FnOnce(&mut Arrangement) -> bool) -> Value {
+        let mut a = self.app_grid();
+        if change(&mut a) {
+            let file = self.state_dir.join(kabuk_core::app_grid::FILE);
+            match kabuk_core::fsutil::write_atomic(&file, a.to_json().as_bytes()) {
+                Ok(()) => tracing::info!(
+                    hidden = a.hidden.len(),
+                    ordered = !a.order.is_empty(),
+                    "app grid arrangement saved"
+                ),
+                Err(e) => tracing::error!(error = %e, "app grid arrangement not written"),
+            }
+        }
+        self.state()
+    }
+
     pub fn state(&self) -> Value {
         let cfg = self.config();
+        let grid = self.app_grid();
         let i18n = kabuk_win::system::i18n(Some(&cfg));
         let strings: Map<String, Value> = i18n
             .table(VALUE_MARK)
@@ -206,6 +242,7 @@ impl Bridge {
             "info": self.info()["info"].clone(),
             "create": self.create_state(),
             "gallery": crate::gallery::list(),
+            "app_grid": { "hidden": grid.hidden, "ordered": !grid.order.is_empty() },
             "version": env!("CARGO_PKG_VERSION"),
             // Each language's own name, as the language choice shows them.
             "lang_names": {

@@ -162,6 +162,10 @@ mod timer {
     pub const APP_GRID_SLIDE: usize = 27;
     /// The app grid's first icons are loaded ahead.
     pub const APP_GRID_AHEAD: usize = 28;
+    /// A press on an app of the grid was held: editing begins.
+    pub const APP_GRID_HOLD: usize = 29;
+    /// An app dragged to a side edge of the grid stayed there: the page turns.
+    pub const APP_GRID_EDGE: usize = 30;
 }
 
 /// An auto-hiding bar (SPEC §2.1): how much of it stays on screen for the mouse to reach
@@ -1168,6 +1172,8 @@ impl Shared {
                     timer::SAVER_KEYS => self.saver_keys_due(),
                     timer::APP_GRID_SLIDE => self.app_grid_slide_over(),
                     timer::APP_GRID_AHEAD => self.app_grid_ahead(),
+                    timer::APP_GRID_HOLD => self.app_grid_held(),
+                    timer::APP_GRID_EDGE => self.app_grid_edge_due(),
                     timer::TRAY_AGAIN => {
                         self.kill(timer::TRAY_AGAIN);
                         let now = std::time::Instant::now();

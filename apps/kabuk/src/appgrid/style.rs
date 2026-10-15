@@ -38,6 +38,27 @@ pub const SEARCH_ICON: f32 = 15.0;
 pub const SEARCH_TEXT: f32 = 14.0;
 pub const SEARCH_PAD: f32 = 12.0;
 pub const SEARCH_GAP: f32 = 8.0;
+/// Once it takes the keys: its frame in the accent colour, this wide, and a caret this
+/// wide, as tall as a line of its text (the launcher's).
+pub const SEARCH_ACTIVE_BORDER: f32 = 1.5;
+pub const CARET: f32 = 1.5;
+pub const CARET_LINE: f32 = 1.25;
+
+/// Editing the grid (moving and hiding apps): a press held this long on an app begins it
+/// (milliseconds), as a right click does; each app shows a badge this big that hides it,
+/// over its icon's top-left corner by this share of the badge; the dragged app follows
+/// the mouse; held this close to the side edges (DIPs) for this long (milliseconds), it
+/// turns the page. Done stands where the search field is, this wide, with the words that
+/// tell what to do under it.
+pub const HOLD_MS: u64 = 500;
+pub const BADGE: f32 = 24.0;
+pub const BADGE_OVER: f32 = 0.3;
+pub const BADGE_TEXT: f32 = 16.0;
+pub const EDGE_TURN: f32 = 60.0;
+pub const EDGE_TURN_MS: u64 = 600;
+pub const DONE_WIDTH: f32 = 120.0;
+pub const EDIT_HINT_GAP: f32 = 10.0;
+pub const EDIT_HINT_TEXT: f32 = 13.0;
 
 /// The page dots: their size, the space between them, the room around each that a
 /// click finds, and how far above the bottom edge they are.

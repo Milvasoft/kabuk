@@ -19,7 +19,22 @@ pub mod hit {
     pub const APP: &str = "grid-app";
     pub const DOT: &str = "grid-dot";
     pub const SEARCH: &str = "grid-search";
+    /// Editing: an app's badge that hides it (the value is its place), and Done.
+    pub const HIDE: &str = "grid-hide";
+    pub const DONE: &str = "grid-done";
 }
+
+/// An app being moved: from its place to the place it will drop at, and the mouse (DIPs
+/// on the monitor).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Drag {
+    pub from: usize,
+    pub to: usize,
+    pub at: kabuk_ui::geom::Point,
+}
+
+/// The sign on the badge that hides an app.
+const MINUS: &str = "−";
 
 /// What a drawing needs besides the grid.
 pub struct Frame<'a> {
@@ -31,6 +46,10 @@ pub struct Frame<'a> {
     pub pictures: &'a HashMap<String, u64>,
     /// The blurred wallpaper's picture; `None` draws the look's desk colour.
     pub backdrop: Option<u64>,
+    /// The user edits the grid: each app shows a badge that hides it, Done stands where
+    /// the search field is.
+    pub editing: bool,
+    pub drag: Option<Drag>,
 }
 
 fn text(words: String, color: Role, size: f32, max_width: Option<f32>) -> Node {
@@ -65,12 +84,28 @@ pub fn cell(grid: &Grid, local: usize, size: Size) -> Rect {
     Rect::new(style::SIDE + col as f32 * w, style::TOP + row as f32 * h, w, h)
 }
 
-/// An app's icon and name; framed when the keyboard selected it.
+/// The cell of the page on screen under `p` (DIPs on the monitor), counted on the page;
+/// a point outside the cells gives the nearest one.
+pub fn cell_at(grid: &Grid, p: kabuk_ui::geom::Point, size: Size) -> usize {
+    let shape = grid.shape();
+    let w = (size.w - 2.0 * style::SIDE) / shape.columns as f32;
+    let h = (size.h - style::TOP - style::BOTTOM) / shape.rows as f32;
+    let along =
+        |v: f32, start: f32, step: f32, n: usize| ((v - start) / step).floor().clamp(0.0, (n - 1) as f32) as usize;
+    let (col, row) = (
+        along(p.x, style::SIDE, w, shape.columns),
+        along(p.y, style::TOP, h, shape.rows),
+    );
+    row * shape.columns + col
+}
+
+/// An app's icon and name; framed when the keyboard selected it. While editing, a badge
+/// over its icon's corner hides it.
 fn app(grid: &Grid, at_shown: usize, index: usize, f: &Frame) -> Node {
     let Some(e) = grid.entry(index) else {
         return Node::spacer(0.0, 0.0);
     };
-    let icon = match f.pictures.get(&e.open) {
+    let picture = match f.pictures.get(&e.open) {
         Some(key) => Node::image(*key, style::ICON),
         None => Node::layer(vec![Node::icon("app", style::PLACEHOLDER_GLYPH, Role::White)])
             .size(Some(style::ICON), Some(style::ICON))
@@ -79,6 +114,22 @@ fn app(grid: &Grid, at_shown: usize, index: usize, f: &Frame) -> Node {
                 border: Some((Role::GlassLine, 1.0)),
                 radius: style::PLACEHOLDER_RADIUS,
             }),
+    };
+    let icon = if f.editing {
+        // A layer puts its children at its top, centred across: the badge goes left.
+        let over = style::BADGE * style::BADGE_OVER;
+        let badge = Node::layer(vec![text(MINUS.into(), Role::White, style::BADGE_TEXT, None)])
+            .size(Some(style::BADGE), Some(style::BADGE))
+            .paint(Paint {
+                fill: Role::Glass,
+                border: Some((Role::GlassLine, 1.0)),
+                radius: style::BADGE / 2.0,
+            })
+            .offset(-(style::ICON - style::BADGE) / 2.0 - over, -over)
+            .hit(hit::HIDE, u32::try_from(at_shown).unwrap_or(u32::MAX));
+        Node::layer(vec![picture, badge]).size(Some(style::ICON), Some(style::ICON))
+    } else {
+        picture
     };
     let label = text(
         e.name.clone(),
@@ -102,13 +153,28 @@ fn app(grid: &Grid, at_shown: usize, index: usize, f: &Frame) -> Node {
     }
 }
 
-/// Page `p` of the grid, the monitor's size; `None` an empty page (past the ends).
+/// Page `p` of the grid, the monitor's size; `None` an empty page (past the ends). While
+/// an app is dragged, the others close up around the gap it will drop into, and on the
+/// page on screen it follows the mouse.
 pub fn page(grid: &Grid, p: Option<usize>, f: &Frame) -> Node {
     let mut layers = vec![Node::spacer(f.size.w, f.size.h)];
-    if let Some(p) = p {
-        for (local, (at_shown, index)) in grid.on_page(p).into_iter().enumerate() {
-            let r = cell(grid, local, f.size);
-            layers.push(at(Node::layer(vec![app(grid, at_shown, index, f)]), r, f.size));
+    let Some(p) = p else {
+        return Node::layer(layers);
+    };
+    let cells: Vec<Option<(usize, usize)>> = match f.drag {
+        Some(d) => grid.on_page_dragging(p, d.from, d.to),
+        None => grid.on_page(p).into_iter().map(Some).collect(),
+    };
+    for (local, place) in cells.into_iter().enumerate() {
+        let Some((at_shown, index)) = place else { continue };
+        let r = cell(grid, local, f.size);
+        layers.push(at(Node::layer(vec![app(grid, at_shown, index, f)]), r, f.size));
+    }
+    if let Some(d) = f.drag.filter(|_| p == grid.page()) {
+        if let Some(index) = grid.index_at(d.from) {
+            let r = cell(grid, 0, f.size);
+            let moving = Rect::new(d.at.x - r.w / 2.0, d.at.y - r.h / 2.0, r.w, r.h);
+            layers.push(at(Node::layer(vec![app(grid, d.from, index, f)]), moving, f.size));
         }
     }
     Node::layer(layers)
@@ -119,27 +185,50 @@ pub fn strip(grid: &Grid, slots: [Option<usize>; 3], f: &Frame) -> Node {
     Node::row(slots.into_iter().map(|p| page(grid, p, f)).collect())
 }
 
-/// The search field: the typed words, or the placeholder.
+/// The search field: the typed words, or the placeholder. Once clicked or typed into it
+/// shows that it takes the keys: its frame in the accent colour and a caret.
 fn search(grid: &Grid, f: &Frame) -> Node {
-    let room = style::SEARCH.w - 2.0 * style::SEARCH_PAD - style::SEARCH_ICON - style::SEARCH_GAP;
+    let active = grid.searching();
+    let caret_w = if active { style::CARET } else { 0.0 };
+    let room = style::SEARCH.w - 2.0 * style::SEARCH_PAD - style::SEARCH_ICON - style::SEARCH_GAP - caret_w;
+    let size = style::SEARCH_TEXT * f.text_scale;
     let (words, color) = if grid.query().is_empty() {
         (f.i18n.tr("grid-search"), Role::Dim)
     } else {
         (grid.query().to_string(), Role::White)
     };
-    Node::row(vec![
-        Node::icon("search", style::SEARCH_ICON, Role::White),
-        text(words, color, style::SEARCH_TEXT * f.text_scale, Some(room)),
-    ])
-    .gap(style::SEARCH_GAP)
-    .align(Align::Center)
-    .padding(Insets::symmetric(style::SEARCH_PAD, 0.0))
-    .paint(Paint {
-        fill: Role::Glass,
-        border: Some((Role::GlassLine, 1.0)),
-        radius: style::SEARCH_RADIUS,
-    })
-    .hit(hit::SEARCH, 0)
+    let words = text(words, color, size, Some(room));
+    let typed = if active {
+        let caret = Node::spacer(style::CARET, size * style::CARET_LINE).paint(Paint {
+            fill: Role::Accent,
+            border: None,
+            radius: 0.0,
+        });
+        // The caret sits before the placeholder, as in a text box.
+        let row = if grid.query().is_empty() {
+            vec![caret, words]
+        } else {
+            vec![words, caret]
+        };
+        Node::row(row).align(Align::Center)
+    } else {
+        words
+    };
+    let border = if active {
+        (Role::Accent, style::SEARCH_ACTIVE_BORDER)
+    } else {
+        (Role::GlassLine, 1.0)
+    };
+    Node::row(vec![Node::icon("search", style::SEARCH_ICON, Role::White), typed])
+        .gap(style::SEARCH_GAP)
+        .align(Align::Center)
+        .padding(Insets::symmetric(style::SEARCH_PAD, 0.0))
+        .paint(Paint {
+            fill: Role::Glass,
+            border: Some(border),
+            radius: style::SEARCH_RADIUS,
+        })
+        .hit(hit::SEARCH, 0)
 }
 
 /// A dot per page, the shown one bright; none for a single page.
@@ -180,10 +269,41 @@ pub fn chrome(grid: &Grid, f: &Frame) -> Node {
         style::SEARCH.w,
         style::SEARCH.h,
     );
-    // In a layer of its own: placed by `at`, the field itself keeps its contents centred
-    // across (found by the user: its icon and words sat at its top).
-    let sized = search(grid, f).size(Some(field.w), Some(field.h));
-    layers.push(at(Node::layer(vec![sized]), field, f.size));
+    if f.editing {
+        // Done where the search field is, and what to do under it.
+        let done = Rect::new(
+            (f.size.w - style::DONE_WIDTH) / 2.0,
+            field.y,
+            style::DONE_WIDTH,
+            field.h,
+        );
+        let button = Node::layer(vec![text(
+            f.i18n.tr("grid-done"),
+            Role::OnAccent,
+            style::SEARCH_TEXT * f.text_scale,
+            None,
+        )])
+        .size(Some(done.w), Some(done.h))
+        .paint(Paint {
+            fill: Role::AccentFill,
+            border: None,
+            radius: style::SEARCH_RADIUS,
+        })
+        .hit(hit::DONE, 0);
+        layers.push(at(Node::layer(vec![button]), done, f.size));
+        let hint = text(
+            f.i18n.tr("grid-edit-h"),
+            Role::White,
+            style::EDIT_HINT_TEXT * f.text_scale,
+            None,
+        );
+        layers.push(hint.offset(0.0, field.y + field.h + style::EDIT_HINT_GAP));
+    } else {
+        // In a layer of its own: placed by `at`, the field itself keeps its contents
+        // centred across (found by the user: its icon and words sat at its top).
+        let sized = search(grid, f).size(Some(field.w), Some(field.h));
+        layers.push(at(Node::layer(vec![sized]), field, f.size));
+    }
     if let Some(d) = dots(grid) {
         layers.push(Node::column(vec![d]).align(Align::End).offset(0.0, -style::DOTS_BOTTOM));
     }
@@ -262,6 +382,8 @@ mod tests {
             text_scale: 1.0,
             pictures,
             backdrop,
+            editing: false,
+            drag: None,
         }
     }
 
@@ -393,5 +515,145 @@ mod tests {
         assert!(t.contains(&"zzz".to_string()) && t.contains(&i18n.tr("grid-empty")));
         assert!(hits(&l, hit::DOT).is_empty());
         assert!(matches!(&l.draws[0], Draw::Panel { paint, .. } if paint.fill == Role::Desk));
+    }
+
+    /// Found by the user: a click on the search field did nothing one could see. Before,
+    /// no caret and a plain frame; once clicked, the accent frame and a caret before the
+    /// placeholder; typed into, the caret after the words, all in the field's middle.
+    #[test]
+    fn the_search_field_shows_when_it_takes_the_keys() {
+        let i18n = I18n::new(Lang::En);
+        let none = HashMap::new();
+        let mut g = grid(0);
+        let field = |l: &Layout| {
+            l.draws
+                .iter()
+                .find_map(|d| match d {
+                    Draw::Panel { rect, paint, .. }
+                        if paint.border.is_some_and(|(_, w)| w > 0.0) && rect.y == style::SEARCH_TOP =>
+                    {
+                        Some((*rect, *paint))
+                    }
+                    _ => None,
+                })
+                .expect("the field")
+        };
+        let caret = |l: &Layout| {
+            l.draws.iter().find_map(|d| match d {
+                Draw::Panel { rect, paint, .. } if paint.fill == Role::Accent && rect.w == style::CARET => Some(*rect),
+                _ => None,
+            })
+        };
+        let words = |l: &Layout, w: &str| {
+            l.draws.iter().find_map(|d| match d {
+                Draw::Text { rect, spec } if spec.spans[0].text == w => Some(*rect),
+                _ => None,
+            })
+        };
+        let l = layout(&chrome(&g, &frame(&i18n, &none, None)), Point::default(), &Fake);
+        assert_eq!(field(&l).1.border.map(|(r, _)| r), Some(Role::GlassLine));
+        assert_eq!(caret(&l), None);
+
+        assert!(g.focus_search());
+        let l = layout(&chrome(&g, &frame(&i18n, &none, None)), Point::default(), &Fake);
+        let (f, paint) = field(&l);
+        assert_eq!(paint.border, Some((Role::Accent, style::SEARCH_ACTIVE_BORDER)));
+        let c = caret(&l).expect("a caret");
+        let placeholder = words(&l, &i18n.tr("grid-search")).expect("the placeholder");
+        assert!(
+            c.x + c.w <= placeholder.x + 0.5,
+            "before the placeholder: {c:?} {placeholder:?}"
+        );
+        assert!(
+            (c.y + c.h / 2.0 - (f.y + f.h / 2.0)).abs() < 1.0,
+            "in the middle: {c:?} {f:?}"
+        );
+
+        g.type_text("ab");
+        let l = layout(&chrome(&g, &frame(&i18n, &none, None)), Point::default(), &Fake);
+        let c = caret(&l).expect("a caret");
+        let typed = words(&l, "ab").expect("the words");
+        assert!(c.x >= typed.x + typed.w - 0.5, "after the words: {c:?} {typed:?}");
+        assert!(c.x + c.w <= f.x + f.w, "inside the field");
+    }
+
+    /// Asked for by the user (hide, show and move the grid's apps). Editing, every app
+    /// carries a badge that hides it, found before the app under it, over its icon's
+    /// top-left corner; Done and the words that tell what to do take the search's place.
+    #[test]
+    fn editing_shows_a_badge_on_every_app_and_done() {
+        let i18n = I18n::new(Lang::En);
+        let none = HashMap::new();
+        let g = grid(8);
+        let mut f = frame(&i18n, &none, None);
+        f.editing = true;
+        let l = layout(&page(&g, Some(0), &f), Point::default(), &Fake);
+        let badges = hits(&l, hit::HIDE);
+        assert_eq!(badges.iter().map(|(_, v)| *v).collect::<Vec<_>>(), [0, 1, 2, 3, 4, 5]);
+        for (badge, at) in &badges {
+            let middle = Point {
+                x: badge.x + badge.w / 2.0,
+                y: badge.y + badge.h / 2.0,
+            };
+            let found = l.hit_test(middle).expect("something");
+            assert_eq!((found.module, found.value), (hit::HIDE, *at), "the badge wins");
+            let app = hits(&l, hit::APP).into_iter().find(|(_, v)| v == at).unwrap().0;
+            assert!(
+                badge.x < app.x + app.w / 2.0 && badge.y < app.y + app.h / 2.0,
+                "top-left"
+            );
+        }
+        let chrome_l = layout(&chrome(&g, &f), Point::default(), &Fake);
+        assert!(hits(&chrome_l, hit::SEARCH).is_empty());
+        assert_eq!(hits(&chrome_l, hit::DONE).len(), 1);
+        let t = texts(&chrome_l);
+        assert!(t.contains(&i18n.tr("grid-done")) && t.contains(&i18n.tr("grid-edit-h")));
+        // Not editing: no badge, the search.
+        let l = layout(&page(&g, Some(0), &frame(&i18n, &none, None)), Point::default(), &Fake);
+        assert!(hits(&l, hit::HIDE).is_empty());
+    }
+
+    /// A dragged app follows the mouse over a gap where it will drop; the cell under the
+    /// mouse is found on the page, the nearest one outside the cells.
+    #[test]
+    fn a_dragged_app_follows_the_mouse_over_its_gap() {
+        let i18n = I18n::new(Lang::En);
+        let none = HashMap::new();
+        let g = grid(8);
+        let mut f = frame(&i18n, &none, None);
+        f.editing = true;
+        let mouse = Point { x: 700.0, y: 400.0 };
+        f.drag = Some(Drag {
+            from: 1,
+            to: 4,
+            at: mouse,
+        });
+        let l = layout(&page(&g, Some(0), &f), Point::default(), &Fake);
+        let apps = hits(&l, hit::APP);
+        // Five in their cells (the gap at the fifth), and the dragged one last, under
+        // the mouse.
+        assert_eq!(apps.len(), 6);
+        let (moving, value) = apps[5];
+        assert_eq!(value, 1);
+        assert!(moving.contains(mouse), "{moving:?}");
+        let gap = cell(&g, 4, SIZE);
+        assert!(apps[..5].iter().all(|(r, _)| !gap.contains(Point {
+            x: r.x + r.w / 2.0,
+            y: r.y + r.h / 2.0
+        })));
+        // Another page shows its own apps, without the dragged one.
+        let l = layout(&page(&g, Some(1), &f), Point::default(), &Fake);
+        assert_eq!(hits(&l, hit::APP).len(), 2);
+        // The cell under the mouse.
+        for local in 0..6 {
+            let r = cell(&g, local, SIZE);
+            let middle = Point {
+                x: r.x + r.w / 2.0,
+                y: r.y + r.h / 2.0,
+            };
+            assert_eq!(cell_at(&g, middle, SIZE), local);
+        }
+        assert_eq!(cell_at(&g, Point { x: 0.0, y: 0.0 }, SIZE), 0, "the nearest");
+        assert_eq!(cell_at(&g, Point { x: SIZE.w, y: SIZE.h }, SIZE), 5);
     }
 }

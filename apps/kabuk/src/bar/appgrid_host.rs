@@ -4,7 +4,10 @@
 //! a strip of three pages that zooms in as it fades in and slides from page to page on
 //! the compositor (a drag follows the mouse, the wheel, the arrows and the dots turn the
 //! pages). Typing searches; Enter or a click opens an app; Escape, a click between the
-//! apps or another window closes it. The apps' icons load off the thread, as the
+//! apps or another window closes it. A press held on an app, or a right click, edits the
+//! grid (asked for by the user): an app dragged goes to another place (held at a side
+//! edge, the page turns), its badge hides it, Done, Escape or a click between the apps
+//! ends it; the arrangement is kept in the state folder (`kabuk_core::app_grid`). The apps' icons load off the thread, as the
 //! launcher's do; the wallpaper is blurred off the thread once per picture and monitor.
 
 use std::collections::{HashMap, HashSet};
@@ -28,6 +31,7 @@ use crate::appgrid::model::{self, Dir, Found, Grid, Shape, Wheel};
 use crate::appgrid::{backdrop, style, view};
 use crate::bar::pictures::Pictures;
 use crate::launcher::item::Target;
+use kabuk_core::app_grid::Arrangement;
 
 /// Classes of the pages' window and the chrome's (tests find them by class).
 pub const GRID_CLASS: &str = "Kabuk.AppGrid";
@@ -75,11 +79,12 @@ pub(super) struct AppGridState {
 }
 
 /// A press of the left button on the pages: where (pixels), how far it went across
-/// (DIPs), and whether it is a drag yet.
+/// (DIPs), whether it is a drag yet, and the app (its place) it began on.
 struct Press {
     at: (i32, i32),
     dx: f32,
     dragging: bool,
+    app: Option<usize>,
 }
 
 /// The grid on screen.
@@ -104,6 +109,11 @@ struct Open {
     wheel: Wheel,
     /// The first half of a character outside the BMP, waiting for the second.
     surrogate: Option<u16>,
+    /// The user edits the grid, and drags an app.
+    editing: bool,
+    drag: Option<view::Drag>,
+    /// The way a dragged app held at a side edge turns the page, once its time is up.
+    edge: Option<isize>,
 }
 
 impl Open {
@@ -319,7 +329,32 @@ impl Shared {
         }
     }
 
-    /// Windows' apps the grid lists, in its order.
+    /// The user's arrangement of the grid; none (alphabetical, nothing hidden) without
+    /// its file.
+    fn app_grid_arrangement(&self) -> Arrangement {
+        self.app_grid_file()
+            .and_then(|f| std::fs::read_to_string(f).ok())
+            .and_then(|t| Arrangement::read(&t))
+            .unwrap_or_default()
+    }
+
+    fn app_grid_file(&self) -> Option<std::path::PathBuf> {
+        Some(
+            super::wm::lock(&self.state)
+                .path()
+                .parent()?
+                .join(kabuk_core::app_grid::FILE),
+        )
+    }
+
+    fn save_app_grid_arrangement(&self, a: &Arrangement) {
+        let Some(file) = self.app_grid_file() else { return };
+        if let Err(e) = kabuk_core::fsutil::write_atomic(&file, a.to_json().as_bytes()) {
+            tracing::error!(error = %e, "app grid arrangement not written");
+        }
+    }
+
+    /// Windows' apps the grid lists, in the user's order, the hidden ones left out.
     fn app_grid_entries(&self) -> Vec<model::Entry> {
         let found = kabuk_win::shellitems::installed_apps_cached()
             .iter()
@@ -330,7 +365,125 @@ impl Shared {
                 open: a.target(),
             })
             .collect();
-        model::entries(found, self.app_grid_casing())
+        self.app_grid_arrangement()
+            .apply(model::entries(found, self.app_grid_casing()), |e| e.open.as_str())
+    }
+
+    /// The grid listed again after the arrangement changed, on the same page.
+    fn app_grid_rebuild(&mut self) {
+        let entries = self.app_grid_entries();
+        let casing = self.app_grid_casing();
+        let Some(o) = self.app_grid.open.as_mut() else { return };
+        let page = o.grid.page();
+        o.grid = Grid::new(entries, casing, o.grid.shape());
+        o.grid.go(page);
+        o.slots = model::slots(o.grid.page(), o.grid.pages());
+    }
+
+    /// Editing begins (a held press or a right click on an app): the search goes, each
+    /// app shows its badge, Done stands where the search was.
+    fn app_grid_edit(&mut self, on: bool) {
+        let Some(o) = self.app_grid.open.as_mut() else { return };
+        if o.editing == on {
+            return;
+        }
+        o.editing = on;
+        o.drag = None;
+        o.edge = None;
+        if on && o.grid.clear() {
+            o.slots = model::slots(o.grid.page(), o.grid.pages());
+        }
+        tracing::info!(on, "app grid editing");
+        self.render_app_grid(true, true);
+    }
+
+    /// The held press's time is up: editing begins, the press now moving its app.
+    pub(super) fn app_grid_held(&mut self) {
+        if let Some(c) = &self.control {
+            c.kill_timer(timer::APP_GRID_HOLD);
+        }
+        let held = self
+            .app_grid
+            .open
+            .as_ref()
+            .and_then(|o| o.press.as_ref())
+            .filter(|p| !p.dragging)
+            .and_then(|p| p.app);
+        if held.is_some() {
+            self.app_grid_edit(true);
+        }
+    }
+
+    /// The dragged app went to the place under the mouse at `at` (DIPs); held at a side
+    /// edge, the page turns once its time is up.
+    fn app_grid_drag_to(&mut self, from: usize, at: Point) {
+        let Some(o) = self.app_grid.open.as_mut() else { return };
+        let to = o.grid.place_of(view::cell_at(&o.grid, at, o.size));
+        let edge = if at.x < style::EDGE_TURN {
+            Some(-1)
+        } else if at.x > o.size.w - style::EDGE_TURN {
+            Some(1)
+        } else {
+            None
+        };
+        if edge != o.edge {
+            o.edge = edge;
+            if let Some(c) = &self.control {
+                match edge {
+                    Some(_) => c.set_timer(timer::APP_GRID_EDGE, Duration::from_millis(style::EDGE_TURN_MS)),
+                    None => c.kill_timer(timer::APP_GRID_EDGE),
+                }
+            }
+        }
+        o.drag = Some(view::Drag { from, to, at });
+        self.render_app_grid(false, true);
+    }
+
+    /// A dragged app stayed at a side edge: the page turns that way.
+    pub(super) fn app_grid_edge_due(&mut self) {
+        if let Some(c) = &self.control {
+            c.kill_timer(timer::APP_GRID_EDGE);
+        }
+        let Some(o) = self.app_grid.open.as_mut() else { return };
+        let (Some(way), Some(d)) = (o.edge.take(), o.drag) else {
+            return;
+        };
+        let page = o.grid.page() as isize;
+        self.app_grid_go(page + way, None);
+        // The drop place follows the new page; still at the edge, it turns on.
+        self.app_grid_drag_to(d.from, d.at);
+    }
+
+    /// The dragged app is let go: it takes its new place, kept for next time.
+    fn app_grid_drop(&mut self) {
+        if let Some(c) = &self.control {
+            c.kill_timer(timer::APP_GRID_EDGE);
+        }
+        let Some(o) = self.app_grid.open.as_mut() else { return };
+        o.edge = None;
+        let Some(d) = o.drag.take() else { return };
+        let list = o.grid.shown_opens();
+        let mut a = self.app_grid_arrangement();
+        if a.moved(&list, d.from, d.to) {
+            tracing::info!(from = d.from, to = d.to, "app grid app moved");
+            self.save_app_grid_arrangement(&a);
+            self.app_grid_rebuild();
+        }
+        self.render_app_grid(false, true);
+    }
+
+    /// The app at place `at` leaves the grid until the settings show it again.
+    fn app_grid_hide(&mut self, at: usize) {
+        let Some(e) = self.app_grid.open.as_ref().and_then(|o| o.grid.shown_at(at)).cloned() else {
+            return;
+        };
+        let mut a = self.app_grid_arrangement();
+        if a.hide(&e.open, &e.name) {
+            tracing::info!(app = %e.name, "app grid app hidden");
+            self.save_app_grid_arrangement(&a);
+            self.app_grid_rebuild();
+            self.render_app_grid(true, true);
+        }
     }
 
     fn open_app_grid(&mut self, monitor: Option<Monitor>, activate: bool) {
@@ -401,6 +554,9 @@ impl Shared {
             press: None,
             wheel: Wheel::default(),
             surrogate: None,
+            editing: false,
+            drag: None,
+            edge: None,
         });
         self.render_app_grid(true, true);
         if let Some(o) = self.app_grid.open.as_ref() {
@@ -435,7 +591,9 @@ impl Shared {
             o.sheet.window().capture_mouse(false);
         }
         if let Some(c) = &self.control {
-            c.kill_timer(timer::APP_GRID_SLIDE);
+            for t in [timer::APP_GRID_SLIDE, timer::APP_GRID_HOLD, timer::APP_GRID_EDGE] {
+                c.kill_timer(t);
+            }
         }
         tracing::info!("app grid closed");
         self.retire(Some(o.sheet));
@@ -479,6 +637,8 @@ impl Shared {
             text_scale: look.style.text_scale,
             pictures: &pictures.loaded,
             backdrop: o.backdrop,
+            editing: o.editing,
+            drag: o.drag,
         };
         if chrome {
             let layout = kabuk_ui::node::layout(&view::chrome(&o.grid, &frame), Point::default(), &gpu.text);
@@ -633,6 +793,7 @@ impl Shared {
                 self.app_grid_key(m.wparam);
                 Some(0)
             }
+            msg::CHAR if self.app_grid.open.as_ref().is_some_and(|o| o.editing) => Some(0),
             msg::CHAR => {
                 let text = self.app_grid_char(m.wparam as u16)?;
                 if let Some(o) = self.app_grid.open.as_mut() {
@@ -656,17 +817,47 @@ impl Shared {
             msg::LBUTTONDOWN => {
                 let o = self.app_grid.open.as_mut()?;
                 if o.sliding.is_none() {
+                    let at = msg::point(m.lparam);
+                    let p = Point {
+                        x: o.scale.dips(at.0),
+                        y: o.scale.dips(at.1),
+                    };
+                    let app = o
+                        .page_layout
+                        .hit_test(p)
+                        .filter(|h| h.module == view::hit::APP)
+                        .map(|h| h.value as usize);
                     o.press = Some(Press {
-                        at: msg::point(m.lparam),
+                        at,
                         dx: 0.0,
                         dragging: false,
+                        app,
                     });
                     o.sheet.window().capture_mouse(true);
+                    // Held on an app, the press begins editing.
+                    if app.is_some() && !o.editing {
+                        if let Some(c) = &self.control {
+                            c.set_timer(timer::APP_GRID_HOLD, Duration::from_millis(style::HOLD_MS));
+                        }
+                    }
+                }
+                Some(0)
+            }
+            msg::RBUTTONUP => {
+                let o = self.app_grid.open.as_ref()?;
+                let (x, y) = msg::point(m.lparam);
+                let p = Point {
+                    x: o.scale.dips(x),
+                    y: o.scale.dips(y),
+                };
+                let on_app = o.page_layout.hit_test(p).is_some_and(|h| h.module == view::hit::APP);
+                if on_app {
+                    self.app_grid_edit(true);
                 }
                 Some(0)
             }
             msg::MOUSEMOVE => {
-                let (x, _) = msg::point(m.lparam);
+                let (x, y) = msg::point(m.lparam);
                 let held = m.wparam & msg::MK_LBUTTON != 0;
                 let o = self.app_grid.open.as_mut()?;
                 let p = o.press.as_mut()?;
@@ -678,10 +869,23 @@ impl Shared {
                 }
                 let moved = x - p.at.0;
                 let dx = o.scale.dips(moved);
-                if !p.dragging && dx.abs() >= style::DRAG_START {
+                let dy = o.scale.dips(y - p.at.1);
+                if !p.dragging && dx.abs().max(dy.abs()) >= style::DRAG_START {
                     p.dragging = true;
+                    if let Some(c) = &self.control {
+                        c.kill_timer(timer::APP_GRID_HOLD);
+                    }
                 }
                 if !p.dragging {
+                    return Some(0);
+                }
+                // Editing, a drag that began on an app moves it.
+                if let Some(from) = p.app.filter(|_| o.editing) {
+                    let at = Point {
+                        x: o.scale.dips(x),
+                        y: o.scale.dips(y),
+                    };
+                    self.app_grid_drag_to(from, at);
                     return Some(0);
                 }
                 p.dx = dx;
@@ -697,10 +901,17 @@ impl Shared {
                 Some(0)
             }
             msg::LBUTTONUP => {
+                if let Some(c) = &self.control {
+                    c.kill_timer(timer::APP_GRID_HOLD);
+                }
                 let o = self.app_grid.open.as_mut()?;
                 let press = o.press.take();
                 o.sheet.window().capture_mouse(false);
                 let (x, y) = msg::point(m.lparam);
+                if o.drag.is_some() {
+                    self.app_grid_drop();
+                    return Some(0);
+                }
                 match press {
                     Some(p) if p.dragging => {
                         let page = o.grid.page() as isize;
@@ -720,6 +931,24 @@ impl Shared {
                 }
                 Some(0)
             }
+            msg::SETCURSOR => {
+                // Over the search field, the text cursor: a field one can type into.
+                let o = self.app_grid.open.as_ref()?;
+                let (x, y) = kabuk_win::input::cursor_pos()?;
+                let at = Point {
+                    x: o.scale.dips(x - o.rect.x),
+                    y: o.scale.dips(y - o.rect.y),
+                };
+                let over = o
+                    .chrome_layout
+                    .hit_test(at)
+                    .is_some_and(|h| h.module == view::hit::SEARCH);
+                if !over {
+                    return None;
+                }
+                msgloop::show_text_cursor();
+                Some(1)
+            }
             msg::ACTIVATE => {
                 if (m.wparam & 0xFFFF) == msg::WA_INACTIVE {
                     // Another window took the keyboard.
@@ -732,7 +961,7 @@ impl Shared {
     }
 
     /// A click (not a drag) at `p` (DIPs on the monitor): a dot turns to its page, an app
-    /// opens, the search field does nothing, anywhere else closes the grid.
+    /// opens, the search field shows it takes the keys, anywhere else closes the grid.
     fn app_grid_click(&mut self, p: Point) {
         let Some(o) = self.app_grid.open.as_ref() else { return };
         let chrome = o.chrome_layout.hit_test(p).map(|h| (h.module, h.value));
@@ -741,9 +970,30 @@ impl Shared {
             .hit_test(p)
             .filter(|h| h.module == view::hit::APP)
             .map(|h| h.value as usize);
+        let editing = o.editing;
+        let hide = o
+            .page_layout
+            .hit_test(p)
+            .filter(|h| h.module == view::hit::HIDE)
+            .map(|h| h.value as usize);
+        if editing {
+            match (chrome, hide, app) {
+                (Some((view::hit::DONE, _)), _, _) => self.app_grid_edit(false),
+                (Some((view::hit::DOT, page)), _, _) => self.app_grid_go(page as isize, None),
+                (_, Some(at), _) => self.app_grid_hide(at),
+                (_, _, Some(_)) => {}
+                _ => self.app_grid_edit(false),
+            }
+            return;
+        }
         match (chrome, app) {
             (Some((view::hit::DOT, page)), _) => self.app_grid_go(page as isize, None),
-            (Some((view::hit::SEARCH, _)), _) => {}
+            (Some((view::hit::SEARCH, _)), _) => {
+                if self.app_grid.open.as_mut().is_some_and(|o| o.grid.focus_search()) {
+                    tracing::info!("app grid search field clicked");
+                    self.render_app_grid(true, false);
+                }
+            }
             (_, Some(at)) => self.app_grid_open_app(Some(at)),
             _ => self.close_app_grid(),
         }
@@ -777,6 +1027,7 @@ impl Shared {
             vk::HOME => self.app_grid_go(0, None),
             vk::END => self.app_grid_go(pages - 1, None),
             vk::RETURN => self.app_grid_open_app(None),
+            vk::ESCAPE if o.editing => self.app_grid_edit(false),
             vk::ESCAPE => {
                 if o.grid.clear() {
                     self.app_grid_searched();
