@@ -102,8 +102,24 @@ pub fn bmp_data_url(w: u32, h: u32, bgr: &[u8]) -> String {
     format!("data:image/bmp;base64,{}", base64(&bmp(w, h, bgr)))
 }
 
-/// The file names of Kabuk's still wallpapers in the state folder: every one starts with
-/// [`FILE_PREFIX`] and is a BMP or a JPEG.
+/// The folder Kabuk's wallpaper pictures are written to: a folder of its own in `temp`,
+/// unless the state folder is in `temp` already (the integration tests' own folders).
+/// Not the state folder: Windows refused every picture newly given as its wallpaper from
+/// under `AppData` but its `Temp` with "file not found" (0x80070002), whatever its kind
+/// (found on the user's Windows 11 build 26300: no still design of the gallery showed).
+pub fn pictures_folder(state_folder: &std::path::Path, temp: &std::path::Path) -> std::path::PathBuf {
+    if state_folder.starts_with(temp) {
+        state_folder.to_path_buf()
+    } else {
+        temp.join(PICTURES_FOLDER)
+    }
+}
+
+/// [`pictures_folder`]'s name in the temporary folder.
+pub const PICTURES_FOLDER: &str = "kabuk-wallpapers";
+
+/// The file names of Kabuk's still wallpapers in [`pictures_folder`]: every one starts
+/// with [`FILE_PREFIX`] and is a BMP or a JPEG.
 pub const FILE_PREFIX: &str = "wallpaper-";
 pub const BLACK_FILE: &str = "wallpaper-black.bmp";
 pub const GRADIENT_PREFIX: &str = "wallpaper-gradient-";
@@ -147,6 +163,18 @@ mod tests {
     //! Edge cases: the gradient's tinted start and plain end; a BMP's padded rows; Base64
     //! of every padding length; a data URL; Kabuk's own picture left showing.
     use super::*;
+
+    #[test]
+    fn pictures_go_where_windows_takes_them() {
+        use std::path::Path;
+        let temp = Path::new(r"C:\Users\u\AppData\Local\Temp");
+        assert_eq!(
+            pictures_folder(Path::new(r"C:\Users\u\AppData\Local\kabuk"), temp),
+            temp.join(PICTURES_FOLDER)
+        );
+        let sandbox = temp.join(".tmpA1b2");
+        assert_eq!(pictures_folder(&sandbox, temp), sandbox, "a test's own folder");
+    }
 
     #[test]
     fn the_night_gradient_starts_tinted_at_the_top_left_and_ends_in_the_desk() {

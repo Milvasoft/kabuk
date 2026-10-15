@@ -84,11 +84,23 @@ fn rgb(c: kabuk_theme::Color) -> (u8, u8, u8) {
 }
 
 impl Shared {
-    /// The picture monitor `m` should show, written to the state folder when Kabuk
+    /// Where Kabuk's wallpaper pictures are written ([`kabuk_core::wallpaper::pictures_folder`]),
+    /// made when missing.
+    fn pictures_folder(&self) -> Option<PathBuf> {
+        let state = wm::lock(&self.state).path().parent()?.to_path_buf();
+        let folder = kabuk_core::wallpaper::pictures_folder(&state, &std::env::temp_dir());
+        if let Err(e) = std::fs::create_dir_all(&folder) {
+            tracing::error!(error = %e, folder = %folder.display(), "wallpaper folder not made");
+            return None;
+        }
+        Some(folder)
+    }
+
+    /// The picture monitor `m` should show, written to the pictures folder when Kabuk
     /// makes it; `None` for the user's own.
     fn wallpaper_for(&self, m: &kabuk_win::shell::Monitor) -> Option<PathBuf> {
         let (kind, image) = self.config().wallpaper.for_monitor(m.number);
-        let folder = wm::lock(&self.state).path().parent()?.to_path_buf();
+        let folder = self.pictures_folder()?;
         // Made only when the file is not there yet (a gradient takes tens of milliseconds).
         let write = |name: &str, bytes: &dyn Fn() -> Vec<u8>| -> Option<PathBuf> {
             let path = folder.join(name);
@@ -192,7 +204,7 @@ impl Shared {
     }
 
     /// A still design of the gallery (DECISIONS D58) drawn once at monitor `m`'s size into
-    /// the state folder, as a JPEG, at its own full light (a picture, as the user's own);
+    /// the pictures folder, as a JPEG, at its own full light (a picture, as the user's own);
     /// `None` (the user's own stays) when it cannot be made.
     fn gallery_still(&self, key: &str, m: &kabuk_win::shell::Monitor, folder: &std::path::Path) -> Option<PathBuf> {
         let design = kabuk_wallgen::gallery::find(key).or_else(|| {
@@ -259,7 +271,7 @@ impl Shared {
 
     /// Drops the gallery's pictures no monitor shows any more.
     fn forget_gallery_pictures(&self, kept: &[(Rect, Option<PathBuf>)]) {
-        let Some(folder) = wm::lock(&self.state).path().parent().map(std::path::Path::to_path_buf) else {
+        let Some(folder) = self.pictures_folder() else {
             return;
         };
         let Ok(entries) = std::fs::read_dir(&folder) else {
@@ -270,6 +282,15 @@ impl Shared {
             let shown = kept.iter().any(|(_, p)| p.as_deref() == Some(e.path().as_path()));
             if name.starts_with(GALLERY_PREFIX) && !shown {
                 let _ = std::fs::remove_file(e.path());
+            }
+        }
+        // Pictures an older Kabuk wrote into the state folder are not used any more.
+        let state = wm::lock(&self.state).path().parent().map(std::path::Path::to_path_buf);
+        if let Some(state) = state.filter(|s| *s != folder) {
+            for e in std::fs::read_dir(&state).into_iter().flatten().flatten() {
+                if kabuk_core::wallpaper::is_kabuks(&e.path().to_string_lossy()) {
+                    let _ = std::fs::remove_file(e.path());
+                }
             }
         }
     }
