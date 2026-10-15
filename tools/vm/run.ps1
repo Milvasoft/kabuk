@@ -15,6 +15,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# `-File` hands `-Test wm,ipc` over as one string.
+$Test = @($Test | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
 $Name = 'kabuk-test'
 $PipeName = 'kabuk-vm-com1'
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
@@ -48,10 +50,15 @@ Write-Host "agent ready"
 # Build on the host.
 cargo build --workspace
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+# cargo's "Compiling" lines on stderr would stop the script under 'Stop' (a design of the
+# gallery changed meanwhile builds kabuk-wallgen again).
+$ErrorActionPreference = 'Continue'
 $artifacts = cargo test -p kabuk --features integration --no-run --message-format=json 2>$null |
     ForEach-Object { try { $_ | ConvertFrom-Json } catch {} } |
     Where-Object { $_.reason -eq 'compiler-artifact' -and $_.executable -and $_.target.kind -contains 'test' }
-if ($LASTEXITCODE -ne 0) { Write-Host "test build failed"; exit $LASTEXITCODE }
+$built = $LASTEXITCODE
+$ErrorActionPreference = 'Stop'
+if ($built -ne 0) { Write-Host "test build failed"; exit $built }
 $tests = $artifacts | Where-Object { $Test.Count -eq 0 -or $Test -contains $_.target.name } | ForEach-Object { $_.executable }
 
 # Stage the job: programs and tests under their repository paths, and the script to run.
