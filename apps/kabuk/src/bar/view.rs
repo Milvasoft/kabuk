@@ -764,6 +764,19 @@ fn stats(d: &BarData, s: &Style, i18n: &I18n) -> Vec<Node> {
     out
 }
 
+/// A "+n" after icons: at least an icon wide, its digits in the middle, and as wide as
+/// they are (found on the user's desktop: "+10" in an icon's width showed as "+1(").
+fn more_count(label: String, s: &Style) -> Node {
+    Node::layer(vec![
+        Node::spacer(s.tray_icon.max(0.0), 0.0),
+        text(
+            vec![span(label, s.mod_icon_color, 400)],
+            FontRole::Num,
+            s.size(s.mod_size),
+        ),
+    ])
+}
+
 /// The tray icons (`.tray`), on the primary monitor only.
 fn tray(d: &BarData, s: &Style, i18n: &I18n) -> Option<Node> {
     if !d.primary || !d.modules.tray || (d.tray.is_empty() && d.tray_more == 0) {
@@ -777,15 +790,7 @@ fn tray(d: &BarData, s: &Style, i18n: &I18n) -> Option<Node> {
         .collect();
     if d.tray_more > 0 {
         let label = i18n.tr_args("bar-tray-more", &[("value", d.tray_more.into())]);
-        icons.push(
-            text(
-                vec![span(label, s.mod_icon_color, 400)],
-                FontRole::Num,
-                s.size(s.mod_size),
-            )
-            .size(Some(s.tray_icon.max(0.0)), None)
-            .hit(hit::TRAY_MORE, 0),
-        );
+        icons.push(more_count(label, s).hit(hit::TRAY_MORE, 0));
     }
     let row = if d.vertical() {
         Node::column(icons)
@@ -1016,13 +1021,7 @@ pub fn regions(d: &BarData, s: &Style, i18n: &I18n, thickness: f32) -> Regions {
         let more = (1..=icons.len())
             .map(|n| {
                 let label = i18n.tr_args("bar-tray-more", &[("value", n.into())]);
-                text(
-                    vec![span(label, s.mod_icon_color, 400)],
-                    FontRole::Num,
-                    s.size(s.mod_size),
-                )
-                .size(Some(s.tray_icon.max(0.0)), None)
-                .hit(hit::APP_MORE, 0)
+                more_count(label, s).hit(hit::APP_MORE, 0)
             })
             .collect();
         AppsGroup {
@@ -2454,6 +2453,70 @@ mod tests {
             &Fake,
         );
         assert_eq!(l.size.w, 10.0 + 2.0 * Style::of(Look::Rihtim).group_pad_h);
+    }
+
+    /// Found on the user's desktop: "+10" was drawn in a box an icon wide, so it showed
+    /// as "+1(". A count is at least an icon wide, and as wide as its digits, in every
+    /// look (the tray's and the apps' "+n").
+    #[test]
+    fn a_two_digit_more_count_is_drawn_whole() {
+        let tr = I18n::new(Lang::Tr);
+        let apps: Vec<AppIcon> = (0..40)
+            .map(|i| AppIcon {
+                label: format!("Program {i}"),
+                image: i,
+                running: true,
+                focused: false,
+                grow: 0.0,
+                shift: (0.0, 0.0),
+            })
+            .collect();
+        for look in Look::ALL {
+            let d = BarData {
+                tray_more: 10,
+                apps: apps.clone(),
+                ..data(&tr)
+            };
+            let l = render_look(look, &d, &tr);
+            let at = l
+                .hits
+                .iter()
+                .find(|(_, h)| h.module == hit::TRAY_MORE)
+                .expect("a count")
+                .0;
+            let drawn = l
+                .draws
+                .iter()
+                .find_map(|d| match d {
+                    Draw::Text { rect, spec } if spec.plain() == "+10" => Some((*rect, spec.clone())),
+                    _ => None,
+                })
+                .expect("its digits");
+            assert!(drawn.0.w + 0.01 >= Fake.measure(&drawn.1).width, "{look:?}: {drawn:?}");
+            assert!(at.w + 0.01 >= drawn.0.w, "{look:?}");
+            if let Some(more) = l.hits.iter().find(|(_, h)| h.module == hit::APP_MORE) {
+                let digits = l
+                    .draws
+                    .iter()
+                    .find_map(|d| match d {
+                        Draw::Text { rect, spec }
+                            if spec.plain().starts_with('+')
+                                && more.0.contains(Point {
+                                    x: rect.x + rect.w / 2.0,
+                                    y: rect.y + rect.h / 2.0,
+                                }) =>
+                        {
+                            Some((*rect, spec.clone()))
+                        }
+                        _ => None,
+                    })
+                    .expect("the apps' count");
+                assert!(
+                    digits.0.w + 0.01 >= Fake.measure(&digits.1).width,
+                    "{look:?}: {digits:?}"
+                );
+            }
+        }
     }
 
     #[test]
