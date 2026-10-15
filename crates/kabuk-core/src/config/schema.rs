@@ -29,7 +29,29 @@ pub struct Config {
     pub create: Create,
     pub system_theme: SystemTheme,
     pub hot_corners: HotCorners,
+    pub dropdown: Dropdown,
 }
+
+/// `[dropdown]` (DECISIONS D62): the terminal that drops down from the top of the monitor.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Dropdown {
+    /// The program and its arguments; empty for Windows Terminal (else PowerShell).
+    pub command: String,
+    /// How much of the monitor's height it takes, in percent.
+    pub height: u32,
+}
+
+impl Default for Dropdown {
+    fn default() -> Self {
+        Dropdown {
+            command: String::new(),
+            height: 40,
+        }
+    }
+}
+
+pub const DROPDOWN_HEIGHT_RANGE: (u32, u32) = (20, 90);
 
 /// `[hot_corners]` (asked for by the user, `kabuk_core::hot_corner`): what the mouse
 /// pushed into each corner of the screen does; nothing by default.
@@ -94,6 +116,7 @@ impl Default for Config {
             create: Create::default(),
             system_theme: SystemTheme::default(),
             hot_corners: HotCorners::default(),
+            dropdown: Dropdown::default(),
         }
     }
 }
@@ -925,6 +948,8 @@ pub struct Shortcuts {
     pub app_grid: Vec<String>,
     /// Shows the card of Kabuk's main shortcuts (DECISIONS D61).
     pub keys_card: Vec<String>,
+    /// Drops the terminal down from the top of the monitor, or hides it (D62).
+    pub dropdown: Vec<String>,
     /// Held while dragging: left button moves, right button resizes.
     pub drag: String,
 }
@@ -960,6 +985,7 @@ impl Default for Shortcuts {
             start_saver: chords(&["Win+Shift+L"]),
             app_grid: chords(&["Win+Shift+A"]),
             keys_card: chords(&["Win+F1"]),
+            dropdown: chords(&["Win+Enter"]),
             drag: "Alt".into(),
         }
     }

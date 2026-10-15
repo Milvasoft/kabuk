@@ -247,6 +247,15 @@ async function main() {
   check((await page.locator(`[data-saver-gal="wall-live/aurora-shore"]`).innerText()).includes("OLED"), "gallery: a live wallpaper as a saver warns about OLED");
   await page.click(`[data-set="screensaver.kind"][data-val='"circuit"']`); await settled();
 
+  // The drop-down terminal (DECISIONS D62): its program and height written.
+  await go("windows");
+  await page.fill(`[data-text="dropdown.command"]`, "pwsh -NoLogo");
+  await page.press(`[data-text="dropdown.command"]`, "Tab"); await settled();
+  check(/\[dropdown\][^[]*command = "pwsh -NoLogo"/.test(toml()), "dropdown: its program written");
+  await page.$eval(`[data-range="dropdown.height"]`, (el) => { el.value = "60"; el.dispatchEvent(new Event("change", { bubbles: true })); }); await settled();
+  check(/\[dropdown\][^[]*height = 60/.test(toml()), "dropdown: its height written");
+  check((await page.locator(`[data-chord="shortcuts.dropdown"]`).first().innerText()).includes("Enter"), "dropdown: its shortcut beside it");
+
   // Hot corners (asked for by the user): none by default, each corner's choice written.
   await go("windows");
   check((await page.locator(`[data-select^="hot_corners."]`).count()) === 4, "hot corners: four corners");

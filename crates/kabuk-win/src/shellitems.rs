@@ -59,6 +59,12 @@ fn take(p: PWSTR) -> String {
     }
 }
 
+/// Whether Windows Terminal is installed: its `wt.exe` alias is in the user's
+/// WindowsApps folder.
+pub fn windows_terminal_installed() -> bool {
+    known_folder(Folder::LocalAppData).is_some_and(|d| d.join("Microsoft").join("WindowsApps").join("wt.exe").exists())
+}
+
 pub fn known_folder(f: Folder) -> Option<PathBuf> {
     let id = match f {
         Folder::Recent => &FOLDERID_Recent,

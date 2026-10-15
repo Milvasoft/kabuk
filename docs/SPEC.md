@@ -216,6 +216,7 @@ Defaults are on the Win key (the user's decision on 2026-10-14, DECISIONS D40: A
 | Overview of every workspace | `Win+Tab` |
 | Start the screen saver now (the displays turn off when no saver is chosen) | `Win+Shift+L` (requested by the user on 2026-10-14) |
 | Every app on a grid (§2.5b) | `Win+Shift+A` (requested by the user on 2026-10-15) |
+| Drop-down terminal (from the top of the monitor, over every workspace; DECISIONS D62) | `Win+Enter` (requested by the user on 2026-10-15) |
 | The card of the main shortcuts (also a greeting on the first start; DECISIONS D61) | `Win+F1` (requested by the user on 2026-10-15) |
 | Emergency exit and restore | `Ctrl+Alt+Shift+End` (cannot be changed) |
 

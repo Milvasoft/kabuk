@@ -111,6 +111,8 @@ pub enum Action {
     ToggleGroup,
     /// Show the next tab of the focused group.
     NextTab,
+    /// Drop the terminal down, or hide it (DECISIONS D62).
+    Dropdown,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -139,7 +141,7 @@ pub fn bindings(s: &crate::config::Shortcuts, workspaces: u32) -> Vec<(crate::co
             }
         }
     }
-    let lists: [(&Vec<String>, Action); 15] = [
+    let lists: [(&Vec<String>, Action); 16] = [
         (&s.focus_left, Action::Focus(Direction::Left)),
         (&s.focus_down, Action::Focus(Direction::Down)),
         (&s.focus_up, Action::Focus(Direction::Up)),
@@ -155,6 +157,7 @@ pub fn bindings(s: &crate::config::Shortcuts, workspaces: u32) -> Vec<(crate::co
         (&s.to_scratchpad, Action::ToScratchpad),
         (&s.toggle_group, Action::ToggleGroup),
         (&s.next_tab, Action::NextTab),
+        (&s.dropdown, Action::Dropdown),
     ];
     for (chords, action) in lists {
         for text in chords {
@@ -351,15 +354,16 @@ mod tests {
         assert_eq!(find("Win+Shift+Z"), Some(Action::ToScratchpad));
         assert_eq!(find("Win+T"), Some(Action::ToggleGroup));
         assert_eq!(find("Win+Shift+T"), Some(Action::NextTab));
+        assert_eq!(find("Win+Enter"), Some(Action::Dropdown));
         // Windows' own that people use, and the input-language switch, stay Windows'.
         for theirs in ["Win+E", "Win+V", "Win+Shift+S", "Win+Space", "Win+G", "Alt+Shift+H"] {
             assert_eq!(find(theirs), None, "{theirs}");
         }
         // Every default can be bound (Win+L, for one, cannot).
         assert!(b.iter().all(|(c, _)| c.check_bindable().is_ok()));
-        // 2 × 9 workspace chords + 8 direction chords + 7 others (two for the hidden
-        // workspace and two for tabbed groups, D34).
-        assert_eq!(b.len(), 18 + 8 + 7);
+        // 2 × 9 workspace chords + 8 direction chords + 8 others (two for the hidden
+        // workspace and two for tabbed groups, D34; the drop-down terminal, D62).
+        assert_eq!(b.len(), 18 + 8 + 8);
         // Fewer workspaces bind fewer digits; the launcher (M6) and drag (M5) are not here.
         let four = bindings(&crate::config::Shortcuts::default(), 4);
         assert_eq!(

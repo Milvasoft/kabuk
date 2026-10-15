@@ -22,6 +22,10 @@ cursor_size = "normal"    # with Kabuk's sets: normal, large, huge
 [system_theme]
 colors = false            # Windows' mode and accent colour follow Kabuk's (recorded, given back on exit)
 
+[dropdown]                # the terminal Win+Enter drops down from the top of the monitor
+command = ""              # empty: Windows Terminal (else PowerShell); or a program with its arguments
+height = 40               # percent of the monitor's height, 20-90
+
 [hot_corners]             # the mouse pushed into a corner of the screen: none, app_grid, overview, launcher, screen_saver
 top_left = "none"
 top_right = "none"
@@ -151,6 +155,7 @@ next_tab = ["Alt+Shift+G"]          # show the group's next tab
 overview = ["Alt+O"]                # every workspace at a glance
 start_saver = ["Win+Shift+L"]       # the screen saver now (the display off when none is chosen)
 app_grid = ["Win+Shift+A"]          # every app on a full-screen grid, as macOS's Launchpad
+dropdown = ["Win+Enter"]            # the drop-down terminal, over every workspace
 keys_card = ["Win+F1"]              # the card of Kabuk's main shortcuts (it greets you on the first start)
 drag = "Alt"                      # held while dragging: left button moves, right button resizes
 

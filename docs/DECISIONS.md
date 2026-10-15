@@ -8,6 +8,9 @@ No open decisions (the user decided D39, D43, D44 and the still pictures' drift 
 
 ## Decided and proposed
 
+### D62 · A drop-down terminal — Decided by the user (2026-10-15)
+Suggested as a feature and asked for by the user: `shortcuts.dropdown` (`Win+Enter`) drops a terminal down from the top of the monitor the user works on, as Quake's console, and hides it again; it stays over every workspace. `[dropdown] command` names the program (empty: Windows Terminal in a window of its own, `wt -w new`, else PowerShell) and `height` its share of the monitor's height (20-90 %, 40 by default). The window manager starts the program and takes the first terminal window that comes within ten seconds (Windows Terminal's or the console host's class; any window for the user's own command); that window stays out of the layout (it never tiles, workspaces leave it alone) and is recorded before it hides, as every hidden window is. Closed, it is forgotten and the next press starts it again.
+
 ### D61 · A card of the main shortcuts, and a greeting — Decided by the user (2026-10-15)
 Suggested as a feature (a newcomer learns tiling in half a minute) and asked for by the user: a card in the middle of the monitor shows Kabuk's main shortcuts as the user bound them, grouped as windows, workspaces and Kabuk (the four arrows of focus and of moving on one row each when they share their modifiers), with the emergency exit. `shortcuts.keys_card` opens it (`Win+F1` by default, Windows' own Win+F1 opens a web help page); any key, a click or another window closes it. On Kabuk's first start it comes once as a greeting (a `greeted` file in the state folder says it came; never in the tests, which run without the shortcuts).
 

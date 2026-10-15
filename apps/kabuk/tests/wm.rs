@@ -454,6 +454,62 @@ fn swap_float_and_close_act_on_the_focused_window() {
     assert_eq!(sandbox.restore().0, 0);
 }
 
+/// DECISIONS D62 (suggested and asked for by the user): the drop-down terminal's program
+/// starts, its window drops down along the top of the monitor out of the layout, hides
+/// (recorded first) and comes back, and is forgotten once closed. A test window stands
+/// in for the terminal.
+#[test]
+fn the_dropdown_terminal_starts_drops_down_and_hides() {
+    let sandbox = Sandbox::new();
+    let name = title("dropdown");
+    let extra = format!(
+        "[dropdown]\ncommand = '\"{}\" --title {name}'\nheight = 40\n",
+        testapp_exe().display()
+    );
+    let wm = Wm::start(&sandbox, &config(&extra));
+    let window = || {
+        kabuk_win::window::windows_of_class(TEST_WINDOW_CLASS)
+            .into_iter()
+            .find(|w| w.title() == name)
+    };
+    wm.act(test_action::DROPDOWN, 0);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("dropdown captured") == 1).is_some());
+    let w = window().expect("its window");
+    assert_eq!(sandbox.log_lines("managing window"), 0, "out of the layout");
+    let shown = |w: Hwnd| w.is_visible() && w.frame_rect().is_some();
+    let m = kabuk_win::shell::monitors()
+        .into_iter()
+        .find(|m| {
+            sandbox
+                .last_log_line(&["dropdown shown"])
+                .is_some_and(|l| l.contains(&m.device))
+        })
+        .expect("its monitor");
+    let strip = kabuk_core::dropdown::place(m.work_area, 40);
+    assert!(
+        wait_until(SETTLE, || shown(w) && w.frame_rect() == Some(strip)).is_some(),
+        "{:?} not {strip:?}",
+        w.frame_rect()
+    );
+    // Hidden, recorded first; back again.
+    wm.act(test_action::DROPDOWN, 0);
+    assert!(wait_until(SETTLE, || !w.is_visible()).is_some(), "not hidden");
+    assert!(sandbox.state().hidden_windows.iter().any(|h| h.hwnd == w.0));
+    wm.act(test_action::DROPDOWN, 0);
+    assert!(wait_until(SETTLE, || shown(w)).is_some(), "not back");
+    assert!(wait_until(SETTLE, || sandbox.state().hidden_windows.is_empty()).is_some());
+    assert_eq!(sandbox.log_lines("dropdown started"), 1, "started once");
+    // Closed: forgotten; the next press starts it again.
+    w.close_async();
+    assert!(wait_until(SETTLE, || sandbox.log_lines("dropdown closed") == 1).is_some());
+    wm.act(test_action::DROPDOWN, 0);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("dropdown captured") == 2).is_some());
+    if let Some(again) = window() {
+        again.close_async();
+    }
+    assert_eq!(sandbox.restore().0, 0);
+}
+
 /// Found by the user: Win+Shift+arrow did nothing to a maximised window (its tile moved
 /// under it, the other window behind it). It is restored and goes to its new place.
 #[test]

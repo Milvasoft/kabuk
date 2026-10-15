@@ -42,7 +42,7 @@
   const LOOK_NAMES = { a: "ada", b: "cizgi", c: "devre", d: "ray", e: "konsol", f: "rihtim", g: "etkinlik" };
   const DIM_MIN = 10, DIM_MAX = 3600, DIM_PRESETS = [30, 60, 120];
   const SAVER_WAITS = [3, 5, 10, 15];
-  const RANGES = { height: [24, 72], tray: [0, 12], gap: [0, 32], bright: [10, 100, 5] };
+  const RANGES = { height: [24, 72], tray: [0, 12], gap: [0, 32], bright: [10, 100, 5], dropdown: [20, 90, 5] };
 
   const cfg = () => S.config;
   const at = (root, path) => path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), root);
@@ -403,7 +403,19 @@
       ${tgl("windows.active_border", t("border"), t("borderH"))}
       ${tgl("windows.follow_look", t("setFollowLook"), t("setFollowLookH"))}
       ${rowFor("windows.minimize_effect", t("setMinimize"), t("setMinimizeH"), segFor("windows.minimize_effect", t("setMinimize"), [["genie", t("setMinimizeGenie")], ["windows", t("setMinimizeWindows")]]))}</div>
+      ${dropdownGroup()}
       ${hotCornersGroup()}`;
+  }
+
+  // The drop-down terminal (DECISIONS D62): its program and how tall it drops.
+  function dropdownGroup() {
+    const d = cfg().dropdown;
+    const command = `<span class="num"><input type="text" data-text="dropdown.command" style="width:260px;font-family:var(--num)" value="${escapeHtml(d.command)}" placeholder="${t("ddCommandPh")}" aria-label="${t("ddCommand")}"></span>`;
+    const height = `<span class="rng"><input type="range" id="dd-height" data-range="dropdown.height" data-unit="%" min="${RANGES.dropdown[0]}" max="${RANGES.dropdown[1]}" step="${RANGES.dropdown[2]}" value="${d.height}" aria-label="${t("ddHeight")}"><span class="v" data-v="dd-height">${d.height}%</span></span>`;
+    return `<div class="set-grp"><span class="gl">${t("dd")}. ${t("ddH")}</span>
+      ${row(t("ddCommand"), t("ddCommandH"), command)}
+      ${row(t("ddHeight"), "", height)}
+      ${rowFor("shortcuts.dropdown", t("setKeyDropdown"), "", chordEditor("shortcuts.dropdown"))}</div>`;
   }
 
   // Hot corners (asked for by the user, off by default): what the mouse pushed into each
@@ -478,7 +490,7 @@
         <div><button class="set-btn ghost" type="button" data-grid-reset ${g.ordered ? "" : "disabled"}>${t("lpGridReset")}</button></div></div>`;
   }
 
-  const KEYS = ["launcher", "workspace", "move_to_workspace", "focus_left", "focus_down", "focus_up", "focus_right", "move_left", "move_down", "move_up", "move_right", "toggle_float", "close_window", "cycle_layout", "toggle_scratchpad", "to_scratchpad", "toggle_group", "next_tab", "overview", "start_saver", "app_grid", "keys_card", "drag"];
+  const KEYS = ["launcher", "workspace", "move_to_workspace", "focus_left", "focus_down", "focus_up", "focus_right", "move_left", "move_down", "move_up", "move_right", "toggle_float", "close_window", "cycle_layout", "toggle_scratchpad", "to_scratchpad", "toggle_group", "next_tab", "overview", "start_saver", "app_grid", "keys_card", "dropdown", "drag"];
   function keysPage() {
     const any = KEYS.some((k) => changed("shortcuts." + k));
     return head(t("navKeys"), t("keysDesc")) + (any ? `<div><button class="set-btn ghost" type="button" data-reset-keys>${t("setResetKeys")}</button></div>` : "") + `
@@ -712,6 +724,7 @@
     if (el.id === "rule-what") ui.ruleForm.what = el.value;
     if (el.id === "bar-color") set("bar.color", el.value.toUpperCase());
     if (el.dataset.select) set(el.dataset.select, el.value);
+    if (el.dataset.text) set(el.dataset.text, el.value.trim());
   });
 
   /* ---------- messages from Rust ---------- */

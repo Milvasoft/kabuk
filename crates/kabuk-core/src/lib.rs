@@ -5,6 +5,7 @@ pub mod app_grid;
 pub mod cli;
 pub mod clock;
 pub mod config;
+pub mod dropdown;
 pub mod fsutil;
 pub mod fullscreen;
 pub mod genie;

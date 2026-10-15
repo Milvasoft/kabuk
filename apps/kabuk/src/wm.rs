@@ -73,6 +73,8 @@ pub mod test_action {
     pub const TO_SCRATCHPAD: usize = 13;
     pub const TOGGLE_GROUP: usize = 14;
     pub const NEXT_TAB: usize = 15;
+    /// Drops the terminal down, or hides it (DECISIONS D62).
+    pub const DROPDOWN: usize = 16;
     /// Fail inside the window manager, to test the hand-over to the watchdog.
     pub const PANIC: usize = 99;
 }
@@ -433,6 +435,10 @@ struct Wm {
     held: Option<(u64, state::Rect, state::Rect)>,
     /// A maximised window a move restores: placed though Windows still has it maximised.
     unmaximizing: Option<u64>,
+    /// The drop-down terminal's window (DECISIONS D62), kept out of the layout, and when
+    /// its program was started while its window has not come yet.
+    dropdown: Option<u64>,
+    dropdown_wait: Option<Instant>,
 }
 
 fn run(
@@ -477,6 +483,8 @@ fn run(
         snapshot,
         held: None,
         unmaximizing: None,
+        dropdown: None,
+        dropdown_wait: None,
     }));
     let weak = Rc::downgrade(&wm);
     let own = Rc::new(std::cell::Cell::new(None));
@@ -939,6 +947,7 @@ impl Wm {
             test_action::TO_SCRATCHPAD => Action::ToScratchpad,
             test_action::TOGGLE_GROUP => Action::ToggleGroup,
             test_action::NEXT_TAB => Action::NextTab,
+            test_action::DROPDOWN => Action::Dropdown,
             test_action::FOCUSED => {
                 self.desk.focused(u64::try_from(arg).unwrap_or(0));
                 self.update_border();
@@ -1017,6 +1026,10 @@ impl Wm {
                 .and_then(|f| self.desk.next_tab(f, true))
                 .map(|t| self.desk.select_tab(t))
                 .unwrap_or_default(),
+            Action::Dropdown => {
+                self.toggle_dropdown();
+                Vec::new()
+            }
         };
         if let (Action::Move(_), Some(f)) = (a, focused) {
             self.unmaximize_moved(f, &effects);
@@ -1036,6 +1049,66 @@ impl Wm {
             tracing::info!(hwnd = id, "maximised window restored to be moved");
             self.unmaximizing = Some(id);
         }
+    }
+
+    /// The drop-down terminal (DECISIONS D62): shown, it hides; hidden, it drops down on
+    /// the monitor the user works on; with none, its program starts and its window, once
+    /// it comes, drops down.
+    fn toggle_dropdown(&mut self) {
+        let alive = self.dropdown.filter(|id| Hwnd(*id).exists());
+        self.dropdown = alive;
+        match alive {
+            Some(id) if Hwnd(id).is_visible() && !Hwnd(id).is_minimized() => {
+                self.hide_all(&[Hwnd(id)]);
+                tracing::info!(hwnd = id, "dropdown hidden");
+            }
+            Some(_) => self.show_dropdown(),
+            None if self
+                .dropdown_wait
+                .is_some_and(|t| t.elapsed() < kabuk_core::dropdown::WAIT) => {}
+            None => {
+                let d = self.config.current().dropdown.clone();
+                let (program, args) =
+                    kabuk_core::dropdown::command(&d, kabuk_win::shellitems::windows_terminal_installed());
+                match kabuk_win::jumplist::run(&program, &args, "") {
+                    Ok(()) => {
+                        tracing::info!(%program, "dropdown started");
+                        self.dropdown_wait = Some(Instant::now());
+                    }
+                    Err(e) => tracing::warn!(%program, error = %e, "dropdown program not started"),
+                }
+            }
+        }
+    }
+
+    /// The drop-down terminal along the top of the monitor the user works on, in front.
+    fn show_dropdown(&mut self) {
+        let Some(id) = self.dropdown else { return };
+        let h = Hwnd(id);
+        let monitors = kabuk_win::shell::monitors();
+        let device = self.action_monitor();
+        let Some(m) = monitors
+            .iter()
+            .find(|m| Some(&m.device) == device.as_ref())
+            .or(monitors.first())
+        else {
+            return;
+        };
+        let height = self.config.current().dropdown.height;
+        let at = kabuk_core::dropdown::place(m.work_area, height);
+        if h.is_minimized() {
+            h.restore_async();
+        }
+        h.show_async();
+        let result = lock(&self.state).remove_hidden(id);
+        if let Err(e) = result {
+            tracing::error!(error = %e, "hidden record not cleared");
+        }
+        h.place_frame_async(at);
+        if !h.focus() {
+            tracing::debug!(hwnd = id, "focus refused by Windows");
+        }
+        tracing::info!(hwnd = id, monitor = %m.device, ?at, "dropdown shown");
     }
 
     /// Where workspace actions apply: the focused window's monitor, else the primary one.
@@ -1213,6 +1286,9 @@ impl Wm {
         if hwnd.pid() == Some(std::process::id()) {
             return;
         }
+        if self.dropdown == Some(hwnd.0) {
+            return;
+        }
         if self.desk.contains(hwnd.0) {
             // Known, but on a hidden workspace and showing itself: bring it to the
             // active workspace instead of leaving it on screen out of place.
@@ -1238,6 +1314,17 @@ impl Wm {
             Verdict::Float => true,
             Verdict::Tile => false,
         };
+        // The drop-down terminal's window, come after its program started.
+        let waiting = self
+            .dropdown_wait
+            .is_some_and(|t| t.elapsed() < kabuk_core::dropdown::WAIT);
+        if waiting && kabuk_core::dropdown::is_it(&self.config.current().dropdown, &facts.class) {
+            self.dropdown_wait = None;
+            self.dropdown = Some(hwnd.0);
+            tracing::info!(hwnd = hwnd.0, class = %facts.class, "dropdown captured");
+            self.show_dropdown();
+            return;
+        }
         let Some(opened_at) = hwnd.frame_rect().map(rect_of) else {
             return;
         };
@@ -1394,7 +1481,17 @@ impl Wm {
                     self.apply(effects);
                 }
             }
-            WindowEvent::Destroyed(h) => self.forget(h, "destroyed"),
+            WindowEvent::Destroyed(h) => {
+                if self.dropdown == Some(h.0) {
+                    self.dropdown = None;
+                    let result = lock(&self.state).remove_hidden(h.0);
+                    if let Err(e) = result {
+                        tracing::error!(error = %e, "hidden record not cleared");
+                    }
+                    tracing::info!(hwnd = h.0, "dropdown closed");
+                }
+                self.forget(h, "destroyed")
+            }
             WindowEvent::Foreground(h) => {
                 if self.desk.contains(h.0) {
                     self.desk.focused(h.0);

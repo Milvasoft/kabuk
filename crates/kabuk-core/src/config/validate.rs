@@ -34,6 +34,13 @@ pub fn validate(config: &Config) -> Vec<(KeyPath, Problem)> {
         range(&mut push, &["bar", "height"], h, BAR_HEIGHT_RANGE);
     }
 
+    range(
+        &mut push,
+        &["dropdown", "height"],
+        config.dropdown.height,
+        DROPDOWN_HEIGHT_RANGE,
+    );
+
     // wallpaper
     let w = &config.wallpaper;
     range(
@@ -231,12 +238,13 @@ fn shortcuts(push: &mut impl FnMut(KeyPath, Problem), s: &Shortcuts, workspaces:
         }
     };
 
-    let lists: [(&str, &Vec<String>); 20] = [
+    let lists: [(&str, &Vec<String>); 21] = [
         ("launcher", &s.launcher),
         ("overview", &s.overview),
         ("start_saver", &s.start_saver),
         ("app_grid", &s.app_grid),
         ("keys_card", &s.keys_card),
+        ("dropdown", &s.dropdown),
         ("focus_left", &s.focus_left),
         ("focus_down", &s.focus_down),
         ("focus_up", &s.focus_up),
