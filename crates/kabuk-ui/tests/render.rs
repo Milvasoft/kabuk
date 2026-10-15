@@ -417,6 +417,13 @@ fn a_heavy_first_span_does_not_make_the_rest_heavy() {
     }
 }
 
+/// WARP is never taken for a graphics card of its own; this machine's card is.
+#[test]
+fn a_software_device_is_no_graphics_card() {
+    let warp = kabuk_ui::render::Gpu::with(kabuk_ui::render::Raster::Software).expect("WARP");
+    assert!(!warp.own_gpu());
+}
+
 /// An underlined span draws its line below the text, in the span's colour.
 #[test]
 fn underlined_spans_get_a_line() {
@@ -560,12 +567,14 @@ fn the_scene_canvas_draws_shapes_text_and_the_wordmark() {
 }
 
 /// PLAN M12: a frame of each scene at 4K takes the GPU under 4 ms (Direct3D timestamps
-/// around the work Direct2D submits). WARP has no GPU clock; there the measure is not
-/// taken.
+/// around the work Direct2D submits). Without a graphics card of its own (WARP, or the
+/// Basic Render Driver of a machine without one, as GitHub's runners) the frames are
+/// drawn but the measure is not taken.
 #[test]
 fn the_scenes_draw_a_4k_frame_in_under_4_ms_on_the_gpu() {
     use kabuk_scenes::{constellation::Constellation, milva::Milva, Clock, Scene, Settings};
     let gpu = kabuk_ui::render::Gpu::with(kabuk_ui::render::Raster::Hardware).expect("GPU");
+    let card = gpu.own_gpu();
     let clock = Clock {
         time: "20:31".into(),
         date: "12 Ekim Pazartesi".into(),
@@ -595,8 +604,10 @@ fn the_scenes_draw_a_4k_frame_in_under_4_ms_on_the_gpu() {
             .expect("drawn");
         let slowest = times.into_iter().skip(1).max().flatten();
         if let Some(t) = slowest {
-            println!("slowest 4K frame on the GPU: {t:?}");
-            assert!(t < std::time::Duration::from_millis(4), "{t:?}");
+            println!("slowest 4K frame on the GPU: {t:?} (a card of its own: {card})");
+            if card {
+                assert!(t < std::time::Duration::from_millis(4), "{t:?}");
+            }
         }
     }
 }
@@ -619,12 +630,17 @@ fn reply_with(hlsl: &str) -> String {
 /// PLAN M13: on the GPU, the sample wallpaper passes every check (compiled, under 4 ms at
 /// 4K, black, dim and moving), and wallpapers that do not compile, are slow, too bright,
 /// keep a bright spot in place or have a grey background are refused for that reason.
-/// WARP cannot time frames; there the measure is not taken.
+/// Without a graphics card of its own (WARP, or the Basic Render Driver of a machine
+/// without one, as GitHub's runners) every wallpaper is slow, so the judging is not tried.
 #[test]
 fn created_wallpapers_are_judged_for_the_right_reason() {
     use kabuk_wallgen::check::OledFault;
     use kabuk_wallgen::pipeline::{assess, Refusal};
     let gpu = kabuk_ui::render::Gpu::with(kabuk_ui::render::Raster::Hardware).expect("GPU");
+    if !gpu.own_gpu() {
+        println!("no graphics card of its own: wallpapers are not judged here");
+        return;
+    }
     let mut judge = kabuk_ui::render::GpuJudge {
         gpu: &gpu,
         tokens: &ada_dark,

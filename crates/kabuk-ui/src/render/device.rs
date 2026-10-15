@@ -112,6 +112,19 @@ impl Gpu {
         })
     }
 
+    /// The device runs on a graphics card of its own: not WARP, and not Windows' Basic
+    /// Render Driver, which stands in for a missing card (as on GitHub's runners) and is
+    /// WARP behind a hardware face. Frame times only mean something on a card.
+    pub fn own_gpu(&self) -> bool {
+        /// PCI vendor id Microsoft gives its software adapters.
+        const MICROSOFT: u32 = 0x1414;
+        let Ok(dxgi) = self._d3d.cast::<IDXGIDevice>() else {
+            return false;
+        };
+        // SAFETY: plain queries on a live DXGI device and its adapter.
+        unsafe { dxgi.GetAdapter().and_then(|a| a.GetDesc()) }.is_ok_and(|d| d.VendorId != MICROSOFT)
+    }
+
     /// How long the GPU took for the work submitted inside `f` after it calls `mark`
     /// (Direct3D timestamp queries; Direct2D submits its batch at `EndDraw`, so `mark`
     /// goes right before it and the CPU's own drawing calls are not counted). `None` when
