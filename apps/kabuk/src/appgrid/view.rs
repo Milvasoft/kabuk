@@ -52,6 +52,48 @@ pub struct Frame<'a> {
     pub drag: Option<Drag>,
     /// Seconds into editing, while the icons wiggle (`None`: still).
     pub wiggle: Option<f32>,
+    /// Apps sliding to new places: where each was (by what opens it), and how far along
+    /// they are (0-1, eased).
+    pub reflow: Option<(&'a HashMap<String, Rect>, f32)>,
+}
+
+/// Where each app of page `p` is drawn (by what opens it): its cell, the gap a dragged
+/// app makes taken into account; the dragged app under the mouse.
+pub fn places(grid: &Grid, p: usize, drag: Option<Drag>, size: Size) -> HashMap<String, Rect> {
+    let cells: Vec<Option<(usize, usize)>> = match drag {
+        Some(d) => grid.on_page_dragging(p, d.from, d.to),
+        None => grid.on_page(p).into_iter().map(Some).collect(),
+    };
+    let mut out: HashMap<String, Rect> = cells
+        .into_iter()
+        .enumerate()
+        .filter_map(|(local, place)| {
+            let (_, index) = place?;
+            Some((grid.entry(index)?.open.clone(), cell(grid, local, size)))
+        })
+        .collect();
+    if let Some(d) = drag {
+        if let Some(e) = grid.index_at(d.from).and_then(|i| grid.entry(i)) {
+            let r = cell(grid, 0, size);
+            out.insert(
+                e.open.clone(),
+                Rect::new(d.at.x - r.w / 2.0, d.at.y - r.h / 2.0, r.w, r.h),
+            );
+        }
+    }
+    out
+}
+
+/// `a` moved `t` (0-1) of the way to `b`.
+pub fn between(a: Rect, b: Rect, t: f32) -> Rect {
+    let m = |x: f32, y: f32| x + (y - x) * t;
+    Rect::new(m(a.x, b.x), m(a.y, b.y), m(a.w, b.w), m(a.h, b.h))
+}
+
+/// The eased share (0-1) of a slide `elapsed` seconds into it.
+pub fn eased(elapsed: f32) -> f32 {
+    let t = (elapsed / style::REFLOW_SECONDS).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }
 
 fn text(words: String, color: Role, size: f32, max_width: Option<f32>) -> Node {
@@ -121,7 +163,8 @@ fn app(grid: &Grid, at_shown: usize, index: usize, f: &Frame) -> Node {
             }),
     };
     let icon = if f.editing {
-        // A layer puts its children at its top, centred across: the badge goes left.
+        // A layer puts its children at its top, centred across: the badge goes right
+        // (asked for by the user: on the icon's top-right corner).
         let over = style::BADGE * style::BADGE_OVER;
         let badge = Node::layer(vec![text(MINUS.into(), Role::White, style::BADGE_TEXT, None)])
             .size(Some(style::BADGE), Some(style::BADGE))
@@ -130,7 +173,7 @@ fn app(grid: &Grid, at_shown: usize, index: usize, f: &Frame) -> Node {
                 border: Some((Role::GlassLine, 1.0)),
                 radius: style::BADGE / 2.0,
             })
-            .offset(-(style::ICON - style::BADGE) / 2.0 - over, -over)
+            .offset((style::ICON - style::BADGE) / 2.0 + over, -over)
             .hit(hit::HIDE, u32::try_from(at_shown).unwrap_or(u32::MAX));
         Node::layer(vec![picture, badge]).size(Some(style::ICON), Some(style::ICON))
     } else {
@@ -172,7 +215,12 @@ pub fn page(grid: &Grid, p: Option<usize>, f: &Frame) -> Node {
     };
     for (local, place) in cells.into_iter().enumerate() {
         let Some((at_shown, index)) = place else { continue };
-        let r = cell(grid, local, f.size);
+        let mut r = cell(grid, local, f.size);
+        if let (Some((from, t)), Some(e)) = (f.reflow, grid.entry(index)) {
+            if let Some(was) = from.get(&e.open) {
+                r = between(*was, r, t);
+            }
+        }
         layers.push(at(Node::layer(vec![app(grid, at_shown, index, f)]), r, f.size));
     }
     if let Some(d) = f.drag.filter(|_| p == grid.page()) {
@@ -390,6 +438,7 @@ mod tests {
             editing: false,
             drag: None,
             wiggle: None,
+            reflow: None,
         }
     }
 
@@ -583,6 +632,46 @@ mod tests {
         assert!(c.x + c.w <= f.x + f.w, "inside the field");
     }
 
+    /// Asked for by the user: apps slide to their new places. Each app's place on the
+    /// page (the dragged one under the mouse); a slide halfway; easing from 0 to 1; a
+    /// drawn app between its old and new place.
+    #[test]
+    fn apps_slide_to_their_new_places() {
+        let i18n = I18n::new(Lang::En);
+        let g = grid(6);
+        let mouse = Point { x: 900.0, y: 500.0 };
+        let p = places(
+            &g,
+            0,
+            Some(Drag {
+                from: 1,
+                to: 4,
+                at: mouse,
+            }),
+            SIZE,
+        );
+        assert_eq!(p.len(), 6);
+        assert!(p["open 1"].contains(mouse), "the dragged one under the mouse");
+        assert_eq!(p["open 2"], cell(&g, 1, SIZE), "closed up into the gap");
+        let a = Rect::new(0.0, 0.0, 10.0, 10.0);
+        let b = Rect::new(100.0, 50.0, 10.0, 10.0);
+        assert_eq!(between(a, b, 0.5), Rect::new(50.0, 25.0, 10.0, 10.0));
+        assert_eq!((eased(0.0), eased(10.0)), (0.0, 1.0));
+        assert!(eased(style::REFLOW_SECONDS / 2.0) > 0.4 && eased(style::REFLOW_SECONDS / 2.0) < 0.6);
+        // Drawn mid-slide: app 2 between where it was and its cell.
+        let from: HashMap<String, Rect> = [("open 2".to_string(), cell(&g, 4, SIZE))].into();
+        let none = HashMap::new();
+        let mut f = frame(&i18n, &none, None);
+        f.reflow = Some((&from, 0.5));
+        let l = layout(&page(&g, Some(0), &f), Point::default(), &Fake);
+        let drawn = hits(&l, hit::APP).into_iter().find(|(_, v)| *v == 2).unwrap().0;
+        let (old, new) = (cell(&g, 4, SIZE), cell(&g, 2, SIZE));
+        assert!(
+            drawn.x > new.x.min(old.x) && drawn.x < new.x.max(old.x) || drawn.y != new.y,
+            "{drawn:?}"
+        );
+    }
+
     /// Asked for by the user: while editing, the loaded icons wiggle, each by its own
     /// turn; still, none is turned.
     #[test]
@@ -612,7 +701,7 @@ mod tests {
 
     /// Asked for by the user (hide, show and move the grid's apps). Editing, every app
     /// carries a badge that hides it, found before the app under it, over its icon's
-    /// top-left corner; Done and the words that tell what to do take the search's place.
+    /// top-right corner; Done and the words that tell what to do take the search's place.
     #[test]
     fn editing_shows_a_badge_on_every_app_and_done() {
         let i18n = I18n::new(Lang::En);
@@ -632,8 +721,8 @@ mod tests {
             assert_eq!((found.module, found.value), (hit::HIDE, *at), "the badge wins");
             let app = hits(&l, hit::APP).into_iter().find(|(_, v)| v == at).unwrap().0;
             assert!(
-                badge.x < app.x + app.w / 2.0 && badge.y < app.y + app.h / 2.0,
-                "top-left"
+                badge.x + badge.w > app.x + app.w / 2.0 && badge.y < app.y + app.h / 2.0,
+                "top-right"
             );
         }
         let chrome_l = layout(&chrome(&g, &f), Point::default(), &Fake);

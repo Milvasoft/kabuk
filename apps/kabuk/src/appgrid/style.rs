@@ -46,7 +46,7 @@ pub const CARET_LINE: f32 = 1.25;
 
 /// Editing the grid (moving and hiding apps): a press held this long on an app begins it
 /// (milliseconds), as a right click does; each app shows a badge this big that hides it,
-/// over its icon's top-left corner by this share of the badge; the dragged app follows
+/// over its icon's top-right corner (asked for by the user) by this share of the badge; the dragged app follows
 /// the mouse; held this close to the side edges (DIPs) for this long (milliseconds), it
 /// turns the page. Done stands where the search field is, this wide, with the words that
 /// tell what to do under it.
@@ -56,6 +56,9 @@ pub const HOLD_MS: u64 = 500;
 pub const WIGGLE_DEGREES: f32 = 2.5;
 pub const WIGGLE_PERIOD: f32 = 0.26;
 pub const WIGGLE_FRAME_MS: u64 = 33;
+/// Apps making room for a dragged one, or taking their new places, slide there this long
+/// (seconds; asked for by the user).
+pub const REFLOW_SECONDS: f32 = 0.2;
 pub const BADGE: f32 = 24.0;
 pub const BADGE_OVER: f32 = 0.3;
 pub const BADGE_TEXT: f32 = 16.0;

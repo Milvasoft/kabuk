@@ -116,6 +116,42 @@ struct Open {
     edge: Option<isize>,
     /// Since when the icons wiggle (editing, with animations on).
     wiggle: Option<Instant>,
+    /// Apps sliding to new places: where each was, and since when (editing, with
+    /// animations on; the wiggle's frames draw it).
+    reflow: Reflow,
+}
+
+impl Open {
+    /// Where each app of the page on screen is drawn now, mid-slide too.
+    fn places_now(&self) -> HashMap<String, kabuk_ui::geom::Rect> {
+        let mut now = view::places(&self.grid, self.grid.page(), self.drag, self.size);
+        if let Some((from, since)) = &self.reflow {
+            let t = view::eased(since.elapsed().as_secs_f32());
+            for (open, r) in now.iter_mut() {
+                if let Some(was) = from.get(open) {
+                    *r = view::between(*was, *r, t);
+                }
+            }
+        }
+        now
+    }
+
+    /// The apps slide from where they are drawn now to their next places (when the
+    /// icons wiggle: their frames draw the slide).
+    fn begin_reflow(&mut self) {
+        if self.wiggle.is_some() {
+            self.reflow = Some((self.places_now(), Instant::now()));
+        }
+    }
+}
+
+/// A reflow as a frame draws it: where each app was and how far along; none once over.
+type Reflow = Option<(HashMap<String, kabuk_ui::geom::Rect>, Instant)>;
+
+fn reflow_now(reflow: &Reflow) -> Option<(&HashMap<String, kabuk_ui::geom::Rect>, f32)> {
+    let (from, since) = reflow.as_ref()?;
+    let elapsed = since.elapsed().as_secs_f32();
+    (elapsed < style::REFLOW_SECONDS).then(|| (from, view::eased(elapsed)))
 }
 
 impl Open {
@@ -442,6 +478,7 @@ impl Shared {
             editing: o.editing,
             drag: o.drag,
             wiggle: o.wiggle.map(|t| t.elapsed().as_secs_f32()),
+            reflow: reflow_now(&o.reflow),
         };
         let layout = kabuk_ui::node::layout(
             &view::strip(&o.grid, [None, o.slots[1], None], &frame),
@@ -494,6 +531,10 @@ impl Shared {
                 }
             }
         }
+        // A new gap: the others slide to make room (and out of the old one).
+        if o.drag.map(|d| d.to) != Some(to) {
+            o.begin_reflow();
+        }
         o.drag = Some(view::Drag { from, to, at });
         self.render_app_grid(false, true);
     }
@@ -520,6 +561,8 @@ impl Shared {
         }
         let Some(o) = self.app_grid.open.as_mut() else { return };
         o.edge = None;
+        // The dropped app slides from the mouse into its place.
+        o.begin_reflow();
         let Some(d) = o.drag.take() else { return };
         let list = o.grid.shown_opens();
         let mut a = self.app_grid_arrangement();
@@ -536,6 +579,10 @@ impl Shared {
         let Some(e) = self.app_grid.open.as_ref().and_then(|o| o.grid.shown_at(at)).cloned() else {
             return;
         };
+        if let Some(o) = self.app_grid.open.as_mut() {
+            // The others close up the hidden app's place.
+            o.begin_reflow();
+        }
         let mut a = self.app_grid_arrangement();
         if a.hide(&e.open, &e.name) {
             tracing::info!(app = %e.name, "app grid app hidden");
@@ -617,6 +664,7 @@ impl Shared {
             drag: None,
             edge: None,
             wiggle: None,
+            reflow: None,
         });
         self.render_app_grid(true, true);
         if let Some(o) = self.app_grid.open.as_ref() {
@@ -705,6 +753,7 @@ impl Shared {
             editing: o.editing,
             drag: o.drag,
             wiggle: o.wiggle.map(|t| t.elapsed().as_secs_f32()),
+            reflow: reflow_now(&o.reflow),
         };
         if chrome {
             let layout = kabuk_ui::node::layout(&view::chrome(&o.grid, &frame), Point::default(), &gpu.text);
