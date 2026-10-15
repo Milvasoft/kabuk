@@ -1411,17 +1411,24 @@ impl Wm {
     /// fails it stays visible.
     fn apply(&mut self, effects: Vec<Effect>) {
         self.animate_moves(&effects);
+        // The windows to hide are on disk together before any of them hides, and those
+        // shown again leave the record together, after.
+        let hiding: Vec<Hwnd> = effects
+            .iter()
+            .filter_map(|e| match e {
+                Effect::Hide(id) => Some(Hwnd(*id)),
+                _ => None,
+            })
+            .collect();
+        self.hide_all(&hiding);
+        let mut shown = Vec::new();
         let mut placed = false;
         for e in effects {
             match e {
-                Effect::Hide(id) => self.hide(Hwnd(id)),
+                Effect::Hide(_) => {}
                 Effect::Show(id) => {
-                    let h = Hwnd(id);
-                    h.show_async();
-                    let result = lock(&self.state).remove_hidden(id);
-                    if let Err(e) = result {
-                        tracing::error!(error = %e, "hidden record not cleared");
-                    }
+                    Hwnd(id).show_async();
+                    shown.push(id);
                 }
                 Effect::Place(id, r) => {
                     // Windows stay where they are while a full-screen program runs there.
@@ -1445,6 +1452,12 @@ impl Wm {
                     }
                     self.update_border();
                 }
+            }
+        }
+        if !shown.is_empty() {
+            let result = lock(&self.state).remove_hidden_all(&shown);
+            if let Err(e) = result {
+                tracing::error!(error = %e, "hidden record not cleared");
             }
         }
         if placed {
@@ -1662,20 +1675,31 @@ impl Wm {
         }
     }
 
-    fn hide(&mut self, h: Hwnd) {
-        let Some(pid) = h.pid() else { return };
-        let record = HiddenWindow {
-            hwnd: h.0,
-            pid,
-            class: h.class_name(),
-            title: h.title(),
-        };
-        let result = lock(&self.state).add_hidden(record);
+    /// Records `windows` in the state file, in one write, then hides them (a window
+    /// gone meanwhile is left out).
+    fn hide_all(&mut self, windows: &[Hwnd]) {
+        let records: Vec<HiddenWindow> = windows
+            .iter()
+            .filter_map(|h| {
+                Some(HiddenWindow {
+                    hwnd: h.0,
+                    pid: h.pid()?,
+                    class: h.class_name(),
+                    title: h.title(),
+                })
+            })
+            .collect();
+        if records.is_empty() {
+            return;
+        }
+        let result = lock(&self.state).add_hidden_all(records.clone());
         match result {
             Ok(()) => {
-                h.hide_async();
+                for r in &records {
+                    Hwnd(r.hwnd).hide_async();
+                }
             }
-            Err(e) => tracing::error!(hwnd = h.0, error = %e, "window not recorded; left visible"),
+            Err(e) => tracing::error!(windows = records.len(), error = %e, "windows not recorded; left visible"),
         }
     }
 

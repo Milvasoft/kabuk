@@ -299,15 +299,36 @@ impl StateFile {
 
     /// Records a window about to be hidden. Call before hiding it.
     pub fn add_hidden(&mut self, window: HiddenWindow) -> Result<(), StateError> {
+        self.add_hidden_all(vec![window])
+    }
+
+    /// Records windows about to be hidden, with one write (a workspace switch hides many:
+    /// one write each made it slow on a slow disk, found in the test VM). Call before
+    /// hiding them.
+    pub fn add_hidden_all(&mut self, windows: Vec<HiddenWindow>) -> Result<(), StateError> {
+        if windows.is_empty() {
+            return Ok(());
+        }
         self.update(|s| {
-            s.hidden_windows.retain(|w| w.hwnd != window.hwnd);
-            s.hidden_windows.push(window);
+            for window in windows {
+                s.hidden_windows.retain(|w| w.hwnd != window.hwnd);
+                s.hidden_windows.push(window);
+            }
         })
     }
 
     /// Forgets a window after it was shown again.
     pub fn remove_hidden(&mut self, hwnd: u64) -> Result<(), StateError> {
-        self.update(|s| s.hidden_windows.retain(|w| w.hwnd != hwnd))
+        self.remove_hidden_all(&[hwnd])
+    }
+
+    /// Forgets windows after they were shown again, with one write (none when none of
+    /// them was recorded).
+    pub fn remove_hidden_all(&mut self, hwnds: &[u64]) -> Result<(), StateError> {
+        if !self.state.hidden_windows.iter().any(|w| hwnds.contains(&w.hwnd)) {
+            return Ok(());
+        }
+        self.update(|s| s.hidden_windows.retain(|w| !hwnds.contains(&w.hwnd)))
     }
 
     /// Records a window about to get a coloured border. Call before colouring it.
@@ -428,6 +449,37 @@ mod tests {
         f.remove_hidden(2).unwrap();
         f.remove_hidden(99).unwrap();
         assert_eq!(StateFile::read(&p).unwrap().hidden_windows, vec![window(1)]);
+    }
+
+    /// Many windows hidden at once are on disk together, in one write; shown again,
+    /// they go together; none at all writes nothing.
+    #[test]
+    fn windows_hidden_together_are_recorded_in_one_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("state.json");
+        let mut f = StateFile::open(&p).unwrap();
+        f.add_hidden_all(vec![window(1), window(2), window(3), window(2)])
+            .unwrap();
+        let hwnds = |p: &std::path::Path| -> Vec<u64> {
+            StateFile::read(p)
+                .unwrap()
+                .hidden_windows
+                .iter()
+                .map(|w| w.hwnd)
+                .collect()
+        };
+        assert_eq!(hwnds(&p), vec![1, 3, 2]);
+        let written = std::fs::metadata(&p).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        f.add_hidden_all(Vec::new()).unwrap();
+        f.remove_hidden_all(&[98, 99]).unwrap();
+        assert_eq!(
+            std::fs::metadata(&p).unwrap().modified().unwrap(),
+            written,
+            "nothing to write"
+        );
+        f.remove_hidden_all(&[1, 2, 99]).unwrap();
+        assert_eq!(hwnds(&p), vec![3]);
     }
 
     /// DECISIONS D20: the user's cursors are on disk before Kabuk sets its own, a value
