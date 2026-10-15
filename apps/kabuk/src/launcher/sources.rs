@@ -438,8 +438,15 @@ mod tests {
         make("gone", &gone);
         make("new", &new);
         std::fs::remove_file(&gone).unwrap();
+        // Found on GitHub's runner: its Temp folder is given in its short (8.3) name, the
+        // shortcuts' targets come back in the long one; both are compared as the long.
+        let long = |v: Vec<(PathBuf, bool)>| -> Vec<(PathBuf, bool)> {
+            v.into_iter()
+                .map(|(p, d)| (std::fs::canonicalize(&p).unwrap_or(p), d))
+                .collect()
+        };
         let got = recent(&recent_dir);
-        assert_eq!(got, vec![(new, false), (files.clone(), true), (old, false)]);
+        assert_eq!(long(got), long(vec![(new, false), (files.clone(), true), (old, false)]));
         assert!(recent(&dir.path().join("nope")).is_empty());
     }
 
