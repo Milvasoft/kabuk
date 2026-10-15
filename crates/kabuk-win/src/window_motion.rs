@@ -44,6 +44,11 @@ const GENIE_ROWS: usize = 128;
 /// costs ~49 MB (measured), more than Kabuk's idle budget, and takes ~180 ms to make, so
 /// it is made ahead (the mouse on an app's icon) and let go when no genie came for a while.
 const RENDERER_KEPT: Duration = Duration::from_secs(60);
+/// Frames drawn with the window's picture before the window counts as pictured (and may
+/// be minimised): the first is only on screen at the compositor's next frame, so with
+/// one the window could go a frame before its picture came (found with a probe: one
+/// frame of what is behind at every minimise from the bar).
+const PICTURED_FRAMES: u32 = 2;
 
 /// What the window moves' thread is told.
 enum Order {
@@ -745,7 +750,7 @@ fn run(rx: &mpsc::Receiver<Order>, ease: fn(f32) -> f32, pictured: &Pictured, tx
                 playing
                     .iter()
                     .filter_map(|p| p.gpu.as_ref())
-                    .filter(|(_, gg)| gg.pictured() > 0)
+                    .filter(|(_, gg)| gg.pictured() >= PICTURED_FRAMES)
                     .map(|(_, gg)| gg.source().0 as isize),
             );
         }
