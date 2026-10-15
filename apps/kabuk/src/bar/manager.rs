@@ -175,6 +175,8 @@ mod timer {
     pub const APP_GRID_EDGE: usize = 30;
     /// Kabuk's first start: the shortcut card greets the user.
     pub const GREETING: usize = 31;
+    /// The edited app grid's icons wiggle: the next frame.
+    pub const APP_GRID_WIGGLE: usize = 32;
 }
 
 /// An auto-hiding bar (SPEC §2.1): how much of it stays on screen for the mouse to reach
@@ -1211,6 +1213,7 @@ impl Shared {
                     timer::APP_GRID_HOLD => self.app_grid_held(),
                     timer::APP_GRID_EDGE => self.app_grid_edge_due(),
                     timer::GREETING => self.greeting_due(),
+                    timer::APP_GRID_WIGGLE => self.app_grid_wiggle_frame(),
                     timer::TRAY_AGAIN => {
                         self.kill(timer::TRAY_AGAIN);
                         let now = std::time::Instant::now();

@@ -118,6 +118,9 @@ pub struct ImageSpec {
     pub key: u64,
     pub size: f32,
     pub height: f32,
+    /// Turned about its centre by this many degrees (clockwise), as the app grid's icons
+    /// wiggle while it is edited.
+    pub turn: f32,
 }
 
 /// Fill, optional border and corner radius of a box.
@@ -233,7 +236,16 @@ impl Node {
             key,
             size,
             height: size,
+            turn: 0.0,
         }))
+    }
+
+    /// A picture turned about its centre by `degrees` (no effect on other nodes).
+    pub fn turned(mut self, degrees: f32) -> Node {
+        if let Kind::Image(spec) = &mut self.kind {
+            spec.turn = degrees;
+        }
+        self
     }
 
     /// A stored picture stretched to `w` × `h` DIPs (e.g. a blurred wallpaper).
@@ -242,6 +254,7 @@ impl Node {
             key,
             size: w,
             height: h,
+            turn: 0.0,
         }))
     }
 

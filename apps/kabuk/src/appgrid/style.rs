@@ -51,6 +51,11 @@ pub const CARET_LINE: f32 = 1.25;
 /// turns the page. Done stands where the search field is, this wide, with the words that
 /// tell what to do under it.
 pub const HOLD_MS: u64 = 500;
+/// While editing, each icon wiggles as on an iPhone (asked for by the user): this many
+/// degrees each way, once per this many seconds, drawn this often (milliseconds).
+pub const WIGGLE_DEGREES: f32 = 2.5;
+pub const WIGGLE_PERIOD: f32 = 0.26;
+pub const WIGGLE_FRAME_MS: u64 = 33;
 pub const BADGE: f32 = 24.0;
 pub const BADGE_OVER: f32 = 0.3;
 pub const BADGE_TEXT: f32 = 16.0;

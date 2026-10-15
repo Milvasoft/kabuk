@@ -89,6 +89,15 @@ impl Shape {
     }
 }
 
+/// How far the icon at place `at` is turned (degrees) `seconds` into editing: each
+/// wiggles back and forth, out of step with its neighbours, as on an iPhone.
+pub fn wiggle(seconds: f32, at: usize) -> f32 {
+    // The golden angle spreads the icons' steps apart; every other one starts the other way.
+    let phase = at as f32 * 2.399_963;
+    let way = if at % 2 == 0 { 1.0 } else { -1.0 };
+    way * super::style::WIGGLE_DEGREES * (std::f32::consts::TAU * seconds / super::style::WIGGLE_PERIOD + phase).sin()
+}
+
 /// An arrow key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dir {
@@ -414,6 +423,25 @@ mod tests {
     }
 
     const SHAPE: Shape = Shape { columns: 3, rows: 2 };
+
+    /// Asked for by the user: icons wiggle while the grid is edited, within the swing,
+    /// back and forth over a period, and not in step with their neighbours.
+    #[test]
+    fn icons_wiggle_out_of_step() {
+        use crate::appgrid::style::{WIGGLE_DEGREES, WIGGLE_PERIOD};
+        for at in 0..12 {
+            let angles: Vec<f32> = (0..40).map(|i| wiggle(i as f32 * 0.01, at)).collect();
+            assert!(angles.iter().all(|a| a.abs() <= WIGGLE_DEGREES + 1e-4), "{at}");
+            assert!(
+                angles.iter().any(|a| *a > WIGGLE_DEGREES * 0.8) && angles.iter().any(|a| *a < -WIGGLE_DEGREES * 0.8)
+            );
+            assert!(
+                (wiggle(0.1, at) - wiggle(0.1 + WIGGLE_PERIOD, at)).abs() < 1e-3,
+                "periodic"
+            );
+        }
+        assert!((wiggle(0.05, 0) - wiggle(0.05, 1)).abs() > 0.5, "neighbours apart");
+    }
 
     /// The user moving an app: its place leaves a gap where it will drop, the others close
     /// up around it, on its page and the next; the cells past the last app stand for the

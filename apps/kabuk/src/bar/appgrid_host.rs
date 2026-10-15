@@ -114,6 +114,8 @@ struct Open {
     drag: Option<view::Drag>,
     /// The way a dragged app held at a side edge turns the page, once its time is up.
     edge: Option<isize>,
+    /// Since when the icons wiggle (editing, with animations on).
+    wiggle: Option<Instant>,
 }
 
 impl Open {
@@ -390,11 +392,68 @@ impl Shared {
         o.editing = on;
         o.drag = None;
         o.edge = None;
+        // The icons wiggle while editing, unless the user turned animations off.
+        let wiggles = on && self.motion_level() == Level::Full;
+        let Some(o) = self.app_grid.open.as_mut() else { return };
+        o.wiggle = wiggles.then(Instant::now);
+        if let Some(c) = &self.control {
+            if wiggles {
+                c.set_timer(timer::APP_GRID_WIGGLE, Duration::from_millis(style::WIGGLE_FRAME_MS));
+            } else {
+                c.kill_timer(timer::APP_GRID_WIGGLE);
+            }
+        }
         if on && o.grid.clear() {
             o.slots = model::slots(o.grid.page(), o.grid.pages());
         }
         tracing::info!(on, "app grid editing");
         self.render_app_grid(true, true);
+    }
+
+    /// The next frame of the wiggle: only the page on screen is drawn (the pages beside it
+    /// show only while sliding, and a slide's frames are its own).
+    pub(super) fn app_grid_wiggle_frame(&mut self) {
+        match self.app_grid.open.as_ref() {
+            Some(o) if o.wiggle.is_some() => {
+                if o.sliding.is_some() {
+                    return;
+                }
+            }
+            _ => {
+                self.kill(timer::APP_GRID_WIGGLE);
+                return;
+            }
+        }
+        let Shared {
+            app_grid,
+            gpu,
+            i18n,
+            look,
+            ..
+        } = self;
+        let AppGridState { open, pictures, .. } = app_grid;
+        let Some(o) = open.as_mut() else { return };
+        let frame = view::Frame {
+            size: o.size,
+            i18n,
+            text_scale: look.style.text_scale,
+            pictures: &pictures.loaded,
+            backdrop: o.backdrop,
+            editing: o.editing,
+            drag: o.drag,
+            wiggle: o.wiggle.map(|t| t.elapsed().as_secs_f32()),
+        };
+        let layout = kabuk_ui::node::layout(
+            &view::strip(&o.grid, [None, o.slots[1], None], &frame),
+            Point::default(),
+            &gpu.text,
+        );
+        if let Some(s) = o.sheet.surface_mut() {
+            if let Err(e) = s.render(gpu, &layout, &look.palette, o.scale, (0.0, 0.0), None) {
+                tracing::debug!(error = %e, "app grid wiggle not drawn");
+            }
+        }
+        let _ = gpu.commit();
     }
 
     /// The held press's time is up: editing begins, the press now moving its app.
@@ -557,6 +616,7 @@ impl Shared {
             editing: false,
             drag: None,
             edge: None,
+            wiggle: None,
         });
         self.render_app_grid(true, true);
         if let Some(o) = self.app_grid.open.as_ref() {
@@ -591,7 +651,12 @@ impl Shared {
             o.sheet.window().capture_mouse(false);
         }
         if let Some(c) = &self.control {
-            for t in [timer::APP_GRID_SLIDE, timer::APP_GRID_HOLD, timer::APP_GRID_EDGE] {
+            for t in [
+                timer::APP_GRID_SLIDE,
+                timer::APP_GRID_HOLD,
+                timer::APP_GRID_EDGE,
+                timer::APP_GRID_WIGGLE,
+            ] {
                 c.kill_timer(t);
             }
         }
@@ -639,6 +704,7 @@ impl Shared {
             backdrop: o.backdrop,
             editing: o.editing,
             drag: o.drag,
+            wiggle: o.wiggle.map(|t| t.elapsed().as_secs_f32()),
         };
         if chrome {
             let layout = kabuk_ui::node::layout(&view::chrome(&o.grid, &frame), Point::default(), &gpu.text);

@@ -50,6 +50,8 @@ pub struct Frame<'a> {
     /// the search field is.
     pub editing: bool,
     pub drag: Option<Drag>,
+    /// Seconds into editing, while the icons wiggle (`None`: still).
+    pub wiggle: Option<f32>,
 }
 
 fn text(words: String, color: Role, size: f32, max_width: Option<f32>) -> Node {
@@ -106,7 +108,10 @@ fn app(grid: &Grid, at_shown: usize, index: usize, f: &Frame) -> Node {
         return Node::spacer(0.0, 0.0);
     };
     let picture = match f.pictures.get(&e.open) {
-        Some(key) => Node::image(*key, style::ICON),
+        Some(key) => {
+            let turn = f.wiggle.map_or(0.0, |s| super::model::wiggle(s, at_shown));
+            Node::image(*key, style::ICON).turned(turn)
+        }
         None => Node::layer(vec![Node::icon("app", style::PLACEHOLDER_GLYPH, Role::White)])
             .size(Some(style::ICON), Some(style::ICON))
             .paint(Paint {
@@ -384,6 +389,7 @@ mod tests {
             backdrop,
             editing: false,
             drag: None,
+            wiggle: None,
         }
     }
 
@@ -575,6 +581,33 @@ mod tests {
         let typed = words(&l, "ab").expect("the words");
         assert!(c.x >= typed.x + typed.w - 0.5, "after the words: {c:?} {typed:?}");
         assert!(c.x + c.w <= f.x + f.w, "inside the field");
+    }
+
+    /// Asked for by the user: while editing, the loaded icons wiggle, each by its own
+    /// turn; still, none is turned.
+    #[test]
+    fn edited_icons_wiggle() {
+        let i18n = I18n::new(Lang::En);
+        let g = grid(4);
+        let pictures: HashMap<String, u64> = (0..4).map(|i| (format!("open {i}"), 100 + i)).collect();
+        let turns = |wiggle: Option<f32>| -> Vec<f32> {
+            let mut f = frame(&i18n, &pictures, None);
+            f.editing = true;
+            f.wiggle = wiggle;
+            layout(&page(&g, Some(0), &f), Point::default(), &Fake)
+                .draws
+                .iter()
+                .filter_map(|d| match d {
+                    Draw::Image { spec, .. } => Some(spec.turn),
+                    _ => None,
+                })
+                .collect()
+        };
+        assert_eq!(turns(None), [0.0; 4]);
+        let moving = turns(Some(0.05));
+        assert_eq!(moving.len(), 4);
+        assert!(moving.iter().all(|t| *t != 0.0) && moving[0] != moving[1], "{moving:?}");
+        assert_eq!(moving[2], crate::appgrid::model::wiggle(0.05, 2));
     }
 
     /// Asked for by the user (hide, show and move the grid's apps). Editing, every app

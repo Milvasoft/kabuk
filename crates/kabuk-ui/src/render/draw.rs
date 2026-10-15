@@ -303,7 +303,7 @@ pub(crate) fn draw_layout(gpu: &Gpu, ctx: &ID2D1DeviceContext, icons: &mut IconC
                 unsafe { ctx.DrawTextLayout(at, &text_layout, &default, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT) };
             }
             Draw::Icon { rect, spec } => icon(gpu, ctx, icons, &mut brush, rect.offset(ox, oy), spec)?,
-            Draw::Image { rect, spec } => image(gpu, ctx, rect.offset(ox, oy), spec.key)?,
+            Draw::Image { rect, spec } => image(gpu, ctx, rect.offset(ox, oy), spec.key, spec.turn)?,
         }
     }
     Ok(())
@@ -390,7 +390,7 @@ fn panel(
 }
 
 /// A stored picture, scaled into `rect`; nothing when the key is unknown.
-fn image(gpu: &Gpu, ctx: &ID2D1DeviceContext, rect: Rect, key: u64) -> Result<()> {
+fn image(gpu: &Gpu, ctx: &ID2D1DeviceContext, rect: Rect, key: u64, turn: f32) -> Result<()> {
     use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
     let made = gpu.images.with(key, |(w, h), px| {
         let props = D2D1_BITMAP_PROPERTIES1 {
@@ -419,8 +419,26 @@ fn image(gpu: &Gpu, ctx: &ID2D1DeviceContext, rect: Rect, key: u64) -> Result<()
         (transform.M31, transform.M32),
         dpi_x / crate::geom::Scale::BASE_DPI,
     );
-    // SAFETY: drawing between BeginDraw/EndDraw on the caller's context.
+    // Turned about its centre, then wherever the caller put the drawing.
+    let turned = (turn != 0.0).then(|| {
+        let (c, s) = (turn.to_radians().cos(), turn.to_radians().sin());
+        let (cx, cy) = (rect.x + rect.w / 2.0, rect.y + rect.h / 2.0);
+        let about = Matrix3x2 {
+            M11: c,
+            M12: s,
+            M21: -s,
+            M22: c,
+            M31: cx - c * cx + s * cy,
+            M32: cy - s * cx - c * cy,
+        };
+        multiply(&about, &transform)
+    });
+    // SAFETY: drawing between BeginDraw/EndDraw on the caller's context; the transform
+    // is restored afterwards.
     unsafe {
+        if let Some(t) = &turned {
+            ctx.SetTransform(t);
+        }
         ctx.DrawBitmap(
             &bitmap,
             Some(&rect_f(rect)),
@@ -428,7 +446,10 @@ fn image(gpu: &Gpu, ctx: &ID2D1DeviceContext, rect: Rect, key: u64) -> Result<()
             D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
             None,
             None,
-        )
+        );
+        if turned.is_some() {
+            ctx.SetTransform(&transform);
+        }
     };
     Ok(())
 }

@@ -187,6 +187,26 @@ fn a_wide_picture_is_stretched_to_its_size() {
     assert!(right[2] > 200 && right[0] < 60, "{right:?}");
 }
 
+/// The app grid's icons wiggle while it is edited (asked for by the user): a picture
+/// turned about its centre leaves its corners empty and keeps its middle; unturned, its
+/// corners are drawn.
+#[test]
+fn a_turned_picture_turns_about_its_centre() {
+    let g = gpu();
+    // A plain white 4 × 4 square.
+    g.images.set_sized(11, 4, 4, vec![255; 4 * 4 * 4]);
+    let draw = |turn: f32| {
+        let l = layout(&Node::image(11, 40.0).turned(turn), Point::default(), &g.text);
+        g.render_pixels(&l, &palette(), Scale(1.0), 40, 40, Color::BLACK)
+            .unwrap()
+    };
+    let straight = draw(0.0);
+    assert!(straight.at(1, 1)[0] > 200, "{:?}", straight.at(1, 1));
+    let turned = draw(30.0);
+    assert!(turned.at(1, 1)[0] < 40, "the corner turned away: {:?}", turned.at(1, 1));
+    assert!(turned.at(20, 20)[0] > 200, "the middle stays: {:?}", turned.at(20, 20));
+}
+
 #[test]
 fn space_after_a_span_widens_the_text_by_that_much() {
     let g = gpu();
