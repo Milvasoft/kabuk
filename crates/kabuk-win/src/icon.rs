@@ -96,11 +96,25 @@ pub fn shell_item_icon_pixels(name: &str, size: u32) -> Option<Vec<u8>> {
     if rows != side {
         return None;
     }
-    // The shell gives premultiplied alpha; a picture without any is opaque.
+    // A picture without any alpha is opaque.
     if px.chunks_exact(BYTES_PER_PIXEL).all(|p| p[3] == 0) {
         px.chunks_exact_mut(BYTES_PER_PIXEL).for_each(|p| p[3] = u8::MAX);
     }
+    // The shell gives straight alpha; the renderer takes premultiplied (found by the
+    // user: drawn as it came, the soft edges of the dock's and the app grid's icons
+    // showed as white specks).
+    premultiply(&mut px);
     Some(px)
+}
+
+/// Straight-alpha BGRA pixels made premultiplied: each colour times its alpha.
+fn premultiply(px: &mut [u8]) {
+    for p in px.chunks_exact_mut(BYTES_PER_PIXEL) {
+        let a = u16::from(p[3]);
+        for c in &mut p[..3] {
+            *c = u8::try_from((u16::from(*c) * a + 127) / 255).unwrap_or(u8::MAX);
+        }
+    }
 }
 
 /// Icon `index` of a file (an `.ico`, a program's resources) at `size`×`size`, as
@@ -295,8 +309,23 @@ mod tests {
             assert_eq!(px.len(), 24 * 24 * 4);
             assert!(px.chunks_exact(4).any(|p| p[3] > 0), "{name}: empty");
             assert!(px.chunks_exact(4).any(|p| p[3] == 0), "{name}: no transparent corner");
+            // Premultiplied, as the renderer draws them: no channel above its alpha (found
+            // by the user: white specks around the dock's and the app grid's icons).
+            let bright = px
+                .chunks_exact(4)
+                .filter(|p| p[0] > p[3] || p[1] > p[3] || p[2] > p[3])
+                .count();
+            assert_eq!(bright, 0, "{name}: {bright} pixels brighter than their alpha");
         }
         assert!(shell_item_icon_pixels(r"C:\nope\missing.exe", 24).is_none());
+    }
+
+    /// Edge cases: transparent, opaque and half-transparent pixels, the rounding.
+    #[test]
+    fn straight_alpha_becomes_premultiplied() {
+        let mut px = vec![255, 255, 255, 0, 10, 20, 30, 255, 255, 128, 0, 128, 200, 100, 50, 1];
+        premultiply(&mut px);
+        assert_eq!(px, [0, 0, 0, 0, 10, 20, 30, 255, 128, 64, 0, 128, 1, 0, 0, 1]);
     }
 
     /// Edge cases: a wide PNG (Kabuk's mark) fitted into a square and centred, its
