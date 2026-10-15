@@ -51,17 +51,22 @@ pub fn cells(n: usize, area: Rect, gap: i32) -> Vec<Rect> {
         .collect()
 }
 
-/// `window` (in `area`) scaled into `cell`, which has the area's shape.
+/// `window` (in `area`) scaled into `cell`, which has the area's shape; a window reaching
+/// past the area (a maximised one's frame) is cut to the cell, so it never covers what is
+/// around the cell (the shown cell's frame).
 pub fn place_in(window: Rect, area: Rect, cell: Rect) -> Rect {
     let sx = f64::from(cell.w) / f64::from(area.w.max(1));
     let sy = f64::from(cell.h) / f64::from(area.h.max(1));
     let x = cell.x + (f64::from(window.x - area.x) * sx).round() as i32;
     let y = cell.y + (f64::from(window.y - area.y) * sy).round() as i32;
+    let right = x + (f64::from(window.w) * sx).round() as i32;
+    let bottom = y + (f64::from(window.h) * sy).round() as i32;
+    let (x, y) = (x.max(cell.x), y.max(cell.y));
     Rect {
         x,
         y,
-        w: (f64::from(window.w) * sx).round() as i32,
-        h: (f64::from(window.h) * sy).round() as i32,
+        w: (right.min(cell.right()) - x).max(0),
+        h: (bottom.min(cell.bottom()) - y).max(0),
     }
 }
 
@@ -134,6 +139,30 @@ mod tests {
         w: 1080,
         h: 1920,
     };
+
+    /// Found by the user: a maximised window's frame reaches a few pixels past the work
+    /// area, and its thumbnail, scaled with it, covered the top of the shown cell's frame.
+    #[test]
+    fn a_window_past_the_area_stays_inside_its_cell() {
+        let cell = Rect {
+            x: 100,
+            y: 100,
+            w: 1000,
+            h: 514,
+        };
+        let past = Rect {
+            x: WIDE.x - 8,
+            y: WIDE.y - 7,
+            w: WIDE.w + 16,
+            h: WIDE.h + 15,
+        };
+        let placed = place_in(past, WIDE, cell);
+        assert!(cell.contains(&placed), "{placed:?} outside {cell:?}");
+        assert_eq!(place_in(WIDE, WIDE, cell), cell);
+        // A window inside keeps its share of the cell.
+        let half = Rect { w: WIDE.w / 2, ..WIDE };
+        assert_eq!(place_in(half, WIDE, cell), Rect { w: 500, ..cell });
+    }
 
     #[test]
     fn grids_are_as_square_as_the_area() {
