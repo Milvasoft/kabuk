@@ -49,7 +49,7 @@ If anything is left hidden: `Ctrl+Alt+Shift+End`, or `kabuk.exe --restore`. Ever
 powershell -ExecutionPolicy Bypass -File tools/check.ps1
 ```
 
-Formatting, clippy with warnings as errors, every unit test, the Windows integration tests (they run the real shell on your desktop for a few seconds at a time) and the design page's checks. `docs/TESTING.md` has the rules.
+Formatting, clippy with warnings as errors, every unit test, the Windows integration tests (they run the real shell on your desktop for a few seconds at a time; on CI they are left to the test VM, `tools/vm/run.ps1`) and the design page's checks. `docs/TESTING.md` has the rules.
 
 ## Documents
 

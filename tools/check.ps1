@@ -32,9 +32,17 @@ Step 'cargo fmt --check' { cargo fmt --all -- --check }
 Step 'cargo clippy (all targets, all features, -D warnings)' { cargo clippy --workspace --all-targets --all-features -- -D warnings }
 # The integration tests start kabuk-watchdog.exe and kabuk-testapp.exe from the target directory.
 Step 'cargo build --workspace' { cargo build --workspace }
-Step 'cargo test --workspace' { cargo test --workspace }
 # Every test file runs even when one fails, so one failure cannot hide another.
-Step 'integration tests' { cargo test -p kabuk --features integration --no-fail-fast -- --test-threads=1 }
+Step 'cargo test --workspace' { cargo test --workspace --no-fail-fast }
+# The integration tests run the real shell on a desktop. A CI runner has none they can
+# use (no taskbar of Explorer's to hide, no windows to capture): there they run in the
+# test VM instead (tools/vm/run.ps1).
+if ($env:CI) {
+    Write-Host ""
+    Write-Host "==> integration tests: not on a CI runner (no desktop); run tools/vm/run.ps1" -ForegroundColor Yellow
+} else {
+    Step 'integration tests' { cargo test -p kabuk --features integration --no-fail-fast -- --test-threads=1 }
+}
 
 if (-not $SkipDesign) {
     if (-not (Test-Path (Join-Path $root 'node_modules/playwright'))) {

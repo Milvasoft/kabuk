@@ -33,7 +33,8 @@ jobs:
           npm ci
           npx playwright install chromium
 
-      # fmt, clippy -D warnings, all tests, Windows integration tests, contrast audit.
+      # fmt, clippy -D warnings, all tests, the design checks and contrast audit. The
+      # Windows integration tests need a desktop and run in the test VM (docs/TESTING.md).
       - name: tools/check.ps1
         shell: pwsh
         run: ./tools/check.ps1

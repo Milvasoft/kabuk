@@ -20,7 +20,7 @@ Kabuk runs on the user's everyday desktop; a bug loses windows or leaves the mac
 | Unit | Each crate's `#[cfg(test)]` modules | Every `cargo test` | std test |
 | Property | `kabuk-layout`, `kabuk-theme`, `kabuk-search` | Every `cargo test` | `proptest` |
 | Snapshot | Configuration parse errors, translation outputs, layout results | Every `cargo test` | `insta` |
-| Windows integration | `apps/kabuk/tests/` | `cargo test --features integration` (Windows only, also in CI) | `kabuk-testapp` |
+| Windows integration | `apps/kabuk/tests/` | `cargo test --features integration` (Windows with a desktop: the host or the test VM; not on CI runners) | `kabuk-testapp` |
 | End-to-end scenario | `apps/kabuk/tests/e2e/` | At the end of each milestone and before a release | driven by the real `kabuk.exe` + IPC, result verified with `query state` |
 | Visual and contrast | `tools/` | When the theme or drawing changes | Rendering to WIC + design page screenshot; contrast audit |
 | Performance | `apps/kabuk/tests/perf` | At the end of each milestone | 10 min idle CPU/RAM measurement, fails if a limit is exceeded |
@@ -109,3 +109,5 @@ The Windows integration tests take the tray, hide the taskbar, open windows and 
 - `tools/vm/screen.ps1 <out.png>` saves what the VM's screen shows, for visual checks.
 
 A change is done when `tools/check.ps1` passes on the host (its integration step may run on the host or be replaced by `tools/vm/run.ps1` while the user's desktop is busy; say which).
+
+GitHub's CI runners have no desktop the integration tests can use (no Explorer taskbar to hide, no windows to capture) and no graphics card (Windows' Basic Render Driver stands in). There `tools/check.ps1` runs everything else and leaves the integration step to the VM (it sees `CI` set); the GPU timing tests draw without measuring, and the window genie test, which captures a real window, says it has no capture and ends. Both run in full on the host and in the VM.

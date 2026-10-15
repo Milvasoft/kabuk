@@ -443,6 +443,9 @@ mod tests {
         std::fs::write(&target, "x").unwrap();
         let lnk = dir.path().join("t.lnk");
         write_shortcut(&lnk, &target).unwrap();
-        assert_eq!(shortcut_target(&lnk), Some(target));
+        // GitHub's runner gives its Temp folder in the short (8.3) name; the shortcut
+        // answers in the long one. Both are compared as the long.
+        let long = |p: PathBuf| std::fs::canonicalize(&p).unwrap_or(p);
+        assert_eq!(shortcut_target(&lnk).map(long), Some(long(target)));
     }
 }

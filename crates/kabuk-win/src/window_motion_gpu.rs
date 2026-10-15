@@ -691,7 +691,16 @@ mod tests {
             right: x0 + 2 * size + 20,
             bottom: y0 + size,
         };
-        let mut g = GpuGenie::new(&r, src, area, 8).expect("a genie");
+        let mut g = match GpuGenie::new(&r, src, area, 8) {
+            Ok(g) => g,
+            // A CI runner has no desktop whose windows can be captured; the genie is
+            // tried on a real desktop and in the test VM (docs/TESTING.md).
+            Err(e) if std::env::var_os("CI").is_some() && format!("{e:?}").contains("capture item") => {
+                println!("no window capture on this runner: {e:?}");
+                return;
+            }
+            Err(e) => panic!("a genie: {e:?}"),
+        };
         // A trapezoid: full width at the top, a quarter at the bottom.
         let rows: Vec<Row> = (0..=8)
             .map(|k| {
