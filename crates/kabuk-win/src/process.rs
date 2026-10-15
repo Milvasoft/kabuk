@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use windows::core::PWSTR;
 use windows::Win32::System::Threading::{
-    GetExitCodeProcess, OpenProcess, QueryFullProcessImageNameW, TerminateProcess, PROCESS_NAME_WIN32,
-    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
+    GetCurrentProcess, GetExitCodeProcess, OpenProcess, QueryFullProcessImageNameW, TerminateProcess,
+    PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
 };
 
 use crate::handle::{OwnedHandle, Waitable};
@@ -178,25 +178,39 @@ impl Process {
     }
 }
 
-/// Cycles per second of one core at its current clock, measured by spinning on the
-/// calling thread for `sample` (turbo and power saving make the nominal speed unreliable).
 /// Whether process `pid` runs with higher rights than Kabuk (an elevated, "Run as
-/// administrator" process), whose windows Kabuk cannot move (UIPI). A process whose
-/// token Kabuk may not read counts as elevated; a process that cannot be opened at all
-/// (gone) does not.
+/// administrator" process while Kabuk is not), whose windows Kabuk cannot move (UIPI).
+/// A process whose token Kabuk may not read counts as elevated; a process that cannot be
+/// opened at all (gone) does not. Kabuk elevated itself moves every window (found in the
+/// test VM, where with UAC off every process is elevated: every window floated).
 pub fn runs_elevated(pid: u32) -> bool {
-    use windows::Win32::Foundation::{ERROR_ACCESS_DENIED, HANDLE};
-    use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
-    use windows::Win32::System::Threading::OpenProcessToken;
+    static KABUK_ELEVATED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    // SAFETY: the pseudo handle of this process needs no closing.
+    let ours = *KABUK_ELEVATED.get_or_init(|| token_elevated(unsafe { GetCurrentProcess() }) == Some(true));
     // SAFETY: plain call; the returned handle is owned by the wrapper below.
     let Ok(process) = (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }) else {
         return false;
     };
     let process = OwnedHandle::new(process);
+    // A token Kabuk may not read is a higher one.
+    higher_rights(token_elevated(process.raw()).unwrap_or(true), ours)
+}
+
+/// Whether a process elevated or not (`theirs`) has more rights than Kabuk (`ours`).
+fn higher_rights(theirs: bool, ours: bool) -> bool {
+    theirs && !ours
+}
+
+/// Whether the process behind `process` (with query rights) runs elevated; `None` when
+/// its token may not be read.
+fn token_elevated(process: windows::Win32::Foundation::HANDLE) -> Option<bool> {
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
+    use windows::Win32::System::Threading::OpenProcessToken;
     let mut token = HANDLE::default();
     // SAFETY: valid process handle with query rights; `token` is a valid out pointer.
-    if let Err(e) = unsafe { OpenProcessToken(process.raw(), TOKEN_QUERY, &mut token) } {
-        return e.code() == ERROR_ACCESS_DENIED.to_hresult();
+    if unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) }.is_err() {
+        return None;
     }
     let token = OwnedHandle::new(token);
     let mut elevation = TOKEN_ELEVATION::default();
@@ -211,7 +225,7 @@ pub fn runs_elevated(pid: u32) -> bool {
             &mut size,
         )
     };
-    ok.is_ok() && elevation.TokenIsElevated != 0
+    ok.is_ok().then_some(elevation.TokenIsElevated != 0)
 }
 
 /// Lets process `pid` take the foreground (a tray icon's program opening its menu after
@@ -304,6 +318,18 @@ mod tests {
     //! a process that exits by itself reports its code, a bogus pid fails to open.
     use super::*;
     use std::process::{Command, Stdio};
+
+    /// Found in the test VM (UAC off, every process elevated): only a process with more
+    /// rights than Kabuk counts; Kabuk's own rights are never more than its own.
+    #[test]
+    fn only_more_rights_than_kabuks_count_as_elevated() {
+        assert!(higher_rights(true, false));
+        assert!(!higher_rights(true, true), "both elevated");
+        assert!(!higher_rights(false, false));
+        assert!(!higher_rights(false, true));
+        assert!(!runs_elevated(std::process::id()), "this very process");
+        assert!(!runs_elevated(u32::MAX), "no such process");
+    }
 
     #[test]
     fn an_ordinary_program_has_no_app_id() {
