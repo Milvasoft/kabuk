@@ -84,8 +84,9 @@ Write-Output ("kabuk --help from Path: " + (`$help -join ' | '))
 Start-Process (Join-Path `$env:LOCALAPPDATA 'Programs\Kabuk\kabuk-watchdog.exe')
 Start-Sleep -Seconds 10
 Write-Output ("kabuk running: " + [bool](Get-Process kabuk -ErrorAction SilentlyContinue))
-`$state = & kabuk msg query state 2>&1
-Write-Output ("state: " + ((`$state | Out-String) -replace '\s+', ' '))
+# Through a pipe: PowerShell captures a windowed program's output only then.
+`$state = & kabuk msg query state 2>&1 | Out-String
+Write-Output ("state: " + (`$state -replace '\s+', ' '))
 exit 0
 "@
 }

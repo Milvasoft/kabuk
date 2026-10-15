@@ -194,20 +194,30 @@ pub fn remove_programs_later(roots: &Roots, pid: u32) -> std::io::Result<()> {
     use std::os::windows::process::CommandExt;
     /// `CREATE_NO_WINDOW`: the prompt shows nothing.
     const NO_WINDOW: u32 = 0x0800_0000;
-    let dir = roots.program_dir();
     // A loop needs a batch file; it sits in the temporary folder and removes itself.
     let batch = std::env::temp_dir().join(format!("kabuk-uninstall-{pid}.cmd"));
-    let body = format!(
-        "@echo off\r\n:wait\r\ntasklist /fi \"PID eq {pid}\" | find \"{pid}\" >nul && (timeout /t 1 /nobreak >nul & goto wait)\r\nrmdir /s /q \"{}\"\r\ndel \"%~f0\"\r\n",
-        dir.display()
-    );
-    std::fs::write(&batch, body)?;
+    std::fs::write(&batch, removal_batch(&roots.program_dir(), pid))?;
+    // Nothing of it reaches the terminal `kabuk --uninstall` ran in.
     std::process::Command::new("cmd.exe")
         .arg("/c")
         .arg(&batch)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .creation_flags(NO_WINDOW)
         .spawn()
         .map(|_| ())
+}
+
+/// The batch file that waits for `pid` to end, removes `dir` and then itself. It leaves
+/// through `(goto)` as it deletes itself: a plain `del` made the prompt look for its next
+/// line and print "The batch file cannot be found." (found trying the setup on a clean
+/// Windows).
+fn removal_batch(dir: &Path, pid: u32) -> String {
+    format!(
+        "@echo off\r\n:wait\r\ntasklist /fi \"PID eq {pid}\" | find \"{pid}\" >nul && (timeout /t 1 /nobreak >nul & goto wait)\r\nrmdir /s /q \"{}\"\r\n(goto) 2>nul & del \"%~f0\"\r\n",
+        dir.display()
+    )
 }
 
 #[cfg(test)]
@@ -281,5 +291,32 @@ mod tests {
         assert!(!starts_at_sign_in(&r));
         registry::delete_tree(r.test_key().unwrap()).unwrap();
         assert_eq!(registry::read_text(r.test_key().unwrap(), "x"), None);
+    }
+
+    /// The removal of a program that already ended: the folder and the batch file go,
+    /// and the prompt says nothing.
+    #[test]
+    fn the_removal_batch_removes_the_folder_and_itself_quietly() {
+        let dir = tempfile::tempdir().unwrap();
+        let programs = dir.path().join("Programs").join("Kabuk");
+        std::fs::create_dir_all(&programs).unwrap();
+        std::fs::write(programs.join("kabuk.exe"), b"x").unwrap();
+        let mut ended = std::process::Command::new("cmd.exe")
+            .args(["/c", "exit"])
+            .spawn()
+            .unwrap();
+        let pid = ended.id();
+        ended.wait().unwrap();
+        let batch = dir.path().join("remove.cmd");
+        std::fs::write(&batch, removal_batch(&programs, pid)).unwrap();
+        let out = std::process::Command::new("cmd.exe")
+            .arg("/c")
+            .arg(&batch)
+            .output()
+            .unwrap();
+        assert!(!programs.exists(), "the folder stayed");
+        assert!(!batch.exists(), "the batch file stayed");
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "");
+        assert_eq!(String::from_utf8_lossy(&out.stderr), "");
     }
 }
