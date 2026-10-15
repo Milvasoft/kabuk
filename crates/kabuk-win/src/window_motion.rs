@@ -294,7 +294,7 @@ fn desktop_thumbnail(overlay: HWND, area: Rect) -> Option<isize> {
     let origin = progman.window_rect()?;
     // SAFETY: a thumbnail of Explorer's window onto our overlay, unregistered with it.
     unsafe {
-        let t = DwmRegisterThumbnail(overlay, progman.raw()).ok()?;
+        let t = register(overlay, progman.raw())?;
         let props = DWM_THUMBNAIL_PROPERTIES {
             dwFlags: DWM_TNP_RECTDESTINATION | DWM_TNP_RECTSOURCE | DWM_TNP_VISIBLE | DWM_TNP_OPACITY,
             rcDestination: RECT {
@@ -409,10 +409,25 @@ fn hide_strips(thumbs: &[isize]) {
     }
 }
 
+/// A thumbnail of `source` on `overlay`, drawn above the ones registered before it.
+fn register(overlay: HWND, source: HWND) -> Option<isize> {
+    // SAFETY: a thumbnail between two windows; [`unregister`] lets it go.
+    let t = unsafe { DwmRegisterThumbnail(overlay, source) }.ok()?;
+    #[cfg(test)]
+    tests::HANDOVER.with(|l| l.borrow_mut().push((true, t)));
+    Some(t)
+}
+
+fn unregister(t: isize) {
+    #[cfg(test)]
+    tests::HANDOVER.with(|l| l.borrow_mut().push((false, t)));
+    // SAFETY: our registered thumbnail.
+    let _ = unsafe { DwmUnregisterThumbnail(t) };
+}
+
 fn unregister_genie(genie: Option<(Genie, Vec<isize>, (i32, i32))>) {
     for t in genie.into_iter().flat_map(|(_, t, _)| t) {
-        // SAFETY: our registered thumbnail.
-        let _ = unsafe { DwmUnregisterThumbnail(t) };
+        unregister(t);
     }
 }
 
@@ -443,19 +458,19 @@ fn gpu_genie(
 
 fn begin(scene: Scene, before: Option<Playing>, renderer: Option<&gpu::Renderer>) -> Option<Playing> {
     let asked = Instant::now();
-    // A move over the same area while one plays starts from where its thumbnails are.
-    let (overlay, desktop, shown, kept) = match before {
-        Some(p) => {
-            for (t, _) in &p.thumbs {
-                // SAFETY: our registered thumbnail.
-                let _ = unsafe { DwmUnregisterThumbnail(*t) };
-            }
-            unregister_genie(p.genie);
-            (p.overlay, p.desktop, p.shown, p.gpu.map(|(_, gg)| gg))
-        }
+    // A move over the same area while one plays starts from where its thumbnails are;
+    // its own go only once the new ones are up (below).
+    let (overlay, desktop, shown, kept, old) = match before {
+        Some(p) => (
+            p.overlay,
+            p.desktop,
+            p.shown,
+            p.gpu.map(|(_, gg)| gg),
+            Some((p.thumbs, p.genie)),
+        ),
         None => {
             let o = overlay(scene.area)?;
-            (o, desktop_thumbnail(o, scene.area), HashMap::new(), None)
+            (o, desktop_thumbnail(o, scene.area), HashMap::new(), None, None)
         }
     };
     let area = scene.area;
@@ -472,7 +487,7 @@ fn begin(scene: Scene, before: Option<Playing>, renderer: Option<&gpu::Renderer>
             if let Some(now) = shown.get(&(layer.window.0 as isize)) {
                 layer.from = *now;
             }
-            if let Ok(t) = DwmRegisterThumbnail(overlay, layer.window.raw()) {
+            if let Some(t) = register(overlay, layer.window.raw()) {
                 let _ = DwmUpdateThumbnailProperties(t, &props(layer.from, area));
                 thumbs.push((t, layer));
             }
@@ -480,9 +495,7 @@ fn begin(scene: Scene, before: Option<Playing>, renderer: Option<&gpu::Renderer>
         // The genie's strips, above the other windows.
         let genie = scene.genie.and_then(|g| {
             let wanted = genie_strips(g.frame.bottom - g.frame.top);
-            let strips: Vec<isize> = (0..wanted)
-                .filter_map(|_| DwmRegisterThumbnail(overlay, g.window.raw()).ok())
-                .collect();
+            let strips: Vec<isize> = (0..wanted).filter_map(|_| register(overlay, g.window.raw())).collect();
             let size = strips
                 .first()
                 .and_then(|t| DwmQueryThumbnailSourceSize(*t).ok())
@@ -504,6 +517,15 @@ fn begin(scene: Scene, before: Option<Playing>, renderer: Option<&gpu::Renderer>
                 }
             }
         });
+        // The scene before's thumbnails go now, under the new ones: let go first, a frame
+        // could show the bare desktop between (found by the user: the desktop flashed as a
+        // window came back from the dock).
+        if let Some((thumbs, genie)) = old {
+            for (t, _) in thumbs {
+                unregister(t);
+            }
+            unregister_genie(genie);
+        }
         let _ = SetWindowPos(
             overlay,
             Some(above_ordinary_windows(overlay)),
@@ -620,7 +642,7 @@ fn end(p: Playing) {
     unsafe {
         let _ = ShowWindow(p.overlay, SW_HIDE);
         for t in p.thumbs.into_iter().map(|(t, _)| t).chain(p.desktop) {
-            let _ = DwmUnregisterThumbnail(t);
+            unregister(t);
         }
         unregister_genie(p.genie);
         let _ = DestroyWindow(p.overlay);
@@ -766,8 +788,15 @@ fn run(rx: &mpsc::Receiver<Order>, ease: fn(f32) -> f32, pictured: &Pictured, tx
 mod tests {
     //! Edge cases: the way between two rectangles starts and ends on them and rounds; a
     //! mover with nothing to play starts and stops; a scene's overlay shows the whole
-    //! desktop window under its windows (the overlay is put out of sight).
+    //! desktop window under its windows (the overlay is put out of sight); a scene that
+    //! follows another puts its thumbnails up before the old ones go.
     use super::*;
+    use std::cell::RefCell;
+
+    thread_local! {
+        /// Every thumbnail registered (`true`) or let go (`false`) on this thread.
+        pub(super) static HANDOVER: RefCell<Vec<(bool, isize)>> = const { RefCell::new(Vec::new()) };
+    }
 
     const A: Rect = Rect {
         left: 0,
@@ -823,6 +852,47 @@ mod tests {
         // Progman's own pixels (the spike shows each monitor's part exactly).
         assert!(size.cx > 0 && size.cy > 0, "{size:?}");
         end(p);
+    }
+
+    /// Found by the user: as a window came back from the dock, the scene that followed
+    /// the genie's first let the old thumbnails go before putting up its own, and a frame
+    /// showed the bare desktop between them.
+    #[test]
+    fn a_following_scene_lets_the_old_thumbnails_go_last() {
+        let area = Rect {
+            left: -32000,
+            top: -32000,
+            right: -31900,
+            bottom: -31900,
+        };
+        let scene = |layers| Scene {
+            area,
+            layers,
+            seconds: 0.0,
+            genie: None,
+        };
+        // A window to show: another scene's overlay, out of sight as well.
+        let source = begin(scene(Vec::new()), None, None).expect("an overlay");
+        let layer = || Layer {
+            window: Hwnd::from_raw(source.overlay),
+            from: area,
+            to: area,
+        };
+        let first = begin(scene(vec![layer()]), None, None).expect("the first scene");
+        let old: Vec<isize> = first.thumbs.iter().map(|(t, _)| *t).collect();
+        assert_eq!(old.len(), 1);
+        HANDOVER.with(|l| l.borrow_mut().clear());
+        let next = begin(scene(vec![layer()]), Some(first), None).expect("the scene after");
+        let log = HANDOVER.with(|l| l.borrow().clone());
+        let last_new = log.iter().rposition(|(up, _)| *up).expect("new thumbnails");
+        let first_gone = log.iter().position(|(up, _)| !*up).expect("the old ones let go");
+        assert!(last_new < first_gone, "{log:?}");
+        assert!(
+            log.iter().filter(|(up, _)| !*up).all(|(_, t)| old.contains(t)),
+            "{log:?}"
+        );
+        end(next);
+        end(source);
     }
 
     #[test]

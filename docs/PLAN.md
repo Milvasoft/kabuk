@@ -367,6 +367,8 @@ Reported or asked for by the user on 2026-10-14, in this order of work (bugs fir
 - Volume keys: the laptop's Fn keys come injected by keyboard software; they are taken now (tried by the user: one indicator).
 - A shell that lost the desk leaves by itself (a test's shell had fought the user's over the tray all night).
 - The genie: the window was minimised a compositor frame before its picture was on screen, so for one frame what is behind showed (found with `flash_probe`, which records every composed frame: 5 of 6 minimises); fixed, 0 of the following.
+- The genie, again (found by the user: the desktop flashed as a window came back from the dock): the scene that follows the genie's first, once Windows minimises or restores the window, let the old thumbnails go before putting up its own, so a frame could show the bare desktop (caught with `flash_probe` clicking the dock icon); now the new ones go up first. Test: `a_following_scene_lets_the_old_thumbnails_go_last`; 0 flashes in 6 following minimises and restores.
+- The shell froze for a quarter of an hour (a lock taken twice, shown by an elevated window); fixed, and the watchdog now restarts a shell that stops answering (DECISIONS D55, M0).
 - Settings: the mode's hint says what the chosen mode does.
 - Checked: fmt, clippy, every unit test, the settings page and design checks, the integration run but `focus_toward_brings_the_neighbour_to_the_front`, which failed once while the user was using the machine (Windows refuses a foreground change then) and passed again alone.
 
