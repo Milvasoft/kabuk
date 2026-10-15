@@ -66,7 +66,7 @@ $job = 'job-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
 $stage = Join-Path $env:TEMP "kabuk-vm-$job"
 $payload = Join-Path $stage 'payload'
 $debug = Join-Path $root 'target\debug'
-$files = @('kabuk.exe', 'kabuk-watchdog.exe', 'kabuk-testapp.exe', 'kabuk-settings.exe', 'WebView2Loader.dll') |
+$files = @('kabuk.exe', 'kabuk-watchdog.exe', 'kabuk-saver.exe', 'kabuk-testapp.exe', 'kabuk-settings.exe', 'WebView2Loader.dll') |
     ForEach-Object { Join-Path $debug $_ }
 $files += $tests
 $runtime = Join-Path $env:SystemRoot 'System32\vcruntime140.dll'
@@ -83,6 +83,10 @@ $testLines = ($tests | ForEach-Object { "    '" + $_.Substring($root.Length).Tri
 `$ErrorActionPreference = 'Continue'
 `$root = '$root'
 Copy-Item -Recurse -Force (Join-Path `$PSScriptRoot 'payload\*') `$root
+# Nobody moves the VM's mouse: it rests in the middle, not over a bar the tests hide.
+Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+`$screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point((`$screen.Width / 2), (`$screen.Height / 2))
 `$tests = @(
 $testLines
 )

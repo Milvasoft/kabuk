@@ -398,8 +398,27 @@ impl Sandbox {
     }
 }
 
+/// How many of a failed test's last log lines are printed.
+const FAILED_LOG_LINES: usize = 40;
+
 impl Drop for Sandbox {
     fn drop(&mut self) {
+        // A failed test shows what the shell said last (its folder goes with it; found
+        // running the tests in the VM, where nothing else was left to read).
+        if std::thread::panicking() {
+            for e in std::fs::read_dir(self.dir.path().join("logs"))
+                .into_iter()
+                .flatten()
+                .flatten()
+            {
+                let text = std::fs::read_to_string(e.path()).unwrap_or_default();
+                let lines: Vec<&str> = text.lines().collect();
+                eprintln!("--- {} (last lines)", e.file_name().to_string_lossy());
+                for l in &lines[lines.len().saturating_sub(FAILED_LOG_LINES)..] {
+                    eprintln!("{l}");
+                }
+            }
+        }
         let _ = self.restore();
     }
 }
