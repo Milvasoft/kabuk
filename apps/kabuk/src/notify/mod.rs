@@ -81,16 +81,17 @@ impl Queue {
         Some(n)
     }
 
-    /// Game mode began (`mute`: notices held back) or ended; the summary when it ends.
+    /// Game mode began (`mute`: notices held back) or ended; the summary when it ends,
+    /// only when it held some back (every full-screen video ended with a notice).
     pub fn game_mode(&mut self, on: bool, mute: bool) -> Option<Notice> {
         if on {
             self.muted = mute;
             self.missed = 0;
             return (!mute).then_some(Notice::GameOn);
         }
-        let was = std::mem::replace(&mut self.muted, false);
+        self.muted = false;
         let missed = std::mem::take(&mut self.missed);
-        (was || missed > 0).then_some(Notice::GameOff { missed })
+        (missed > 0).then_some(Notice::GameOff { missed })
     }
 }
 
@@ -134,6 +135,9 @@ mod tests {
         assert_eq!(q.offer(Notice::Copied), None);
         assert_eq!(q.game_mode(false, true), Some(Notice::GameOff { missed: 2 }));
         assert_eq!(q.offer(Notice::Tiled), Some(Notice::Tiled));
+        // A video watched full screen with nothing held back ends quietly.
+        assert_eq!(q.game_mode(true, true), None);
+        assert_eq!(q.game_mode(false, true), None);
         // With muting off, notices show and game mode says so.
         assert_eq!(q.game_mode(true, false), Some(Notice::GameOn));
         assert_eq!(q.offer(Notice::Tiled), Some(Notice::Tiled));

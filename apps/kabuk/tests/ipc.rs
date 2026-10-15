@@ -300,8 +300,8 @@ fn the_shells_pipe_is_open_only_to_the_current_user() {
 
 /// SPEC §2.4 and TESTING §4: a full-screen window turns game mode on within a second
 /// (seen in `query state`); the mouse hook goes, tiling pauses (a new window keeps its
-/// own place, the others stay), and once the window is gone the layout is as it was and
-/// one summary notice says so.
+/// own place, the others stay), and once the window is gone the layout is as it was. No
+/// notice was held back, so none tells it ended (every full-screen video ended with one).
 #[test]
 fn a_full_screen_window_turns_game_mode_on_and_the_layout_comes_back() {
     use kabuk::bar::manager::MSG_APPBAR;
@@ -376,8 +376,10 @@ fn a_full_screen_window_turns_game_mode_on_and_the_layout_comes_back() {
         .log_lines("mouse hook back after a full-screen program")
         == 1)
     .is_some());
-    assert!(
-        wait_until(SETTLE, || sandbox.log_lines("notice shown title=Game mode off") == 1).is_some(),
+    std::thread::sleep(Duration::from_secs(1));
+    assert_eq!(
+        sandbox.log_lines("notice shown"),
+        0,
         "{}",
         sandbox.last_log_line(&["notice"]).unwrap_or_default()
     );
