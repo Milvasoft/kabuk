@@ -119,6 +119,9 @@ unsafe_op_in_unsafe_fn = "deny"
 
 [workspace.lints.clippy]
 undocumented_unsafe_blocks = "deny"
+# A lock taken in a `match` or `if let` is held through every arm: taking it again
+# there waits for ever (found by the user: the window manager and the bar froze).
+significant_drop_in_scrutinee = "deny"
 
 [profile.release]
 lto = true

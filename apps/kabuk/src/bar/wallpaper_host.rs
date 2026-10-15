@@ -284,7 +284,8 @@ impl Shared {
                     tracing::error!("wallpaper not readable; left as it is");
                     return;
                 };
-                if let Err(e) = wm::lock(&self.state).update(|st| st.wallpaper = Some(b.clone())) {
+                let result = wm::lock(&self.state).update(|st| st.wallpaper = Some(b.clone()));
+                if let Err(e) = result {
                     tracing::error!(error = %e, "wallpaper not recorded; left as it is");
                     return;
                 }
@@ -306,7 +307,8 @@ impl Shared {
             }
         }
         if !ours {
-            if let Err(e) = wm::lock(&self.state).update(|st| st.wallpaper = None) {
+            let result = wm::lock(&self.state).update(|st| st.wallpaper = None);
+            if let Err(e) = result {
                 tracing::error!(error = %e, "wallpaper record not cleared");
             }
             tracing::info!("the user's wallpaper is back");

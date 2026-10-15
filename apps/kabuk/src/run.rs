@@ -107,7 +107,8 @@ pub fn main(options: Run) -> i32 {
         }
     }
     let state: SharedState = Arc::new(Mutex::new(StateFile::fresh(&paths.state_file())));
-    if let Err(e) = wm::lock(&state).update(|s| s.kabuk_pid = Some(std::process::id())) {
+    let result = wm::lock(&state).update(|s| s.kabuk_pid = Some(std::process::id()));
+    if let Err(e) = result {
         startup_failed(&i18n, &e);
         return exit::STARTUP_FAILED;
     }

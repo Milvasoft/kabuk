@@ -722,7 +722,8 @@ impl Wm {
         self.hotkeys.clear();
         if let Some(id) = self.bordered.take() {
             Hwnd(id).set_border_color(None);
-            if let Err(e) = lock(&self.state).remove_bordered(id) {
+            let result = lock(&self.state).remove_bordered(id);
+            if let Err(e) = result {
                 tracing::error!(error = %e, "border record not cleared");
             }
         }
@@ -1259,14 +1260,16 @@ impl Wm {
         if self.genie.remove(&hwnd.0) {
             // Still there (now left alone): Windows' own transitions back.
             hwnd.set_transitions(true);
-            if let Err(e) = lock(&self.state).remove_genie(hwnd.0) {
+            let result = lock(&self.state).remove_genie(hwnd.0);
+            if let Err(e) = result {
                 tracing::error!(error = %e, "genie record not cleared");
             }
         }
         if self.styled.remove(&hwnd.0) {
             // Still there (now left alone): Windows' own frame back.
             hwnd.set_frame_style(None);
-            if let Err(e) = lock(&self.state).remove_styled(hwnd.0) {
+            let result = lock(&self.state).remove_styled(hwnd.0);
+            if let Err(e) = result {
                 tracing::error!(error = %e, "frame record not cleared");
             }
         }
@@ -1277,12 +1280,14 @@ impl Wm {
         let effects = self.desk.remove(hwnd.0);
         if self.bordered == Some(hwnd.0) {
             self.bordered = None;
-            if let Err(e) = lock(&self.state).remove_bordered(hwnd.0) {
+            let result = lock(&self.state).remove_bordered(hwnd.0);
+            if let Err(e) = result {
                 tracing::error!(error = %e, "border record not cleared");
             }
         }
         // It may have been hidden by Kabuk; it is gone or left on its own now.
-        if let Err(e) = lock(&self.state).remove_hidden(hwnd.0) {
+        let result = lock(&self.state).remove_hidden(hwnd.0);
+        if let Err(e) = result {
             tracing::error!(error = %e, "hidden record not cleared");
         }
         self.apply(effects);
@@ -1369,7 +1374,8 @@ impl Wm {
                 Effect::Show(id) => {
                     let h = Hwnd(id);
                     h.show_async();
-                    if let Err(e) = lock(&self.state).remove_hidden(id) {
+                    let result = lock(&self.state).remove_hidden(id);
+                    if let Err(e) = result {
                         tracing::error!(error = %e, "hidden record not cleared");
                     }
                 }
@@ -1426,7 +1432,8 @@ impl Wm {
                 class: h.class_name(),
                 title: h.title(),
             };
-            if let Err(e) = lock(&self.state).add_genie(record) {
+            let result = lock(&self.state).add_genie(record);
+            if let Err(e) = result {
                 tracing::error!(error = %e, "genie not recorded; Windows' transitions kept");
                 return;
             }
@@ -1437,7 +1444,8 @@ impl Wm {
         } else if self.genie.remove(&id) {
             let back = h.set_transitions(true);
             tracing::debug!(hwnd = id, back, "Windows' transitions back");
-            if let Err(e) = lock(&self.state).remove_genie(id) {
+            let result = lock(&self.state).remove_genie(id);
+            if let Err(e) = result {
                 tracing::error!(error = %e, "genie record not cleared");
             }
         }
@@ -1618,7 +1626,8 @@ impl Wm {
             class: h.class_name(),
             title: h.title(),
         };
-        match lock(&self.state).add_hidden(record) {
+        let result = lock(&self.state).add_hidden(record);
+        match result {
             Ok(()) => {
                 h.hide_async();
             }
@@ -1686,7 +1695,8 @@ impl Wm {
                     class: h.class_name(),
                     title: h.title(),
                 };
-                if let Err(e) = lock(&self.state).add_styled(record) {
+                let result = lock(&self.state).add_styled(record);
+                if let Err(e) = result {
                     tracing::error!(error = %e, "frame not recorded; left as it is");
                     return;
                 }
@@ -1698,7 +1708,8 @@ impl Wm {
             None if self.styled.remove(&id) => {
                 let reset = h.set_frame_style(None);
                 tracing::debug!(hwnd = id, reset, "frame back to Windows'");
-                if let Err(e) = lock(&self.state).remove_styled(id) {
+                let result = lock(&self.state).remove_styled(id);
+                if let Err(e) = result {
                     tracing::error!(error = %e, "frame record not cleared");
                 }
             }
@@ -1714,7 +1725,8 @@ impl Wm {
         }
         if let Some(old) = self.bordered.take() {
             Hwnd(old).set_border_color(None);
-            if let Err(e) = lock(&self.state).remove_bordered(old) {
+            let result = lock(&self.state).remove_bordered(old);
+            if let Err(e) = result {
                 tracing::error!(error = %e, "border record not cleared");
             }
         }
@@ -1729,12 +1741,19 @@ impl Wm {
             class: h.class_name(),
             title: h.title(),
         };
-        match lock(&self.state).add_bordered(record) {
+        let result = lock(&self.state).add_bordered(record);
+        match result {
             Ok(()) => {
                 if h.set_border_color(Some(rgb)) {
                     self.bordered = Some(id);
-                } else if let Err(e) = lock(&self.state).remove_bordered(id) {
-                    tracing::error!(error = %e, "border record not cleared");
+                } else {
+                    // Refused (an elevated window): the record goes again. Under the lock
+                    // taken above, this froze the window manager and the bar (found by
+                    // the user, showing Hyper-V Manager from the bar).
+                    let result = lock(&self.state).remove_bordered(id);
+                    if let Err(e) = result {
+                        tracing::error!(error = %e, "border record not cleared");
+                    }
                 }
             }
             Err(e) => tracing::error!(error = %e, "border not recorded; frame left alone"),
