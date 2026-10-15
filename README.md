@@ -4,7 +4,7 @@ A desktop shell for Windows built from scratch: a bar on every monitor, dynamic 
 
 Licensed under the PolyForm Noncommercial License 1.0.0 (see `LICENSE.md`): free for personal and other non-commercial use; commercial use is not permitted.
 
-> Status: version 0.1.0, the first release. `docs/PLAN.md` has each milestone's results and what is left.
+> Status: version 1.0.0, the first release. `docs/PLAN.md` has each milestone's results and what is left.
 
 ## Installing
 

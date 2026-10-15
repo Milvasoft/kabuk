@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.9.0.schema.json
 PackageIdentifier: Milvasoft.Kabuk
-PackageVersion: 0.1.0
+PackageVersion: 1.0.0
 PackageLocale: en-US
 Publisher: Milvasoft
 PublisherUrl: https://github.com/Milvasoft
@@ -22,6 +22,6 @@ Tags:
   - tiling
   - window-manager
   - launcher
-ReleaseNotesUrl: https://github.com/Milvasoft/kabuk/releases/tag/v0.1.0
+ReleaseNotesUrl: https://github.com/Milvasoft/kabuk/releases/tag/v1.0.0
 ManifestType: defaultLocale
 ManifestVersion: 1.9.0
