@@ -215,7 +215,9 @@ pub fn remove_programs_later(roots: &Roots, pid: u32) -> std::io::Result<()> {
 /// Windows).
 fn removal_batch(dir: &Path, pid: u32) -> String {
     format!(
-        "@echo off\r\n:wait\r\ntasklist /fi \"PID eq {pid}\" | find \"{pid}\" >nul && (timeout /t 1 /nobreak >nul & goto wait)\r\nrmdir /s /q \"{}\"\r\n(goto) 2>nul & del \"%~f0\"\r\n",
+        // Windows' own tools by their path: with Git's or MSYS's folder in `Path`, `find`
+        // and `timeout` were theirs (found running the tests from Git's shell).
+        "@echo off\r\nset sys=%SystemRoot%\\System32\r\n:wait\r\n\"%sys%\\tasklist.exe\" /fi \"PID eq {pid}\" | \"%sys%\\find.exe\" \"{pid}\" >nul && (\"%sys%\\timeout.exe\" /t 1 /nobreak >nul & goto wait)\r\nrmdir /s /q \"{}\"\r\n(goto) 2>nul & del \"%~f0\"\r\n",
         dir.display()
     )
 }
