@@ -591,7 +591,8 @@ fn resolve_look(cfg: &Config, windows_light: bool, hour: u8) -> Look {
         .with_text_scale(text_size(cfg.appearance.text_size).factor())
         // Over the blur the tinted backdrop stands in for the desk colour (D28).
         .with_wallpaper(wallpaper_behind_bars(cfg) && cfg.bar.background != BarBackground::Blur)
-        .with_bar_color(bar_color);
+        .with_bar_color(bar_color)
+        .with_solid(cfg.bar.background == BarBackground::Solid);
     let r = resolved(mode);
     if let Some(shade) = &r.accent_adapted {
         tracing::info!(shade = %shade, "accent adapted for readability");
@@ -1610,7 +1611,6 @@ impl Shared {
         let distance = scale.px(dock::STYLE.distance) - kabuk_core::oled::MAX_SHIFT;
         let rect = dock::window_rect(edge, mon, strip, self.dock_window_size(edge, scale), distance);
         window.set_rect(rect);
-        self.set_backdrop(window.hwnd());
         window.show();
         let surface = match WindowSurface::new(&self.gpu, window.hwnd().0 as isize, rect.w as u32, rect.h as u32) {
             Ok(s) => Some(s),
@@ -1619,6 +1619,7 @@ impl Shared {
                 None
             }
         };
+        self.set_backdrop(window.hwnd());
         tracing::info!(device = %monitor.device, ?edge, ?strip, ?rect, "dock placed");
         Ok(Dock {
             window,
@@ -2457,7 +2458,9 @@ impl Shared {
             };
             [r, g, b, alpha]
         });
-        if !hwnd.set_blur_behind(tint) && tint.is_some() {
+        if hwnd.set_blur_behind(tint) {
+            tracing::info!(hwnd = hwnd.0, blur = tint.is_some(), "bar backdrop set");
+        } else if tint.is_some() {
             tracing::warn!("blur behind the bar unavailable");
         }
     }
@@ -2514,6 +2517,9 @@ impl Shared {
                 None
             }
         };
+        // Every bar made gets its blur (found by the user: a bar made again for the new
+        // setting had none, so blur looked as none).
+        self.set_backdrop(window.hwnd());
         tracing::info!(device = %monitor.device, dpi = monitor.dpi, ?rect, "bar placed");
         Ok(Bar {
             window,

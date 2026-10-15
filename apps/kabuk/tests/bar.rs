@@ -374,6 +374,15 @@ fn the_bar_background_follows_its_setting_live() {
             "{value:?}: {}",
             drawn()
         );
+        // The bar made again for the setting has the blur only with it (found by the
+        // user: a new bar had none, so the blur looked like no background).
+        let blur = format!("blur={}", value == Some("blur"));
+        let backdrop = || sandbox.last_log_line(&["bar backdrop set"]).unwrap_or_default();
+        assert!(
+            wait_until(Duration::from_secs(5), || backdrop().contains(&blur)).is_some(),
+            "{value:?}: {}",
+            backdrop()
+        );
     }
     assert_eq!(sandbox.log_lines("blur behind the bar unavailable"), 0);
     assert_eq!(sandbox.restore().0, 0);

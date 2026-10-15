@@ -781,21 +781,8 @@ pub fn regions(d: &BarData, s: &Style, i18n: &I18n, thickness: f32) -> Regions {
     let g = |children: Vec<Node>| group(children, s, v, thickness);
 
     let mut first = Vec::new();
-    if let Some((size, ring)) = s.logo {
-        first.push(Node::spacer(size, size).paint(Paint {
-            fill: Role::Clear,
-            border: Some((Role::Fg, ring)),
-            radius: size / 2.0,
-        }));
-    }
-    if s.activities && !v {
-        first.push(text(
-            vec![span(i18n.tr("activities"), Role::Fg, s.strong_weight)],
-            FontRole::Ui,
-            s.size(14.0),
-        ));
-    }
-    // Before the workspaces, as Launchpad leads macOS's dock.
+    // Before the workspaces, as Launchpad leads macOS's dock, in every look: it stands
+    // where Rıhtım's logo ring and Etkinlik's "Activities" stood (asked for by the user).
     if d.modules.app_grid {
         first.push(Node::icon("app", s.tray_icon, s.mod_icon_color).hit(hit::APP_GRID, 0));
     }
@@ -1271,10 +1258,32 @@ mod tests {
                 ..d.clone()
             },
         ] {
-            let l = render(&bar, &tr);
-            let button = l.hits.iter().find(|(_, h)| h.module == hit::APP_GRID).map(|(r, _)| *r);
-            let first = l.hits.iter().map(|(r, _)| r.x).fold(f32::MAX, f32::min);
-            assert_eq!(button.map(|r| r.x), Some(first), "first on the bar");
+            for look in Look::ALL {
+                let l = render_look(look, &bar, &tr);
+                let button = l.hits.iter().find(|(_, h)| h.module == hit::APP_GRID).map(|(r, _)| *r);
+                let first = l.hits.iter().map(|(r, _)| r.x).fold(f32::MAX, f32::min);
+                assert_eq!(button.map(|r| r.x), Some(first), "{look:?}: first on the bar");
+                // Asked for by the user: nothing before it, neither Rıhtım's logo ring
+                // nor Etkinlik's "Activities".
+                let left = button.map_or(0.0, |b| b.x);
+                let ring = l.draws.iter().any(|d| {
+                    matches!(d, Draw::Panel { rect, paint } if paint.fill == Role::Clear && paint.border.is_some() && rect.x + rect.w <= left)
+                });
+                assert!(!ring, "{look:?}: a logo ring");
+                assert!(!texts(&l).contains(&tr.tr("activities")), "{look:?}: Activities");
+                let drawn_first = l
+                    .draws
+                    .iter()
+                    .filter_map(|d| match d {
+                        Draw::Text { rect, .. } | Draw::Icon { rect, .. } => Some(rect.x),
+                        _ => None,
+                    })
+                    .fold(f32::MAX, f32::min);
+                assert!(
+                    button.is_some_and(|b| b.x <= drawn_first + 0.5),
+                    "{look:?}: drawn first"
+                );
+            }
         }
         let mut off = d.clone();
         off.modules.app_grid = false;
@@ -1778,18 +1787,15 @@ mod tests {
         // Ray: one slab behind everything.
         let l = render_look(Look::Ray, &d, &tr);
         assert!(matches!(l.draws[0], Draw::Panel { paint, .. } if paint.radius == 20.0));
-        // Rıhtım: logo first, clock at the trailing end, no layout indicator.
+        // Rıhtım: clock at the trailing end, no layout indicator.
         let l = render_look(Look::Rihtim, &d, &tr);
-        assert!(matches!(l.draws[1], Draw::Panel { paint, .. } if paint.fill == Role::Clear));
         assert_eq!(texts(&l).last().map(String::as_str), Some("20:31"));
         assert!(!texts(&l).contains(&"tile".to_string()));
-        // Etkinlik: activities label, no title, the volume icon, the bell and power at the end.
+        // Etkinlik: no title, the volume icon, the bell and power at the end.
         let l = render_look(Look::Etkinlik, &d, &tr);
         let t = texts(&l);
         assert!(
-            t.contains(&"Etkinlikler".to_string())
-                && !t.iter().any(|s| s.contains("Milva"))
-                && !t.contains(&"12%".to_string()),
+            !t.iter().any(|s| s.contains("Milva")) && !t.contains(&"12%".to_string()),
             "{t:?}"
         );
         assert_eq!(icons(&l), vec!["app", "vol", "bell", "power"]);

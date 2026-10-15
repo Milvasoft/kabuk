@@ -168,10 +168,6 @@ pub struct Style {
     pub app_icon: f32,
     /// The second start group (layout indicator, title).
     pub second_start_group: bool,
-    /// Rıhtım's logo ring: size and ring width.
-    pub logo: Option<(f32, f32)>,
-    /// Etkinlik's "Activities" label.
-    pub activities: bool,
     /// Bold text weight for labels such as "Activities".
     pub strong_weight: u16,
     /// Font sizes are multiplied by this (Settings → Text size, DECISIONS D15).
@@ -181,6 +177,10 @@ pub struct Style {
     /// The colour the user chose for the bar strip (`bar.color`, D57): it fills the whole
     /// strip in every look, its slab's corners kept.
     pub bar_color: Option<[u8; 3]>,
+    /// `bar.background = "solid"`: the strip is filled. With the blur or none, nothing is
+    /// (found by the user: Etkinlik's black strip hid the blur, and the desk colour drawn
+    /// over a wallpaper made "none" look solid).
+    pub solid: bool,
 }
 
 /// How opaque the desk colour lies over the blurred wallpaper behind a bar
@@ -216,10 +216,18 @@ impl Style {
         self
     }
 
+    pub fn with_solid(mut self, solid: bool) -> Style {
+        self.solid = solid;
+        self
+    }
+
     /// What fills the bar strip: the look's own background, or over a wallpaper the desk
     /// colour, so the text keeps the contrast it was checked against (all looks but Ada,
     /// whose capsules carry their own surface).
     pub fn bar_background(&self) -> Option<Paint> {
+        if !self.solid {
+            return None;
+        }
         if self.bar_color.is_some() {
             return Some(Paint {
                 fill: Role::BarFill,
@@ -327,12 +335,11 @@ fn ada() -> Style {
         tray_icon: 16.0,
         app_icon: 20.0,
         second_start_group: true,
-        logo: None,
-        activities: false,
         strong_weight: 700,
         text_scale: 1.0,
         wallpaper: false,
         bar_color: None,
+        solid: true,
     }
 }
 
@@ -505,7 +512,6 @@ fn rihtim() -> Style {
             ..ada().clock
         },
         media_bars: None,
-        logo: Some((15.0, 3.0)),
         ..ada()
     }
 }
@@ -545,7 +551,6 @@ fn etkinlik() -> Style {
         },
         media_group: false,
         second_start_group: false,
-        activities: true,
         ..ada()
     }
 }
@@ -564,7 +569,6 @@ mod tests {
         assert!(matches!(Style::of(Look::Ada).group, Group::Capsule { .. }));
         assert!(matches!(Style::of(Look::Devre).between, Between::Connector { .. }));
         assert!(Style::of(Look::Cizgi).labels && Style::of(Look::Konsol).labels);
-        assert!(Style::of(Look::Rihtim).logo.is_some());
         assert_eq!(Style::of(Look::Rihtim).arrangement, Arrangement::ClockLast);
         assert!(Style::of(Look::Etkinlik).bar_dark && !Style::of(Look::Etkinlik).title);
         assert!(Style::of(Look::Ray).bar_paint.is_some());
@@ -600,6 +604,23 @@ mod tests {
             assert_eq!(s.with_wallpaper(true).bar_background(), s.bar_paint, "{look:?}");
             assert_eq!(s.with_wallpaper(false).bar_background(), s.bar_paint, "{look:?}");
         }
+    }
+
+    /// Found by the user: with the blur or no background, Etkinlik's black strip (and the
+    /// other looks' own fills, and the desk colour over a wallpaper) was still drawn, so
+    /// neither setting showed. Only a solid background fills the strip, in every look.
+    #[test]
+    fn only_a_solid_background_fills_the_strip() {
+        for look in Look::ALL {
+            for color in [None, Some([30, 20, 51])] {
+                for wall in [true, false] {
+                    let s = Style::of(look).with_bar_color(color).with_wallpaper(wall);
+                    assert_eq!(s.with_solid(false).bar_background(), None, "{look:?} {color:?} {wall}");
+                    assert_eq!(s.with_solid(true).bar_background(), s.bar_background(), "{look:?}");
+                }
+            }
+        }
+        assert!(Style::of(Look::Etkinlik).bar_background().is_some(), "solid by default");
     }
 
     /// DECISIONS D57: a colour the user chose fills the whole strip in every look, with
