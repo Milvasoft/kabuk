@@ -3,7 +3,7 @@
 
 pub mod format;
 
-pub use format::{ClockStyle, TimeText};
+pub use format::{roman, ClockStyle, TimeText};
 
 use fluent_bundle::{FluentArgs, FluentBundle, FluentResource, FluentValue};
 use unic_langid::LanguageIdentifier;

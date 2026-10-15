@@ -5,7 +5,7 @@
 //! 12-hour form, single-digit hours and minutes, rounding (including to the next
 //! integer and negative values), zero digits, out-of-range calendar inputs.
 
-use crate::{Arg, I18n};
+use crate::{Arg, I18n, Lang};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClockStyle {
@@ -89,12 +89,56 @@ impl I18n {
         };
         text.replace('.', &self.tr("decimal-separator"))
     }
+
+    /// `text` in capitals by the language's rules (CSS `text-transform: uppercase` with
+    /// the page's `lang`): Turkish writes `i` as `İ`.
+    pub fn upper(&self, text: &str) -> String {
+        match self.lang() {
+            Lang::Tr => text
+                .chars()
+                .map(|c| if c == 'i' { 'İ' } else { c })
+                .collect::<String>()
+                .to_uppercase(),
+            Lang::En => text.to_uppercase(),
+        }
+    }
+}
+
+/// `n` in Roman numerals (Defter's workspaces); numbers Roman numerals cannot write (0,
+/// above 3999) stay as they are.
+pub fn roman(n: u32) -> String {
+    const NUMERALS: [(u32, &str); 13] = [
+        (1000, "M"),
+        (900, "CM"),
+        (500, "D"),
+        (400, "CD"),
+        (100, "C"),
+        (90, "XC"),
+        (50, "L"),
+        (40, "XL"),
+        (10, "X"),
+        (9, "IX"),
+        (5, "V"),
+        (4, "IV"),
+        (1, "I"),
+    ];
+    if n == 0 || n > 3999 {
+        return n.to_string();
+    }
+    let mut left = n;
+    let mut out = String::new();
+    for (value, numeral) in NUMERALS {
+        while left >= value {
+            out.push_str(numeral);
+            left -= value;
+        }
+    }
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Lang;
 
     #[test]
     fn short_dates() {
@@ -153,6 +197,31 @@ mod tests {
         );
         let t = en.time(11, 59, ClockStyle::H12);
         assert_eq!((t.hours.as_str(), t.suffix.as_deref()), ("11", Some("AM")));
+    }
+
+    /// Edge cases: Turkish dotted and dotless i, letters outside ASCII, English.
+    #[test]
+    fn capitals_follow_the_language() {
+        let tr = I18n::new(Lang::Tr);
+        let en = I18n::new(Lang::En);
+        assert_eq!(tr.upper("işlemci ılık çğüöş"), "İŞLEMCİ ILIK ÇĞÜÖŞ");
+        assert_eq!(en.upper("video editing"), "VIDEO EDITING");
+        assert_eq!(tr.upper("ağ 9,8 MB/s"), "AĞ 9,8 MB/S");
+        assert_eq!(tr.upper(""), "");
+    }
+
+    /// Edge cases: the subtractive pairs, the first ten as the design writes them, and
+    /// numbers Roman numerals cannot write.
+    #[test]
+    fn roman_numerals() {
+        let first: Vec<String> = (1..=10).map(roman).collect();
+        assert_eq!(first, ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"]);
+        assert_eq!(roman(14), "XIV");
+        assert_eq!(roman(49), "XLIX");
+        assert_eq!(roman(1994), "MCMXCIV");
+        assert_eq!(roman(3999), "MMMCMXCIX");
+        assert_eq!(roman(0), "0");
+        assert_eq!(roman(4000), "4000");
     }
 
     #[test]
