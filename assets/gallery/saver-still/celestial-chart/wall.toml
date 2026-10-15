@@ -1,0 +1,16 @@
+name = "Celestial chart"
+author = "Kabuk"
+version = 1
+tokens = []
+
+[[values]]
+name = "grid"
+min = 0.0
+max = 1.0
+default = 0.6
+
+[[values]]
+name = "stars"
+min = 0.0
+max = 1.0
+default = 0.6

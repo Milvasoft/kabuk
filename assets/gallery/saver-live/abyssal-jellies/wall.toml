@@ -1,0 +1,16 @@
+name = "Abyssal jellies"
+author = "Kabuk"
+version = 1
+tokens = []
+
+[[values]]
+name = "current"
+min = 0.3
+max = 2.0
+default = 1.0
+
+[[values]]
+name = "glow"
+min = 0.5
+max = 1.5
+default = 1.0

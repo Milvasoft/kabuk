@@ -1,0 +1,16 @@
+name = "Ember enso"
+author = "Kabuk"
+version = 1
+tokens = []
+
+[[values]]
+name = "size"
+min = 0.75
+max = 1.25
+default = 1.0
+
+[[values]]
+name = "dryness"
+min = 0.0
+max = 1.0
+default = 0.55

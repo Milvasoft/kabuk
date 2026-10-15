@@ -1,0 +1,10 @@
+name = "Three fireflies"
+author = "Kabuk"
+version = 1
+tokens = []
+
+[[values]]
+name = "trails"
+min = 0.0
+max = 1.0
+default = 0.7

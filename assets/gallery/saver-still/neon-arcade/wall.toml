@@ -1,0 +1,16 @@
+name = "Neon arcade"
+author = "Kabuk"
+version = 1
+tokens = []
+
+[[values]]
+name = "depth"
+min = 0.6
+max = 1.4
+default = 1.0
+
+[[values]]
+name = "reflection"
+min = 0.0
+max = 1.0
+default = 0.6

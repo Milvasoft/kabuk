@@ -1,0 +1,16 @@
+name = "Light-painted spiral"
+author = "Kabuk"
+version = 1
+tokens = []
+
+[[values]]
+name = "strands"
+min = 2.0
+max = 7.0
+default = 5.0
+
+[[values]]
+name = "tilt"
+min = 0.0
+max = 1.0
+default = 0.55

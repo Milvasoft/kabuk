@@ -1,0 +1,16 @@
+name = "Frost bloom"
+author = "Kabuk"
+version = 1
+tokens = []
+
+[[values]]
+name = "growth"
+min = 0.5
+max = 2.0
+default = 1.0
+
+[[values]]
+name = "sparkle"
+min = 0.0
+max = 1.0
+default = 0.6

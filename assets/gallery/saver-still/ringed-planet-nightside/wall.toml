@@ -1,0 +1,16 @@
+name = "Ringed planet, night side"
+author = "Kabuk"
+version = 1
+tokens = []
+
+[[values]]
+name = "tilt"
+min = 0.12
+max = 0.4
+default = 0.28
+
+[[values]]
+name = "atmosphere"
+min = 0.0
+max = 1.0
+default = 0.6

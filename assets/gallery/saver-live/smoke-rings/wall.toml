@@ -1,0 +1,16 @@
+name = "Smoke rings of light"
+author = "Kabuk"
+version = 1
+tokens = []
+
+[[values]]
+name = "drift"
+min = 0.5
+max = 2.0
+default = 1.0
+
+[[values]]
+name = "haze"
+min = 0.5
+max = 1.5
+default = 1.0

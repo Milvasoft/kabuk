@@ -1,0 +1,16 @@
+name = "Wireframe galaxy"
+author = "Kabuk"
+version = 1
+tokens = []
+
+[[values]]
+name = "spin"
+min = 0.3
+max = 2.0
+default = 1.0
+
+[[values]]
+name = "stars"
+min = 0.0
+max = 1.0
+default = 0.7

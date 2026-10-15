@@ -1,0 +1,22 @@
+name = "Quiet orrery"
+author = "Kabuk"
+version = 1
+tokens = []
+
+[[values]]
+name = "speed"
+min = 0.2
+max = 3.0
+default = 1.0
+
+[[values]]
+name = "tilt"
+min = 0.0
+max = 1.0
+default = 0.55
+
+[[values]]
+name = "trails"
+min = 0.0
+max = 1.0
+default = 0.6

@@ -1,0 +1,22 @@
+name = "Isometric isle"
+author = "Kabuk"
+version = 1
+tokens = []
+
+[[values]]
+name = "hue"
+min = -0.5
+max = 0.5
+default = 0.0
+
+[[values]]
+name = "seed"
+min = 0.0
+max = 10.0
+default = 3.0
+
+[[values]]
+name = "grain"
+min = 0.0
+max = 2.0
+default = 1.0

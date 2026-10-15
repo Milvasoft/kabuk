@@ -1,0 +1,22 @@
+name = "Leaf shallows"
+author = "Kabuk"
+version = 1
+tokens = []
+
+[[values]]
+name = "speed"
+min = 0.2
+max = 3.0
+default = 1.0
+
+[[values]]
+name = "sparkle"
+min = 0.2
+max = 1.5
+default = 1.0
+
+[[values]]
+name = "depth"
+min = 0.0
+max = 1.0
+default = 0.4
