@@ -114,6 +114,7 @@ grid-search = Search
 grid-empty = No app matches
 grid-done = Done
 lp-grid = All apps grid
+media-nothing = Nothing plays
 k-profile = Layout profile
 k-profile-open = Open the { $value } layout
 pf = Layout profiles

@@ -113,6 +113,7 @@ grid-search = Ara
 grid-empty = Eşleşen uygulama yok
 grid-done = Bitti
 lp-grid = Tüm uygulamalar ızgarası
+media-nothing = Çalan bir şey yok
 k-profile = Düzen profili
 k-profile-open = { $value } düzenini aç
 pf = Düzen profilleri

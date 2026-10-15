@@ -7,6 +7,7 @@ pub mod dock;
 pub mod geometry;
 pub mod keys_card;
 pub mod manager;
+pub mod media_card;
 pub mod pictures;
 pub mod power_menu;
 pub mod style;

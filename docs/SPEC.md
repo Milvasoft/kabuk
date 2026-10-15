@@ -36,7 +36,7 @@ Target platform: Windows 11 22H2 and later. Windows 10 22H2 is supported on a be
   | `taskbar` | Apps | Pinned apps and the icons of open apps, as on the Windows taskbar (requested by the user on 2026-10-13, not on the design page; DECISIONS D25). A window belongs to the pin with its app id, as on Windows (a web app's pin holds the web app's windows, not the browser's; D51). A right click shows the app's jump list as Windows' taskbar does: pinned entries, the app's own categories, frequent or recent files, its tasks, then its name, pin/unpin, for a program its own rules (always open floating, always open on the workspace its window is on; D63) and close (requested by the user on 2026-10-14; D52) |
   | `clock` | Clock | No seconds; 24/12-hour setting |
   | `date` | Date | Format depends on language ("Pzt 12 Eki") |
-  | `media` | Playing media | Windows media session; play/pause |
+  | `media` | Playing media | Windows media session; play/pause; a right click shows the media card: cover, title, artist, album, previous, play/pause and next (requested by the user on 2026-10-15; DECISIONS D66) |
   | `cpu` | CPU usage | |
   | `ram` | RAM usage | GB, decimal separator depends on language |
   | `gpu` | GPU temperature | |

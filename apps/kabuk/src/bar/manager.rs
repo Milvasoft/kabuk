@@ -81,6 +81,8 @@ pub use app_preview_host::MSG_TEST_APP_PREVIEW;
 pub use wallpaper_host::MSG_TEST_DRIFT;
 #[path = "keys_card_host.rs"]
 mod keys_card_host;
+#[path = "media_card_host.rs"]
+mod media_card_host;
 #[path = "power_menu_host.rs"]
 mod power_menu_host;
 #[path = "saver_host.rs"]
@@ -97,6 +99,7 @@ pub use app_menu_host::{
     TEST_TO_FRONT as APP_MENU_TO_FRONT,
 };
 pub use keys_card_host::MSG_TEST_KEYS_CARD;
+pub use media_card_host::MSG_TEST_MEDIA_CARD;
 pub use power_menu_host::MSG_TEST_POWER_MENU;
 pub use volume_panel_host::MSG_TEST_VOLUME_PANEL;
 /// Windows' notification centre.
@@ -492,6 +495,8 @@ struct Shared {
     power_menu: Option<power_menu_host::PowerMenu>,
     /// The shortcut card's shortcuts, and the card while it shows (DECISIONS D61).
     keys_card: keys_card_host::KeysCardState,
+    /// The media card while it is open (D66).
+    media_card: Option<media_card_host::MediaCard>,
     volume_panel: Option<volume_panel_host::VolumePanel>,
     app_menu: Option<app_menu_host::AppMenu>,
     app_drag: Option<AppDrag>,
@@ -740,6 +745,7 @@ impl BarManager {
                 saver: saver_host::SaverState::default(),
                 power_menu: None,
                 keys_card: Default::default(),
+                media_card: None,
                 volume_panel: None,
                 app_menu: None,
                 app_drag: None,
@@ -1104,6 +1110,16 @@ impl Shared {
                 Some(0)
             }
             #[cfg(feature = "integration")]
+            MSG_TEST_MEDIA_CARD => {
+                if m.wparam == 1 {
+                    let b = self.bars.iter().position(|b| b.primary)?;
+                    self.open_media_card(b, false, true);
+                } else {
+                    self.close_media_card();
+                }
+                Some(0)
+            }
+            #[cfg(feature = "integration")]
             MSG_TEST_KEYS_CARD => {
                 match m.wparam {
                     0 => self.close_keys_card(),
@@ -1371,6 +1387,7 @@ impl Shared {
             MSG_MEDIA => {
                 self.live.media = self.media.as_ref().map(Media::info).unwrap_or_default();
                 self.render_all(false);
+                self.media_card_changed();
                 Some(0)
             }
             _ => None,
@@ -2815,6 +2832,10 @@ impl Shared {
         if let Some((view::hit::VOLUME, _)) = hit {
             // As Windows' taskbar: the level on a left click, the menu on a right one.
             self.toggle_volume_panel(index, button == Click::Left);
+            return;
+        }
+        if let (Click::Right, Some((view::hit::MEDIA, _))) = (button, hit) {
+            self.toggle_media_card(index);
             return;
         }
         if let (Click::Right, Some((view::hit::APP, i))) = (button, hit) {

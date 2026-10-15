@@ -8,6 +8,9 @@ No open decisions (the user decided D39, D43, D44 and the still pictures' drift 
 
 ## Decided and proposed
 
+### D66 · The media card — Decided by the user (2026-10-15)
+Suggested as one of the bar's widgets and asked for by the user: a right click on the media module shows what plays in the tray panel's surface: its cover (Windows' media session gives it; read once per item and decoded to 192 px), title, artist and album, with previous, play or pause, and next, each clickable only when the session takes it. A change of what plays draws the open card again without its entrance. The buttons are the system symbol face's signs (⏮ ▶ ⏸ ⏭), as the design page has no such icons. Weather, sensor temperatures and a clipboard history, the other widgets suggested, wait for the user's answers (network and location for the weather; temperatures need a driver without administrator rights; Windows has its own clipboard history, Win+V).
+
 ### D65 · Layout profiles — Decided by the user (2026-10-15)
 Suggested as a feature and asked for by the user: a named arrangement of programs over monitors and workspaces (`[[profile]]` with `name` and `[[profile.window]]` `exe`, `open`, `monitor` as Windows numbers it, `workspace`, `floating`), saved from the windows the shell manages now (Settings › Windows, through `query windows`, which now also tells each window's program file and what opens it again: its file, or a packaged app's `shell:AppsFolder\…`) and opened by name from the settings, the launcher ("Open the … layout") or `kabuk msg profile <name>`. Opening it moves an open window of each program to its place (each window taken once) and starts the program for the places left; a window that comes within 30 seconds from a program it started goes to its place, as a rule's would. Each program is kept once per monitor and workspace; the hidden workspace's windows are left out.
 

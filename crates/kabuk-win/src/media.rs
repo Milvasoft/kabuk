@@ -1,7 +1,8 @@
 //! The current media session (what is playing) through
 //! `GlobalSystemMediaTransportControlsSessionManager`. WinRT work happens on a
 //! dedicated thread that sleeps on a channel; session events only queue commands, and
-//! every change is posted to a window.
+//! every change is posted to a window. The media card (DECISIONS D66) reads the item's
+//! artist, album and cover too, and steps to the previous or next item.
 
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -21,12 +22,41 @@ pub struct MediaInfo {
     /// Title of the current session's item; `None` when nothing is open.
     pub title: Option<String>,
     pub playing: bool,
+    pub artist: String,
+    pub album: String,
+    /// The program playing it (its app id).
+    pub source: String,
+    /// The session takes "previous" and "next" now.
+    pub can_previous: bool,
+    pub can_next: bool,
+    pub cover: Option<Cover>,
 }
+
+/// The item's cover as [`COVER_SIDE`]-square premultiplied BGRA pixels; two covers are
+/// the same when their `id` (the item's title, artist and album) is.
+#[derive(Clone, Debug)]
+pub struct Cover {
+    pub id: u64,
+    pub pixels: Arc<Vec<u8>>,
+}
+
+impl PartialEq for Cover {
+    fn eq(&self, other: &Cover) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for Cover {}
+
+/// The side the cover is decoded at (pixels): the card shows it at most this large.
+pub const COVER_SIDE: u32 = 192;
 
 enum Command {
     Refresh,
     SessionChanged,
     Toggle,
+    Previous,
+    Next,
     Quit,
 }
 
@@ -58,6 +88,16 @@ impl Media {
     pub fn toggle(&self) {
         let _ = self.tx.send(Command::Toggle);
     }
+
+    /// The current session's previous item.
+    pub fn previous(&self) {
+        let _ = self.tx.send(Command::Previous);
+    }
+
+    /// The current session's next item.
+    pub fn next(&self) {
+        let _ = self.tx.send(Command::Next);
+    }
 }
 
 impl Drop for Media {
@@ -69,13 +109,57 @@ impl Drop for Media {
     }
 }
 
-fn read(session: &Session) -> windows::core::Result<MediaInfo> {
+/// The id of an item's cover: its title, artist and album.
+fn cover_id(title: &str, artist: &str, album: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (title, artist, album).hash(&mut h);
+    h.finish()
+}
+
+/// The item's cover, read and decoded (only when it is another item than `known`'s).
+fn read_cover(
+    props: &windows::Media::Control::GlobalSystemMediaTransportControlsSessionMediaProperties,
+    id: u64,
+    known: Option<&Cover>,
+) -> Option<Cover> {
+    if let Some(k) = known.filter(|k| k.id == id) {
+        return Some(k.clone());
+    }
+    let stream = props.Thumbnail().ok()?.OpenReadAsync().ok()?.join().ok()?;
+    let size = u32::try_from(stream.Size().ok()?).ok()?;
+    let reader = windows::Storage::Streams::DataReader::CreateDataReader(&stream.GetInputStreamAt(0).ok()?).ok()?;
+    reader.LoadAsync(size).ok()?.join().ok()?;
+    let mut bytes = vec![0u8; size as usize];
+    reader.ReadBytes(&mut bytes).ok()?;
+    let pixels = crate::icon::png_pixels(&bytes, COVER_SIDE)?;
+    Some(Cover {
+        id,
+        pixels: Arc::new(pixels),
+    })
+}
+
+fn read(session: &Session, known: Option<&Cover>) -> windows::core::Result<MediaInfo> {
     let props = session.TryGetMediaPropertiesAsync()?.join()?;
     let title = props.Title()?.to_string();
-    let playing = session.GetPlaybackInfo()?.PlaybackStatus()? == Status::Playing;
+    let artist = props.Artist().map(|a| a.to_string()).unwrap_or_default();
+    let album = props.AlbumTitle().map(|a| a.to_string()).unwrap_or_default();
+    let playback = session.GetPlaybackInfo()?;
+    let playing = playback.PlaybackStatus()? == Status::Playing;
+    let controls = playback.Controls()?;
+    let cover = read_cover(&props, cover_id(&title, &artist, &album), known);
     Ok(MediaInfo {
         title: (!title.trim().is_empty()).then_some(title),
         playing,
+        artist,
+        album,
+        source: session
+            .SourceAppUserModelId()
+            .map(|s| s.to_string())
+            .unwrap_or_default(),
+        can_previous: controls.IsPreviousEnabled().unwrap_or(false),
+        can_next: controls.IsNextEnabled().unwrap_or(false),
+        cover,
     })
 }
 
@@ -131,8 +215,22 @@ fn run(rx: Receiver<Command>, tx: Sender<Command>, info: Arc<Mutex<MediaInfo>>, 
                     let _ = s.TryTogglePlayPauseAsync().and_then(|op| op.join());
                 }
             }
+            Command::Previous => {
+                if let Some((s, _, _)) = &current {
+                    let _ = s.TrySkipPreviousAsync().and_then(|op| op.join());
+                }
+            }
+            Command::Next => {
+                if let Some((s, _, _)) = &current {
+                    let _ = s.TrySkipNextAsync().and_then(|op| op.join());
+                }
+            }
             Command::Refresh => {
-                let next = current.as_ref().and_then(|(s, _, _)| read(s).ok()).unwrap_or_default();
+                let known = info.lock().ok().and_then(|i| i.cover.clone());
+                let next = current
+                    .as_ref()
+                    .and_then(|(s, _, _)| read(s, known.as_ref()).ok())
+                    .unwrap_or_default();
                 let changed = info
                     .lock()
                     .map(|mut i| std::mem::replace(&mut *i, next.clone()) != next)

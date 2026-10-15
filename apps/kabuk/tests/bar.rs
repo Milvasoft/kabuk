@@ -1762,6 +1762,50 @@ fn the_screen_saver_choice_is_set_in_windows_and_comes_back() {
     assert!(wait_until(Duration::from_secs(5), || restored(&areas)).is_some());
 }
 
+/// DECISIONS D66 (suggested and asked for by the user): the media card opens under the
+/// bar and closes again, whether or not something plays on the machine.
+#[test]
+fn the_media_card_opens_and_closes() {
+    use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_MEDIA_CARD};
+    use kabuk_win::msgloop::{post_message, Msg};
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
+    let card = || {
+        kabuk_win::window::windows_of_class("Kabuk.MediaCard")
+            .into_iter()
+            .find(|w| w.pid() == Some(pid) && w.is_visible())
+    };
+    let post = |wparam: usize| {
+        post_message(
+            control,
+            Msg {
+                id: MSG_TEST_MEDIA_CARD,
+                wparam,
+                lparam: 0,
+            },
+        )
+        .unwrap()
+    };
+    post(1);
+    assert!(wait_until(SETTLE, || card().is_some()).is_some(), "no card");
+    assert_eq!(sandbox.log_lines("media card opened"), 1);
+    let r = card().unwrap().window_rect().unwrap();
+    let m = kabuk_win::shell::monitors().into_iter().find(|m| m.primary).unwrap();
+    assert!(m.rect.contains(&r), "{r:?} off {:?}", m.rect);
+    post(0);
+    assert!(wait_until(SETTLE, || card().is_none()).is_some(), "the card stayed");
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
+}
+
 /// DECISIONS D61 (suggested and asked for by the user): the shortcut card opens in the
 /// middle of the monitor, as the card or as the greeting, and closes again.
 #[test]
