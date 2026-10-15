@@ -35,8 +35,10 @@ pub fn font_faces() -> &'static str {
             .iter()
             .map(|(file, family, _)| {
                 format!(
-                    "@font-face {{ font-family: \"{family}\"; src: url(\"fonts/{file}\") format(\"truetype\"); font-weight: {}; font-display: block; }}\n",
-                    weight(file)
+                    "@font-face {{ font-family: \"{family}\"; src: url(\"fonts/{file}\") format(\"truetype\"); font-weight: {}; font-style: {}; font-display: block; }}\n",
+                    weight(file),
+                    // An italic face (`-Italic-`) is the italic of its family.
+                    if file.contains("-Italic") { "italic" } else { "normal" }
                 )
             })
             .collect()

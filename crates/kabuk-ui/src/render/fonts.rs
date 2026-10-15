@@ -8,6 +8,11 @@ use super::{Context, Result};
 /// `(file name, family, bytes)` of every embedded font file.
 pub const FONT_FILES: &[(&str, &str, &[u8])] = &[
     (
+        "Archivo-Variable.ttf",
+        "Archivo",
+        include_bytes!("../../../../assets/fonts/Archivo-Variable.ttf"),
+    ),
+    (
         "Cantarell-Bold.ttf",
         "Cantarell",
         include_bytes!("../../../../assets/fonts/Cantarell-Bold.ttf"),
@@ -78,6 +83,11 @@ pub const FONT_FILES: &[(&str, &str, &[u8])] = &[
         include_bytes!("../../../../assets/fonts/IBMPlexSansCondensed-SemiBold.ttf"),
     ),
     (
+        "Inter-Variable.ttf",
+        "Inter",
+        include_bytes!("../../../../assets/fonts/Inter-Variable.ttf"),
+    ),
+    (
         "JetBrainsMono-Variable.ttf",
         "JetBrains Mono",
         include_bytes!("../../../../assets/fonts/JetBrainsMono-Variable.ttf"),
@@ -91,6 +101,16 @@ pub const FONT_FILES: &[(&str, &str, &[u8])] = &[
         "MartianMono-Variable.ttf",
         "Martian Mono",
         include_bytes!("../../../../assets/fonts/MartianMono-Variable.ttf"),
+    ),
+    (
+        "Newsreader-Italic-Variable.ttf",
+        "Newsreader",
+        include_bytes!("../../../../assets/fonts/Newsreader-Italic-Variable.ttf"),
+    ),
+    (
+        "Newsreader-Variable.ttf",
+        "Newsreader",
+        include_bytes!("../../../../assets/fonts/Newsreader-Variable.ttf"),
     ),
 ];
 
