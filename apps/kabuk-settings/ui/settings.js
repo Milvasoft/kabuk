@@ -325,8 +325,11 @@
     const savers = [["circuit", "milva", "Milvasoft", t("sMilvaH")], ["constellation", "stars", t("sStars"), t("sStarsH")], ["none", "off", t("sOff"), t("sOffH")]];
     askPreviews();
     const designs = (cat) => (S.gallery || []).filter((d) => d.category === cat);
-    const saverCards = (cat) => galleryCards(designs(cat), (k) => kind === "gallery" && cfg().screensaver.gallery === k, (d) => `data-saver-gal="${escapeHtml(d.key)}"`, (d) => (d.live ? t(d.name + "-h") : `${t(d.name + "-h")}. ${t("galStillSaverH")}`));
-    const gallery = [["saver-live", "galSaversLive"], ["saver-still", "galSaversStill"]]
+    // The live wallpapers play as screen savers too (asked for by the user); they are not
+    // made for OLED screens, and say so.
+    const hint = (d) => d.category === "wall-live" ? `${t(d.name + "-h")}. ${t("galWallSaverH")}` : d.live ? t(d.name + "-h") : `${t(d.name + "-h")}. ${t("galStillSaverH")}`;
+    const saverCards = (cat) => galleryCards(designs(cat), (k) => kind === "gallery" && cfg().screensaver.gallery === k, (d) => `data-saver-gal="${escapeHtml(d.key)}"`, hint);
+    const gallery = [["saver-live", "galSaversLive"], ["saver-still", "galSaversStill"], ["wall-live", "galWallsAsSavers"]]
       .map(([cat, title]) => `<div class="set-grp"><span class="gl">${t(title)}</span><div class="savers">${saverCards(cat)}</div></div>`).join("");
     return head(t("navSaver"), t("saverDesc")) + `
       <div class="set-grp"><span class="gl">${t("saverPick")}</span><div class="savers">${savers.map(([k, a, n, h]) => `<button class="saver${kind === k ? " on" : ""}" type="button" data-set="screensaver.kind" data-val='"${k}"' aria-pressed="${kind === k}"><span class="sp">${art[a]}</span><span class="sn">${n}<span>${h}</span></span></button>`).join("")}</div></div>

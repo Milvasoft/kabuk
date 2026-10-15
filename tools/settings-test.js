@@ -241,7 +241,27 @@ async function main() {
   check((await page.locator(`[data-saver-gal]`).count()) >= 20, "gallery: twenty screen savers or more");
   await page.click(`[data-saver-gal="saver-still/ember-enso"]`); await settled();
   check(/\[screensaver\][^[]*kind = "gallery"/.test(toml()) && /gallery = "saver-still\/ember-enso"/.test(toml()), "gallery: a still screen saver chosen");
+  // The live wallpapers play as screen savers too, saying they are not for OLED screens.
+  await page.click(`[data-saver-gal="wall-live/aurora-shore"]`); await settled();
+  check(/\[screensaver\][^[]*gallery = "wall-live\/aurora-shore"/.test(toml()), "gallery: a live wallpaper chosen as the screen saver");
+  check((await page.locator(`[data-saver-gal="wall-live/aurora-shore"]`).innerText()).includes("OLED"), "gallery: a live wallpaper as a saver warns about OLED");
   await page.click(`[data-set="screensaver.kind"][data-val='"circuit"']`); await settled();
+
+  // The all-apps grid (asked for by the user): an app hidden on the grid is listed and
+  // shown again, the order goes back to alphabetical.
+  const gridFile = path.join(dir, "app-grid.json");
+  fs.writeFileSync(gridFile, JSON.stringify({ order: ["b", "a"], hidden: [{ open: "shell:AppsFolder\\X", name: "Hidden app" }] }));
+  await go("launcher");
+  const chip = page.locator(`[data-tgl="launcher.sources.recent"]`);
+  await chip.click(); await settled(); await chip.click(); await settled();
+  check((await page.locator(".set-main").innerText()).includes("Hidden app"), "app grid: a hidden app listed");
+  await page.locator(`[data-grid-show]`).first().click(); await settled();
+  check(JSON.parse(fs.readFileSync(gridFile, "utf8")).hidden.length === 0, "app grid: the hidden app shown again");
+  check(!(await page.locator(".set-main").innerText()).includes("Hidden app"), "app grid: no longer listed");
+  check(await page.locator(`[data-grid-reset]`).isEnabled(), "app grid: an order to reset");
+  await page.click(`[data-grid-reset]`); await settled();
+  check(JSON.parse(fs.readFileSync(gridFile, "utf8")).order.length === 0, "app grid: back to alphabetical order");
+  check(!(await page.locator(`[data-grid-reset]`).isEnabled()), "app grid: nothing more to reset");
 
   await go("look");
   await page.click(`[data-set="appearance.look"][data-val='"cizgi"']`); await settled();

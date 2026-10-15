@@ -1,0 +1,22 @@
+name = "Obsidian seams"
+author = "Kabuk"
+version = 1
+tokens = []
+
+[[values]]
+name = "speed"
+min = 0.2
+max = 3.0
+default = 1.0
+
+[[values]]
+name = "heat"
+min = 0.2
+max = 1.5
+default = 1.0
+
+[[values]]
+name = "plates"
+min = 0.5
+max = 2.0
+default = 1.0

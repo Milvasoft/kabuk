@@ -1,0 +1,28 @@
+name = "Milva liquid gold"
+author = "Kabuk"
+version = 1
+tokens = []
+
+[[values]]
+name = "speed"
+min = 0.2
+max = 2.5
+default = 1.0
+
+[[values]]
+name = "glow"
+min = 0.2
+max = 2.0
+default = 1.0
+
+[[values]]
+name = "ripples"
+min = 0.0
+max = 2.0
+default = 1.0
+
+[[values]]
+name = "flow"
+min = 0.0
+max = 2.0
+default = 1.0

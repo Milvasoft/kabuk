@@ -1,0 +1,28 @@
+name = "Paper pleats"
+author = "Kabuk"
+version = 1
+tokens = []
+
+[[values]]
+name = "speed"
+min = 0.2
+max = 3.0
+default = 1.0
+
+[[values]]
+name = "pleats"
+min = 0.6
+max = 1.8
+default = 1.0
+
+[[values]]
+name = "depth"
+min = 0.2
+max = 1.0
+default = 0.7
+
+[[values]]
+name = "shade"
+min = 0.0
+max = 1.0
+default = 0.0

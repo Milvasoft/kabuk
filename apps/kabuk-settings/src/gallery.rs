@@ -177,6 +177,8 @@ mod tests {
                 "gal-savers-live",
                 "gal-savers-still",
                 "gal-still-saver-h",
+                "gal-walls-as-savers",
+                "gal-wall-saver-h",
             ] {
                 assert!(named(k), "{lang:?} {k}");
             }

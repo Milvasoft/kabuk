@@ -1,0 +1,22 @@
+name = "Cloud sea"
+author = "Kabuk"
+version = 1
+tokens = []
+
+[[values]]
+name = "speed"
+min = 0.2
+max = 3.0
+default = 1.0
+
+[[values]]
+name = "billow"
+min = 0.5
+max = 1.4
+default = 1.0
+
+[[values]]
+name = "warmth"
+min = 0.0
+max = 1.0
+default = 0.6

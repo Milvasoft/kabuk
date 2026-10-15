@@ -1,0 +1,22 @@
+name = "Ebru flow"
+author = "Kabuk"
+version = 1
+tokens = ["accent", "accent2"]
+
+[[values]]
+name = "speed"
+min = 0.2
+max = 3.0
+default = 1.0
+
+[[values]]
+name = "comb"
+min = 0.0
+max = 1.0
+default = 0.6
+
+[[values]]
+name = "follow"
+min = 0.0
+max = 1.0
+default = 0.0
