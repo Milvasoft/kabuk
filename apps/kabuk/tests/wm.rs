@@ -472,11 +472,32 @@ fn the_dropdown_terminal_starts_drops_down_and_hides() {
             .into_iter()
             .find(|w| w.title() == name)
     };
+    // Kabuk starts the program, so the test ends it, failed or not (found by a failed run:
+    // the window stayed and the next tests managed it).
+    struct EndsIt<F: Fn() -> Option<Hwnd>>(F);
+    impl<F: Fn() -> Option<Hwnd>> Drop for EndsIt<F> {
+        fn drop(&mut self) {
+            // A second one may have started; a few tries, never forever.
+            for _ in 0..3 {
+                let Some(p) = (self.0)()
+                    .and_then(|w| w.pid())
+                    .and_then(|pid| kabuk_win::process::Process::open(pid).ok())
+                else {
+                    break;
+                };
+                let _ = p.terminate(1);
+                p.wait(Some(SETTLE));
+            }
+        }
+    }
+    let _ends = EndsIt(window);
     wm.act(test_action::DROPDOWN, 0);
     assert!(wait_until(SETTLE, || sandbox.log_lines("dropdown captured") == 1).is_some());
     let w = window().expect("its window");
     assert_eq!(sandbox.log_lines("managing window"), 0, "out of the layout");
     let shown = |w: Hwnd| w.is_visible() && w.frame_rect().is_some();
+    // Shown just after it is captured (found by a failed run that looked too soon).
+    assert!(wait_until(SETTLE, || sandbox.log_lines("dropdown shown") >= 1).is_some());
     let m = kabuk_win::shell::monitors()
         .into_iter()
         .find(|m| {
@@ -649,6 +670,7 @@ toggle_scratchpad = ["Ctrl+Alt+F13"]
 to_scratchpad = ["Ctrl+Alt+F14"]
 toggle_group = ["Ctrl+Alt+F15"]
 next_tab = ["Ctrl+Alt+F16"]
+dropdown = ["Ctrl+Alt+F17"]
 "#;
 
 /// The configured shortcuts are bound and a hotkey message runs its action. Reported by
@@ -677,7 +699,8 @@ fn shortcuts_are_bound_even_when_another_program_holds_one() {
         "{:?}",
         sandbox.last_log_line(&["taken"])
     );
-    // 2 + 2 workspace chords and 15 others, every one of them Kabuk's.
+    // 2 + 2 workspace chords and 16 others (the drop-down terminal's since D62), every
+    // one of them Kabuk's.
     let registered = sandbox.last_log_line(&["shortcuts registered"]).unwrap();
     let count: usize = registered
         .split("count=")
@@ -688,7 +711,7 @@ fn shortcuts_are_bound_even_when_another_program_holds_one() {
         .unwrap()
         .parse()
         .unwrap();
-    assert_eq!(count, 19, "{registered}");
+    assert_eq!(count, 20, "{registered}");
 
     let a = open("keys-a", &[]);
     assert!(wait_until(SETTLE, || fills(&a)).is_some());
