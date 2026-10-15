@@ -517,6 +517,9 @@ impl Desk {
             let mut before = self.visible_set();
             before.remove(&id);
             let entry = self.take_from_scratch(i);
+            if self.focused == Some(id) {
+                self.focused = self.scratch.focus;
+            }
             let monitor = self.scratch_on.clone().unwrap_or_default();
             self.parked.insert(
                 id,
@@ -544,6 +547,10 @@ impl Desk {
         entry.tab_hidden = false;
         if ws.focus == Some(id) {
             ws.focus = ws.entries.last().map(|e| e.id);
+        }
+        if self.focused == Some(id) {
+            // Until Windows tells which window it brought to the front.
+            self.focused = ws.focus;
         }
         let reflow = if w == self.monitors[m].active && !entry.floating {
             vec![(m, w)]
@@ -581,6 +588,7 @@ impl Desk {
             let entries = &mut self.scratch.entries;
             entries.insert(p.index.min(entries.len()), p.entry);
             self.scratch_dirty = self.scratch_on.is_some();
+            self.refocus(id);
             return self.sync(&before, &[], None);
         }
         let m = self
@@ -594,8 +602,16 @@ impl Desk {
         let floating = p.entry.floating;
         let entries = &mut self.monitors[m].workspaces[w].entries;
         entries.insert(p.index.min(entries.len()), p.entry);
+        self.refocus(id);
         let reflow = if floating { Vec::new() } else { vec![(m, w)] };
         self.sync(&before, &reflow, None)
+    }
+
+    /// A window back from being parked that was focused meanwhile is its workspace's focus.
+    fn refocus(&mut self, id: WindowId) {
+        if self.focused == Some(id) {
+            self.focused(id);
+        }
     }
 
     /// Switches a monitor to workspace `n` (1-based).
@@ -1078,7 +1094,12 @@ impl Desk {
 
     /// Windows reported this window as the foreground one.
     pub fn focused(&mut self, id: WindowId) {
-        if self.in_scratchpad(id) {
+        if self.is_parked(id) {
+            // Windows brings a restored window to the front before it is restored: it
+            // takes the focus once back (found by the user: the shortcuts then acted on
+            // the window focused before it).
+            self.focused = Some(id);
+        } else if self.in_scratchpad(id) {
             self.focused = Some(id);
             self.scratch.focus = Some(id);
         } else if let Some((m, w, _)) = self.find(id) {

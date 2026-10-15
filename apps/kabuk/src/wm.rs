@@ -421,6 +421,8 @@ struct Wm {
     snapshot: SharedSnapshot,
     /// The window held with Alt, with its outer rectangle and frame from before it moved.
     held: Option<(u64, state::Rect, state::Rect)>,
+    /// A maximised window a move restores: placed though Windows still has it maximised.
+    unmaximizing: Option<u64>,
 }
 
 fn run(
@@ -464,6 +466,7 @@ fn run(
         listener,
         snapshot,
         held: None,
+        unmaximizing: None,
     }));
     let weak = Rc::downgrade(&wm);
     let own = Rc::new(std::cell::Cell::new(None));
@@ -746,7 +749,7 @@ impl Wm {
                 let id = i32::try_from(m.wparam).ok();
                 let action = self.hotkeys.iter().find(|(i, _, _)| Some(*i) == id).map(|(_, _, a)| *a);
                 if let Some(a) = action {
-                    self.act(a);
+                    self.act_on_front(a);
                 }
                 Some(0)
             }
@@ -811,7 +814,7 @@ impl Wm {
                 let effects = self.desk.switch(&device, number);
                 self.apply(effects);
             }
-            Command::Action(a) => self.act(a),
+            Command::Action(a) => self.act_on_front(a),
             Command::ToggleFloatingLayout { device } => self.toggle_floating_layout(&device),
             Command::Reveal(hwnd) => self.reveal(hwnd),
             Command::SelectTab(hwnd) => {
@@ -963,6 +966,19 @@ impl Wm {
         self.act(action);
     }
 
+    /// The user's action, for the window in front: Windows tells Kabuk which window is in
+    /// front with events that can come before the window is back from the bar, so the
+    /// focus Kabuk had could be another window (found by the user: Win+arrow did nothing,
+    /// or moved the window before it).
+    fn act_on_front(&mut self, a: Action) {
+        if let Some(front) = kabuk_win::events::foreground() {
+            if self.desk.contains(front.0) && !self.desk.is_parked(front.0) {
+                self.desk.focused(front.0);
+            }
+        }
+        self.act(a);
+    }
+
     /// A shortcut action. Logs how long applying it took (SPEC §8: under 16 ms).
     fn act(&mut self, a: Action) {
         let started = Instant::now();
@@ -989,8 +1005,24 @@ impl Wm {
                 .map(|t| self.desk.select_tab(t))
                 .unwrap_or_default(),
         };
+        if let (Action::Move(_), Some(f)) = (a, focused) {
+            self.unmaximize_moved(f, &effects);
+        }
         self.apply(effects);
+        self.unmaximizing = None;
         tracing::info!(action = ?a, apply_us = started.elapsed().as_micros() as u64, "action applied");
+    }
+
+    /// A maximised window covers its tile, so moving it showed nothing (found by the user:
+    /// Win+Shift+arrow did nothing to it): when the move places it, Windows restores it
+    /// first and it goes to its new place.
+    fn unmaximize_moved(&mut self, id: u64, effects: &[Effect]) {
+        let h = Hwnd(id);
+        let placed = effects.iter().any(|e| matches!(e, Effect::Place(p, _) if *p == id));
+        if placed && h.is_maximized() && h.restore_async() {
+            tracing::info!(hwnd = id, "maximised window restored to be moved");
+            self.unmaximizing = Some(id);
+        }
     }
 
     /// Where workspace actions apply: the focused window's monitor, else the primary one.
@@ -1396,7 +1428,7 @@ impl Wm {
                     }
                     let h = Hwnd(id);
                     // A window the user maximised or minimised keeps that state.
-                    if h.is_maximized() || h.is_minimized() {
+                    if (h.is_maximized() && self.unmaximizing != Some(id)) || h.is_minimized() {
                         continue;
                     }
                     if h.place_frame_async(state_rect(r)) {
@@ -1775,7 +1807,12 @@ impl Wm {
     /// the setting says so, and the layout comes back as it was once they are free again.
     fn set_game_mode(&mut self, devices: Vec<String>) {
         crate::grab::pause(&self.snapshot, !devices.is_empty());
-        kabuk_win::keyhook::set_paused(!devices.is_empty());
+        let covered = kabuk_win::shell::monitors()
+            .into_iter()
+            .filter(|m| devices.contains(&m.device))
+            .map(|m| m.handle)
+            .collect();
+        kabuk_win::keyhook::set_paused_on(covered);
         let paused: std::collections::HashSet<String> = if self.config.current().game.pause_tiling {
             devices.into_iter().collect()
         } else {

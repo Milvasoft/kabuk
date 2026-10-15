@@ -11,9 +11,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, FindWindowExW, GetAncestor, GetClassNameW, GetWindow, GetWindowLongPtrW, GetWindowRect,
     GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, IsZoomed,
     PostMessageW, SetForegroundWindow, SetWindowPos, ShowWindowAsync, GA_ROOT, GWL_EXSTYLE, GWL_STYLE, GW_OWNER,
-    HWND_MESSAGE, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOZORDER, SW_HIDE, SW_MINIMIZE,
-    SW_RESTORE, SW_SHOWNA, WINDOW_LONG_PTR_INDEX, WM_CLOSE, WS_CAPTION, WS_CHILD, WS_EX_APPWINDOW, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW, WS_POPUP, WS_THICKFRAME,
+    HWND_MESSAGE, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOZORDER, SW_HIDE, SW_MAXIMIZE,
+    SW_MINIMIZE, SW_RESTORE, SW_SHOWNA, WINDOW_LONG_PTR_INDEX, WM_CLOSE, WS_CAPTION, WS_CHILD, WS_EX_APPWINDOW,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP, WS_THICKFRAME,
 };
 
 /// The settings app's window class (`webview`) for Kabuk instance `instance`, known
@@ -550,6 +550,12 @@ impl Hwnd {
     pub fn minimize_async(self) -> bool {
         // SAFETY: as for `show_async`.
         unsafe { ShowWindowAsync(self.raw(), SW_MINIMIZE) }.as_bool()
+    }
+
+    /// Asks the window to maximise, as its maximise button would. Never blocks.
+    pub fn maximize_async(self) -> bool {
+        // SAFETY: as for `show_async`.
+        unsafe { ShowWindowAsync(self.raw(), SW_MAXIMIZE) }.as_bool()
     }
 
     /// Asks a minimised or maximised window to return to its normal size. Never blocks.

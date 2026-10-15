@@ -870,6 +870,45 @@ fn a_minimised_window_leaves_the_layout_and_comes_back_to_its_place() {
     assert!(!d.is_parked(8) && !d.contains(8));
 }
 
+/// Found by the user: Win+arrow did nothing, or moved another window, right after a
+/// window came back from the bar. Windows brings it to the front while it is still
+/// minimised; the focus must not stay on the window before it, nor on a minimised one.
+#[test]
+fn a_window_brought_to_the_front_while_minimised_has_the_focus_once_back() {
+    let mut d = desk(false);
+    for id in 1..=3 {
+        d.add(new(id));
+    }
+    d.focused(3);
+    d.park(3);
+    assert_ne!(d.focus(), Some(3), "a minimised window is not the focus");
+    assert!(d.focus().is_some_and(|f| d.visible_windows().contains(&f)));
+    d.focused(1);
+    // Restored from the bar: the front first, then the restore.
+    d.focused(3);
+    d.unpark(3);
+    assert_eq!(d.focus(), Some(3));
+    assert_eq!(d.focused_monitor(), Some(M1.to_string()));
+    let left = d.focus_toward(Toward::Left).expect("a window to its left");
+    assert_ne!(left, Effect::Focus(3));
+    // Restored without being focused: the focus stays where it was.
+    d.park(2);
+    d.focused(1);
+    d.unpark(2);
+    assert_eq!(d.focus(), Some(1));
+    // The same on the hidden workspace.
+    d.focused(1);
+    d.to_scratchpad(1);
+    d.toggle_scratchpad(M1);
+    d.focused(1);
+    d.park(1);
+    assert_ne!(d.focus(), Some(1));
+    d.focused(1);
+    d.unpark(1);
+    assert_eq!(d.focus(), Some(1));
+    assert!(d.in_scratchpad(1));
+}
+
 #[test]
 fn a_minimum_width_that_does_not_fit_floats_the_window() {
     let mut d = desk(false);

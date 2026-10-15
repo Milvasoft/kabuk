@@ -454,6 +454,39 @@ fn swap_float_and_close_act_on_the_focused_window() {
     assert_eq!(sandbox.restore().0, 0);
 }
 
+/// Found by the user: Win+Shift+arrow did nothing to a maximised window (its tile moved
+/// under it, the other window behind it). It is restored and goes to its new place.
+#[test]
+fn moving_a_maximised_window_restores_it_to_its_new_place() {
+    let sandbox = Sandbox::new();
+    let wm = Wm::start(&sandbox, &config(""));
+    let a = open("maxmove-a", &[]);
+    let b = open("maxmove-b", &[]);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("managing window") == 2).is_some());
+    let apart = || matches!((frame(&a), frame(&b)), (Some(fa), Some(fb)) if !overlaps(&fa, &fb) && fa.left != fb.left);
+    assert!(wait_until(SETTLE, apart).is_some());
+    let (left, right) = if frame(&a).unwrap().left < frame(&b).unwrap().left {
+        (&a, &b)
+    } else {
+        (&b, &a)
+    };
+    let (rl, rr) = (frame(left).unwrap(), frame(right).unwrap());
+    assert!(left.hwnd.maximize_async());
+    assert!(wait_until(SETTLE, || left.hwnd.is_maximized()).is_some());
+    wm.focus(left);
+    wm.act(test_action::MOVE, 3);
+    let moved = || !left.hwnd.is_maximized() && frame(left) == Some(rr) && frame(right) == Some(rl);
+    assert!(
+        wait_until(SETTLE, moved).is_some(),
+        "maximised {}, left at {:?}, right at {:?}",
+        left.hwnd.is_maximized(),
+        frame(left),
+        frame(right)
+    );
+    assert_eq!(sandbox.log_lines("maximised window restored to be moved"), 1);
+    assert_eq!(sandbox.restore().0, 0);
+}
+
 /// Reported by the user: Win and an arrow did not move the focus. Kabuk takes the chord
 /// from its keyboard hook, so Windows does not count it as Kabuk's input and refused to
 /// bring the next window to the front. Here the action comes as a message, which Windows

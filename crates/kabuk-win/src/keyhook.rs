@@ -9,8 +9,9 @@
 //! When the Win key or Alt took part in a chord, its release is masked (a key that does
 //! nothing pressed in between), so Start or the program's menu does not open. The hook
 //! runs on a thread of its own that does nothing else (a slow hook makes every key on
-//! the machine wait); injected keys (the mask among them) pass untouched; while paused
-//! (game mode) every key passes.
+//! the machine wait); injected keys (the mask among them) pass untouched; while the
+//! window in front is on a monitor a full-screen program covers (game mode) every key
+//! passes, and on the other monitors the chords work as usual (SPEC §2.4).
 //!
 //! Settings' shortcut recorder takes the keys with a [`Capture`]: a hook of its own,
 //! installed when the recorder waits (so it is the newest and sees keys before Kabuk's
@@ -54,6 +55,8 @@ struct Binding {
 static BINDINGS: Mutex<Vec<Binding>> = Mutex::new(Vec::new());
 static NEXT: AtomicU64 = AtomicU64::new(1);
 static PAUSED: AtomicBool = AtomicBool::new(false);
+/// The monitors (`HMONITOR` values) a full-screen program covers while [`PAUSED`].
+static PAUSED_ON: Mutex<Vec<isize>> = Mutex::new(Vec::new());
 static THREAD: OnceLock<Result<(), String>> = OnceLock::new();
 
 /// A key event as the hook sees it.
@@ -246,12 +249,36 @@ thread_local! {
     static STATE: std::cell::RefCell<KeyState> = std::cell::RefCell::new(KeyState::default());
 }
 
+/// Whether keys pass untouched: a full-screen program covers the monitor of the window
+/// in front (`None`: no window in front, as a game may be). Pure.
+fn paused_for(front: Option<isize>, paused_on: &[isize]) -> bool {
+    !paused_on.is_empty() && front.is_none_or(|m| paused_on.contains(&m))
+}
+
+/// The monitor of the window in front.
+fn front_monitor() -> Option<isize> {
+    use windows::Win32::Graphics::Gdi::{MonitorFromWindow, MONITOR_DEFAULTTONULL};
+    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    // SAFETY: plain queries; no window or monitor gives a null handle.
+    let m = unsafe { MonitorFromWindow(GetForegroundWindow(), MONITOR_DEFAULTTONULL) };
+    (!m.is_invalid()).then_some(m.0 as isize)
+}
+
+/// Game mode, decided per key (cheap: only while a full-screen program runs).
+fn paused_now() -> bool {
+    if !PAUSED.load(Ordering::Relaxed) {
+        return false;
+    }
+    let paused_on = PAUSED_ON.lock().map(|p| p.clone()).unwrap_or_default();
+    paused_for(front_monitor(), &paused_on)
+}
+
 unsafe extern "system" fn on_key(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let pass = || {
         // SAFETY: passes the event on with the arguments received.
         unsafe { CallNextHookEx(None, code, wparam, lparam) }
     };
-    if code < 0 || PAUSED.load(Ordering::Relaxed) {
+    if code < 0 || crate::msgloop::contain(false, paused_now) {
         return pass();
     }
     // SAFETY: for WH_KEYBOARD_LL, lparam points to the event's KBDLLHOOKSTRUCT.
@@ -517,9 +544,16 @@ pub fn bind(window: &MessageWindow, id: i32, chord: Chord) -> std::io::Result<Bo
     }
 }
 
-/// Lets every key pass (game mode, DECISIONS D40) or takes the chords again.
-pub fn set_paused(paused: bool) {
-    PAUSED.store(paused, Ordering::Relaxed);
+/// Lets every key pass while the window in front is on one of `monitors` (`HMONITOR`
+/// values of the monitors full-screen programs cover: game mode, DECISIONS D40), or,
+/// with none, takes the chords everywhere again. Found by the user: with a video full
+/// screen on one monitor, Win+arrow on the other did Windows' snapping instead.
+pub fn set_paused_on(monitors: Vec<isize>) {
+    let any = !monitors.is_empty();
+    if let Ok(mut p) = PAUSED_ON.lock() {
+        *p = monitors;
+    }
+    PAUSED.store(any, Ordering::Relaxed);
 }
 
 #[cfg(test)]
@@ -679,9 +713,22 @@ mod tests {
         assert_eq!(BINDINGS.lock().unwrap().len(), before + 1);
         drop(s);
         assert_eq!(BINDINGS.lock().unwrap().len(), before);
-        set_paused(true);
+        set_paused_on(vec![7]);
         assert!(PAUSED.load(Ordering::Relaxed));
-        set_paused(false);
+        set_paused_on(Vec::new());
+        assert!(!PAUSED.load(Ordering::Relaxed) && !paused_now());
+    }
+
+    /// Game mode lets keys pass only where the full-screen program is: the window in
+    /// front on its monitor (or no window in front); on another monitor the chords work.
+    #[test]
+    fn keys_pass_only_while_the_front_window_is_on_a_full_screen_monitor() {
+        assert!(!paused_for(Some(1), &[]), "no full-screen program");
+        assert!(!paused_for(None, &[]));
+        assert!(paused_for(Some(1), &[1]), "in front on its monitor");
+        assert!(paused_for(Some(2), &[1, 2]));
+        assert!(!paused_for(Some(2), &[1]), "the other monitor works as usual");
+        assert!(paused_for(None, &[1]), "nothing in front: the game's");
     }
 
     /// The recorder takes the next chord, Win chords included, and its key's repeats
