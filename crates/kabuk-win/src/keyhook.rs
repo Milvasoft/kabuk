@@ -130,6 +130,14 @@ fn is_modifier(vk: u16) -> bool {
             .any(|k| k.0 == vk)
 }
 
+/// Whether the hook takes `vk` even when a program injected it: the volume keys, which
+/// keyboard software sends that way (found on the user's machine: the laptop's Fn
+/// volume keys come injected, so Windows' flyout showed beside Kabuk's OSD). Kabuk
+/// itself never injects them; every other injected key passes (its own masks too).
+fn taken_when_injected(vk: u16) -> bool {
+    VolumeKey::of(vk).is_some()
+}
+
 /// A volume key's event while the bar takes them, pure: `None` when it is not one.
 /// Up and Down repeat while held (as Windows steps the volume); Mute acts once per press.
 /// Every event of a volume key is swallowed (`Some(None)` tells nothing).
@@ -248,10 +256,10 @@ unsafe extern "system" fn on_key(code: i32, wparam: WPARAM, lparam: LPARAM) -> L
     }
     // SAFETY: for WH_KEYBOARD_LL, lparam points to the event's KBDLLHOOKSTRUCT.
     let info = unsafe { &*(lparam.0 as *const KBDLLHOOKSTRUCT) };
-    if info.flags.0 & LLKHF_INJECTED.0 != 0 {
+    let vk = u16::try_from(info.vkCode).unwrap_or(0);
+    if info.flags.0 & LLKHF_INJECTED.0 != 0 && !taken_when_injected(vk) {
         return pass();
     }
-    let vk = u16::try_from(info.vkCode).unwrap_or(0);
     let event = match wparam.0 as u32 {
         WM_KEYDOWN | WM_SYSKEYDOWN => Event::Down(vk),
         WM_KEYUP | WM_SYSKEYUP => Event::Up(vk),
@@ -638,6 +646,16 @@ mod tests {
             assert_eq!(VolumeKey::from_wparam(k as usize), Some(k));
         }
         assert_eq!(VolumeKey::from_wparam(0), None);
+    }
+
+    #[test]
+    fn injected_volume_keys_are_taken_and_other_injected_keys_pass() {
+        for vk in [VK_VOLUME_UP.0, VK_VOLUME_DOWN.0, VK_VOLUME_MUTE.0] {
+            assert!(taken_when_injected(vk));
+        }
+        assert!(!taken_when_injected(MASK_KEY), "Kabuk's own mask key");
+        assert!(!taken_when_injected(virtual_key(Key::Letter('A')).0));
+        assert!(!taken_when_injected(VK_LWIN.0));
     }
 
     #[test]

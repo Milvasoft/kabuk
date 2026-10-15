@@ -1076,6 +1076,7 @@ impl Shared {
             msg::TIMER => {
                 match m.wparam {
                     timer::CLOCK => {
+                        self.leave_if_desk_taken();
                         let now = kabuk_win::system::local_time();
                         let changed = self.live.time.is_none_or(|t| !t.same_minute(&now));
                         self.live.time = Some(now);
@@ -1591,8 +1592,34 @@ impl Shared {
         if m.id != msg::SETTINGCHANGE && !shell {
             return None;
         }
+        if m.id == self.taskbar_created {
+            // Two shells pass the tray back and forth with this: the older one leaves.
+            self.leave_if_desk_taken();
+        }
         self.apply_pending();
         Some(if shell { Some(0) } else { None })
+    }
+
+    /// Leaves (the emergency stop of this instance: its desktop comes back and its
+    /// watchdog goes too) when the desk names another shell ([`kabuk_core::instance::lost_desk`]).
+    fn leave_if_desk_taken(&self) {
+        let Some(own) = wm::lock(&self.state).path().parent().map(std::path::Path::to_path_buf) else {
+            return;
+        };
+        let owner = kabuk_win::desk_owner::current();
+        if !kabuk_core::instance::lost_desk(&own, owner.as_deref()) {
+            return;
+        }
+        tracing::warn!(owner = ?owner, "another shell has the desk; this one leaves");
+        let instance = kabuk_core::instance::Instance::for_state_dir(&own);
+        match kabuk_win::sync::NamedEvent::create_or_open(&instance.emergency_event()) {
+            Ok(e) => {
+                if let Err(err) = e.set() {
+                    tracing::error!(error = %err, "could not stop for the other shell");
+                }
+            }
+            Err(err) => tracing::error!(error = %err, "could not stop for the other shell"),
+        }
     }
 
     /// Handles the notifications noted while busy, or just now.

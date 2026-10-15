@@ -285,6 +285,47 @@ fn a_shell_of_another_state_directory_takes_the_desk() {
     assert_eq!(other.restore().0, 0);
 }
 
+/// Found on the user's machine: a test's shell left running (its claim overwritten by a
+/// later shell, so no new shell made it give way) fought the user's shell over the tray
+/// all night. A shell that sees the desk name another leaves by itself, at the next
+/// minute or when the tray is passed back to it.
+#[test]
+fn a_shell_that_lost_the_desk_leaves_by_itself() {
+    let mine = Sandbox::new();
+    let other = Sandbox::new();
+    let mut shell = mine.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || mine.state().kabuk_pid.is_some()).is_some());
+    let pid = mine.state().kabuk_pid.unwrap();
+    // A bar gets Explorer's TaskbarCreated broadcast, as a top-level window.
+    let find = || {
+        kabuk_win::window::windows_of_class("Kabuk.Bar")
+            .into_iter()
+            .find(|h| h.pid() == Some(pid))
+    };
+    assert!(wait_until(STARTUP_TIMEOUT, || find().is_some()).is_some(), "a bar");
+    let bar = find().unwrap();
+    // Another shell's name on the desk, as a later shell would have put it.
+    let claim = kabuk_win::desk_owner::claim(other.state_dir()).expect("desk claimed");
+    let taskbar_created = kabuk_win::system::register_message(kabuk_win::system::TASKBAR_CREATED);
+    post_message(
+        bar,
+        Msg {
+            id: taskbar_created,
+            wparam: 0,
+            lparam: 0,
+        },
+    )
+    .unwrap();
+    assert!(
+        shell.wait_exit(Duration::from_secs(5)).is_some(),
+        "it stayed beside the other"
+    );
+    assert_eq!(mine.log_lines("another shell has the desk; this one leaves"), 1);
+    assert!(!mine.state().has_changes(), "its changes stayed");
+    drop(claim);
+    assert_eq!(mine.restore().0, 0);
+}
+
 #[test]
 fn restore_reapplies_taskbar_and_work_area_entries() {
     // The recorded values are the current ones, so re-applying them changes nothing

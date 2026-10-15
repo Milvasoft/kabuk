@@ -95,6 +95,14 @@ pub fn desk_owner(block: &[u8]) -> Option<std::path::PathBuf> {
     (!text.is_empty()).then(|| std::path::PathBuf::from(text))
 }
 
+/// Whether the shell of `own` (a state directory) lost the desk to another one: the desk
+/// names a shell of another instance. Only the last shell to start is named, so an older
+/// one that was never made to give way (found on the user's machine: a test's shell left
+/// running fought the user's shell over the tray all night) finds out and leaves.
+pub fn lost_desk(own: &std::path::Path, owner: Option<&std::path::Path>) -> bool {
+    owner.is_some_and(|o| Instance::for_state_dir(o) != Instance::for_state_dir(own))
+}
+
 fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for b in bytes {
@@ -150,5 +158,13 @@ mod tests {
             .all(|n| n.starts_with("Local\\kabuk-") && n.ends_with(i.id())));
         assert_ne!(names[0], names[1]);
         assert_ne!(names[1], names[2]);
+    }
+
+    #[test]
+    fn a_shell_knows_when_another_has_the_desk() {
+        let own = std::path::Path::new(r"C:\Users\u\AppData\Local\kabuk");
+        assert!(!lost_desk(own, None), "nobody named: it stays");
+        assert!(!lost_desk(own, Some(own)), "itself");
+        assert!(lost_desk(own, Some(std::path::Path::new(r"C:\Temp\.tmpK9njnZ"))));
     }
 }
