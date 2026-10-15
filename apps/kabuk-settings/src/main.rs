@@ -6,6 +6,7 @@
 
 mod bridge;
 mod create;
+mod gallery;
 mod resources;
 
 use kabuk_core::instance::Instance;

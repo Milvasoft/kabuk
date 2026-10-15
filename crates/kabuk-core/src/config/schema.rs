@@ -342,6 +342,9 @@ pub enum WallpaperKind {
     Constellation,
     /// A wallpaper made in the Create tab (`wallpaper.generated`).
     Generated,
+    /// A design of Kabuk's gallery (`wallpaper.gallery`, DECISIONS D58): a live one is
+    /// played, a still one drawn once as the picture.
+    Gallery,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -355,6 +358,9 @@ pub struct Wallpaper {
     /// Name of the created wallpaper for `kind = "generated"`.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub generated: String,
+    /// The gallery design for `kind = "gallery"` (`wall-live/aurora-shore`).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub gallery: String,
     /// Peak brightness, percent (10-100).
     pub brightness: u32,
     /// Pause animation when the desktop is covered, in full screen, in game mode and on battery.
@@ -376,6 +382,8 @@ pub struct MonitorWallpaper {
     pub image: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub generated: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub gallery: String,
 }
 
 pub const WALLPAPER_BRIGHTNESS_RANGE: (u32, u32) = (10, 100);
@@ -398,6 +406,27 @@ impl Wallpaper {
             None => self.generated.clone(),
         }
     }
+
+    /// The gallery design for monitor `number` (its own entry, or the default).
+    pub fn gallery_for(&self, number: u32) -> String {
+        match self.monitors.iter().find(|m| m.index == number) {
+            Some(m) => m.gallery.clone(),
+            None => self.gallery.clone(),
+        }
+    }
+
+    /// Whether monitor `number`'s wallpaper is played behind the icons: an animated kind,
+    /// or a live design of the gallery.
+    pub fn animated_for(&self, number: u32) -> bool {
+        let (kind, _) = self.for_monitor(number);
+        kind.animated() || (kind == WallpaperKind::Gallery && is_live_design(&self.gallery_for(number)))
+    }
+}
+
+/// A gallery design that is played: its category ends in `-live` (`wall-live/…`).
+pub fn is_live_design(key: &str) -> bool {
+    key.split_once('/')
+        .is_some_and(|(category, _)| category.ends_with("-live"))
 }
 
 impl WallpaperKind {
@@ -417,6 +446,7 @@ impl Default for Wallpaper {
             kind: WallpaperKind::Windows,
             image: String::new(),
             generated: String::new(),
+            gallery: String::new(),
             brightness: 60,
             pause_when_hidden: true,
             drift: true,
@@ -434,6 +464,8 @@ pub enum SaverKind {
     /// Milvasoft circuit board eye.
     Circuit,
     Constellation,
+    /// A design of Kabuk's gallery (`screensaver.gallery`, DECISIONS D58).
+    Gallery,
     /// No saver; turn the display off.
     None,
 }
@@ -442,6 +474,9 @@ pub enum SaverKind {
 #[serde(default)]
 pub struct Screensaver {
     pub kind: SaverKind,
+    /// The gallery design for `kind = "gallery"` (`saver-live/comet-calligraphy`).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub gallery: String,
     /// One of [`SAVER_WAIT_CHOICES`].
     pub wait_minutes: u32,
     /// Honour display-on requests (do not start while a video plays).
@@ -454,6 +489,7 @@ impl Default for Screensaver {
     fn default() -> Self {
         Screensaver {
             kind: SaverKind::Circuit,
+            gallery: String::new(),
             wait_minutes: 5,
             respect_video: true,
         }

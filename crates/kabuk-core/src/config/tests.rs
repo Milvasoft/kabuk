@@ -630,11 +630,35 @@ fn a_monitors_own_wallpaper_wins_over_the_default() {
         kind: WallpaperKind::Image,
         image: "D:/Pictures/night.png".into(),
         generated: String::new(),
+        gallery: String::new(),
     });
     assert_eq!(w.for_monitor(1).0, WallpaperKind::Circuit);
     assert_eq!(w.for_monitor(2), (WallpaperKind::Image, "D:/Pictures/night.png".into()));
     assert!(WallpaperKind::Circuit.animated() && WallpaperKind::Constellation.animated());
     assert!(!WallpaperKind::Image.animated() && !WallpaperKind::Windows.animated());
+}
+
+/// DECISIONS D58: a gallery design names its category and id; a live one is played, a
+/// still one is not; a monitor's own wins; a missing design is reported.
+#[test]
+fn gallery_designs_are_chosen_per_monitor_and_saver() {
+    let c = parse(
+        "schema = 1\n[wallpaper]\nkind = \"gallery\"\ngallery = \"wall-live/aurora-shore\"\n[[wallpaper.monitor]]\nindex = 2\nkind = \"gallery\"\ngallery = \"wall-still/agate-slice\"\n[screensaver]\nkind = \"gallery\"\ngallery = \"saver-still/ember-enso\"\n",
+    )
+    .unwrap()
+    .config;
+    let w = &c.wallpaper;
+    assert_eq!(w.gallery_for(1), "wall-live/aurora-shore");
+    assert_eq!(w.gallery_for(2), "wall-still/agate-slice");
+    assert!(w.animated_for(1) && !w.animated_for(2));
+    assert!(!WallpaperKind::Gallery.animated(), "only a live design moves");
+    assert_eq!(c.screensaver.kind, SaverKind::Gallery);
+    assert_eq!(c.screensaver.gallery, "saver-still/ember-enso");
+    assert!(is_live_design("saver-live/x") && !is_live_design("wall-still/x") && !is_live_design("x"));
+    let e = single_error("schema = 1\n[wallpaper]\nkind = \"gallery\"\n");
+    assert_eq!((e.path, e.problem), (path("wallpaper.gallery"), Problem::Missing));
+    let e = single_error("schema = 1\n[screensaver]\nkind = \"gallery\"\n");
+    assert_eq!((e.path, e.problem), (path("screensaver.gallery"), Problem::Missing));
 }
 
 /// DECISIONS D41: the cursors are chosen apart from the look; "kabuk" follows the look's

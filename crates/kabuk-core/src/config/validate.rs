@@ -48,7 +48,14 @@ pub fn validate(config: &Config) -> Vec<(KeyPath, Problem)> {
         w.drift_minutes,
         WALLPAPER_DRIFT_MINUTES_RANGE,
     );
-    wallpaper_source(&mut push, KeyPath::of(&["wallpaper"]), w.kind, &w.image, &w.generated);
+    wallpaper_source(
+        &mut push,
+        KeyPath::of(&["wallpaper"]),
+        w.kind,
+        &w.image,
+        &w.generated,
+        &w.gallery,
+    );
     let mut seen = Vec::new();
     for (i, m) in w.monitors.iter().enumerate() {
         let base = KeyPath::of(&["wallpaper", "monitor"]).index(i);
@@ -58,10 +65,14 @@ pub fn validate(config: &Config) -> Vec<(KeyPath, Problem)> {
             push(base.key("index"), Problem::Duplicate);
         }
         seen.push(m.index);
-        wallpaper_source(&mut push, base, m.kind, &m.image, &m.generated);
+        wallpaper_source(&mut push, base, m.kind, &m.image, &m.generated, &m.gallery);
     }
 
     // screen saver
+    let saver = &config.screensaver;
+    if saver.kind == SaverKind::Gallery && saver.gallery.trim().is_empty() {
+        push(KeyPath::of(&["screensaver", "gallery"]), Problem::Missing);
+    }
     let wait = config.screensaver.wait_minutes;
     if !SAVER_WAIT_CHOICES.contains(&wait) {
         push(
@@ -193,10 +204,12 @@ fn wallpaper_source(
     kind: WallpaperKind,
     image: &str,
     generated: &str,
+    gallery: &str,
 ) {
     match kind {
         WallpaperKind::Image if image.trim().is_empty() => push(base.key("image"), Problem::Missing),
         WallpaperKind::Generated if generated.trim().is_empty() => push(base.key("generated"), Problem::Missing),
+        WallpaperKind::Gallery if gallery.trim().is_empty() => push(base.key("gallery"), Problem::Missing),
         _ => {}
     }
 }

@@ -36,7 +36,7 @@ pub enum Which {
     Constellation,
     /// Nothing but black ("None": the display turns off by itself).
     Black,
-    /// A wallpaper made in the Create tab.
+    /// A wallpaper made in the Create tab, or a design of the gallery (DECISIONS D58).
     Created(Box<Created>),
 }
 
@@ -47,6 +47,9 @@ pub struct Created {
     pub hlsl: String,
     /// The look's colours by theme token name (sRGB 0-1).
     pub colors: Vec<(String, (f32, f32, f32))>,
+    /// Drawn once, at its time 0, then wandering and breathing (a still screen saver of
+    /// the gallery; [`kabuk_core::oled::still_pose`]).
+    pub still: bool,
 }
 
 /// A created wallpaper playing in a window.
@@ -56,6 +59,8 @@ struct Wall {
     created: Created,
     /// The wallpaper's own time: it stands still while paused.
     time: f32,
+    /// A still picture has been drawn into the canvas.
+    drawn: bool,
 }
 
 /// Where the scenes play.
@@ -119,6 +124,7 @@ fn wall(gpu: &Gpu, which: &Which, size: (u32, u32)) -> Option<Wall> {
         canvas,
         created: (**c).clone(),
         time: 0.0,
+        drawn: false,
     })
 }
 
@@ -361,9 +367,21 @@ pub fn play(
                     values: &values,
                     brightness: settings.brightness(),
                 };
-                let drawn = gpu
-                    .draw_wall_frame(&w.shader, inputs, w.time, &w.canvas)
-                    .and_then(|()| t.surface.draw_wall(&w.canvas));
+                let drawn = if w.created.still {
+                    // Drawn once; then only moved and dimmed (a bitmap copy a frame).
+                    let ready = if w.drawn {
+                        Ok(())
+                    } else {
+                        w.drawn = true;
+                        gpu.draw_wall_frame(&w.shader, inputs, 0.0, &w.canvas)
+                    };
+                    let height = w.canvas.size().1 as f32;
+                    let (dx, dy, light) = kabuk_core::oled::still_pose(w.time, height);
+                    ready.and_then(|()| t.surface.draw_wall_moved(&w.canvas, dx, dy, light))
+                } else {
+                    gpu.draw_wall_frame(&w.shader, inputs, w.time, &w.canvas)
+                        .and_then(|()| t.surface.draw_wall(&w.canvas))
+                };
                 if let Err(e) = drawn {
                     tracing::error!(error = %e, "created wallpaper not drawn");
                 }
@@ -438,8 +456,17 @@ mod tests {
             manifest: Manifest::parse(kabuk_wallgen::prompt::SAMPLE_TOML).unwrap(),
             hlsl: kabuk_wallgen::prompt::SAMPLE_HLSL.into(),
             colors: vec![("accent-s".into(), (0.56, 0.83, 1.0))],
+            still: false,
         }));
-        for which in [Which::Circuit, Which::Constellation, Which::Black, created] {
+        // A still design of the gallery (DECISIONS D58), drawn once and moved.
+        let (manifest, hlsl) = kabuk_wallgen::gallery::load("saver-still/ember-enso").expect("in the gallery");
+        let still = Which::Created(Box::new(Created {
+            manifest,
+            hlsl: hlsl.into(),
+            colors: Vec::new(),
+            still: true,
+        }));
+        for which in [Which::Circuit, Which::Constellation, Which::Black, created, still] {
             let started = Instant::now();
             let until = Until {
                 frames: Some(6),

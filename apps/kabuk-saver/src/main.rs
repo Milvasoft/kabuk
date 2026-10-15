@@ -8,7 +8,7 @@
 mod args;
 mod player;
 
-use kabuk_core::config::{Config, SaverKind, WallpaperKind};
+use kabuk_core::config::{is_live_design, Config, SaverKind, WallpaperKind};
 use kabuk_core::paths::Paths;
 use kabuk_i18n::{ClockStyle, I18n};
 use kabuk_scenes::{Clock, Settings};
@@ -20,12 +20,29 @@ use crate::player::{Place, Which};
 /// The settings program, next to this one.
 const SETTINGS_EXE: &str = "kabuk-settings.exe";
 
-fn which(kind: SaverKind) -> Which {
-    match kind {
+/// The screen saver `[screensaver]` chose; black when its gallery design is unknown.
+fn which(cfg: &Config) -> Which {
+    match cfg.screensaver.kind {
         SaverKind::Circuit => Which::Circuit,
         SaverKind::Constellation => Which::Constellation,
+        SaverKind::Gallery => gallery(&cfg.screensaver.gallery, cfg).unwrap_or(Which::Black),
         SaverKind::None => Which::Black,
     }
+}
+
+/// The gallery design `key` (DECISIONS D58), ready to play; a still one is drawn once and
+/// then wanders. `None` when there is no such design.
+fn gallery(key: &str, cfg: &Config) -> Option<Which> {
+    let Some((manifest, hlsl)) = kabuk_wallgen::gallery::load(key) else {
+        tracing::error!(key, "no such gallery design; black instead");
+        return None;
+    };
+    Some(Which::Created(Box::new(player::Created {
+        manifest,
+        hlsl: hlsl.to_string(),
+        colors: wall_colors(cfg),
+        still: !is_live_design(key),
+    })))
 }
 
 /// The look's colours a created wallpaper is drawn with: the chosen look and accent in
@@ -54,6 +71,7 @@ fn created(paths: Option<&Paths>, id: &str, cfg: &Config) -> Option<Which> {
             manifest,
             hlsl,
             colors: wall_colors(cfg),
+            still: false,
         }))),
         Err(e) => {
             tracing::error!(error = %e, id, "created wallpaper not loaded; black instead");
@@ -105,7 +123,7 @@ fn main() {
         .scene
         .as_deref()
         .and_then(scene_named)
-        .unwrap_or_else(|| which(config.screensaver.kind));
+        .unwrap_or_else(|| which(&config));
     let clock_style = clock_style(&config);
     let clock = move || {
         let now = kabuk_win::system::local_time();
@@ -120,6 +138,24 @@ fn main() {
         }
     };
     let wallpaper = config.wallpaper.clone();
+    // Each live gallery design chosen as a wallpaper, loaded once (a still one is
+    // Windows' picture, made by Kabuk).
+    let designs: Vec<(String, Option<Which>)> = {
+        let mut keys: Vec<String> = kabuk_win::shell::monitors()
+            .iter()
+            .filter(|m| wallpaper.for_monitor(m.number).0 == WallpaperKind::Gallery)
+            .map(|m| wallpaper.gallery_for(m.number))
+            .filter(|k| is_live_design(k))
+            .collect();
+        keys.sort();
+        keys.dedup();
+        keys.into_iter()
+            .map(|k| {
+                let w = gallery(&k, &config);
+                (k, w)
+            })
+            .collect()
+    };
     // Each created wallpaper chosen, loaded once.
     let walls: Vec<(String, Option<Which>)> = {
         let mut ids: Vec<String> = kabuk_win::shell::monitors()
@@ -148,6 +184,10 @@ fn main() {
             WallpaperKind::Generated => {
                 let id = wallpaper.generated_for(number);
                 walls.iter().find(|(i, _)| *i == id).and_then(|(_, w)| w.clone())
+            }
+            WallpaperKind::Gallery => {
+                let key = wallpaper.gallery_for(number);
+                designs.iter().find(|(k, _)| *k == key).and_then(|(_, w)| w.clone())
             }
             _ => None,
         }

@@ -108,7 +108,7 @@ Target platform: Windows 11 22H2 and later. Windows 10 22H2 is supported on a be
 
 ### 2.7 Screen saver
 
-- Chosen in settings: Milvasoft (circuit board eye), Constellation, None (turn the display off directly).
+- Chosen in settings: Milvasoft (circuit board eye), Constellation, None (turn the display off directly), or one of the gallery's (requested by the user on 2026-10-15; DECISIONS D58): ten live savers and ten still ones, each OLED-safe (mostly black, at most 8 % average brightness); a still one is drawn once and slowly wanders (2 % of the screen's height) and breathes (70-100 % light, 23 s), so nothing burns in.
 - Wait time: 3, 5, 10, 15 min. "Don't start while video is playing" (honours Windows' display-on requests). "Preview" starts the selected screen saver immediately.
 - The implementation is the existing `.scr` file in `reference/OledSaver`; Kabuk installs it and writes the Windows settings (`SCRNSAVE.EXE`, timeout, enabled).
 
@@ -118,6 +118,7 @@ Target platform: Windows 11 22H2 and later. Windows 10 22H2 is supported on a be
 - Choose:
   - Monitor: All monitors, Monitor 1 (main), Monitor 2 … The choice applies only to the target monitor.
   - Animated: Circuit eye (the same scene as the screen saver), Constellation. Static: Windows' wallpaper (default: the user's own, untouched; changed by the user on 2026-10-13, as the design's default black desk is not what people use), Pure black, Night gradient (from the accent colour), Your image (a file is picked). Kabuk records the user's wallpaper before it sets another and gives it back when it exits. Created wallpapers are added to the list as "Created by you".
+  - The gallery (requested by the user on 2026-10-15; DECISIONS D58): twelve live wallpapers (two of them Milvasoft's, made for the desktop) and ten still ones, for everyone, each with its preview. A live one is played as the animated ones are; a still one is drawn once at each monitor's size and becomes Windows' picture, recorded and given back like the others.
   - Brightness (10-100 %, default 60): the wallpaper's maximum brightness.
   - Pause when not needed (on by default): the animation stops while the desktop is fully covered by windows, in full screen, in game mode and on battery.
 - Wallpapers are drawn with the look's tokens; when the look, mode or accent changes, the wallpaper follows.

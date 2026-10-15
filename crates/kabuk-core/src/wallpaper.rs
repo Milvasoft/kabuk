@@ -103,18 +103,31 @@ pub fn bmp_data_url(w: u32, h: u32, bgr: &[u8]) -> String {
 }
 
 /// The file names of Kabuk's still wallpapers in the state folder: every one starts with
-/// [`FILE_PREFIX`] and is a BMP.
+/// [`FILE_PREFIX`] and is a BMP or a JPEG.
 pub const FILE_PREFIX: &str = "wallpaper-";
 pub const BLACK_FILE: &str = "wallpaper-black.bmp";
 pub const GRADIENT_PREFIX: &str = "wallpaper-gradient-";
 pub const DRIFT_PREFIX: &str = "wallpaper-drift-";
-const FILE_EXTENSION: &str = ".bmp";
+/// A still design of the gallery drawn at a monitor's size (DECISIONS D58).
+pub const GALLERY_PREFIX: &str = "wallpaper-gallery-";
+const FILE_EXTENSIONS: [&str; 2] = [".bmp", ".jpg"];
 
 /// Whether the picture at `path` is one Kabuk made (by its file name, in any folder:
-/// integration tests make theirs in temporary state folders).
+/// integration tests make theirs in temporary state folders). The drift's and the
+/// gallery's are JPEGs (a drifting picture was once taken for the user's own).
 pub fn is_kabuks(path: &str) -> bool {
     let name = path.rsplit(['\\', '/']).next().unwrap_or("").to_lowercase();
-    name.starts_with(FILE_PREFIX) && name.ends_with(FILE_EXTENSION)
+    name.starts_with(FILE_PREFIX) && FILE_EXTENSIONS.iter().any(|e| name.ends_with(e))
+}
+
+/// The file a still gallery design `key` (`wall-still/agate-slice`) is drawn into at
+/// `w` × `h`; `version` names its source, so an updated design is drawn again.
+pub fn gallery_file(key: &str, w: u32, h: u32, version: u64) -> String {
+    let safe: String = key
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
+        .collect();
+    format!("{GALLERY_PREFIX}{safe}-{w}x{h}-{version:016x}.jpg")
 }
 
 /// The user's own wallpaper, to record before Kabuk sets its own: `current` unless it is
@@ -211,6 +224,15 @@ mod tests {
         ));
         assert!(is_kabuks(r"C:\x\wallpaper-gradient-2560x1440-ff7eb6-000000.bmp"));
         assert!(is_kabuks(r"C:\x\wallpaper-drift-1a2b-2560x1440-3.bmp"));
+        // The drift's and the gallery's JPEGs too.
+        assert!(is_kabuks(r"C:\x\wallpaper-drift-1a2b-2560x1440-3.jpg"));
+        let g = gallery_file("wall-still/agate-slice", 2560, 1440, 0xabc);
+        assert_eq!(
+            g,
+            "wallpaper-gallery-wall-still-agate-slice-2560x1440-0000000000000abc.jpg"
+        );
+        assert!(is_kabuks(&format!(r"C:\x\{g}")));
+        assert!(!is_kabuks(r"C:\Users\u\Pictures\wallpaper-beach.png"));
         assert!(!is_kabuks(r"C:\Users\u\Pictures\Frame 79.png"));
         assert!(!is_kabuks(r"C:\Users\u\Pictures\wallpaper-black.png"));
         assert!(!is_kabuks(r"C:\Users\u\Pictures\my-wallpaper-black.bmp"));

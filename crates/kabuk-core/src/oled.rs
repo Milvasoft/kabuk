@@ -17,6 +17,25 @@ pub fn shift_at(step: u64) -> (i32, i32) {
     SHIFT_PATTERN[(step % SHIFT_PATTERN.len() as u64) as usize]
 }
 
+/// A still screen saver's picture (DECISIONS D58) wanders over this share of the screen's
+/// height either way, on two long, unrelated periods (seconds), so no pixel stays lit in
+/// one place; and it breathes between [`STILL_DIMMEST`] and full light over [`STILL_BREATH`].
+pub const STILL_WANDER: f32 = 0.02;
+pub const STILL_PERIODS: (f32, f32) = (97.0, 131.0);
+pub const STILL_DIMMEST: f32 = 0.7;
+pub const STILL_BREATH: f32 = 23.0;
+
+/// Where a still saver's picture is `seconds` in (pixels, on a screen `height` pixels
+/// high) and how much of its light it shows.
+pub fn still_pose(seconds: f32, height: f32) -> (f32, f32, f32) {
+    use std::f32::consts::TAU;
+    let reach = STILL_WANDER * height;
+    let dx = reach * (TAU * seconds / STILL_PERIODS.0).sin();
+    let dy = reach * (TAU * seconds / STILL_PERIODS.1).sin();
+    let breath = 0.5 - 0.5 * (TAU * seconds / STILL_BREATH).cos();
+    (dx, dy, 1.0 - (1.0 - STILL_DIMMEST) * breath)
+}
+
 /// The design's dimmed opacities (`.screen.idle .win { opacity: .55 }`,
 /// `.screen.idle .bar { opacity: .35 }`).
 pub const DIMMED_WINDOWS: f32 = 0.55;
@@ -56,6 +75,30 @@ pub fn idle_step(idle: Duration, delay: Duration, busy: bool) -> IdleStep {
     match delay.checked_sub(idle) {
         Some(left) if !left.is_zero() => IdleStep::CheckIn(left),
         _ => IdleStep::Dim,
+    }
+}
+
+#[cfg(test)]
+mod still_tests {
+    //! Edge cases: the start is in place at full light; over a breath the light dips to
+    //! the dimmest and back; the picture never leaves its reach and does reach most of it.
+    use super::*;
+
+    #[test]
+    fn a_still_picture_wanders_and_breathes_within_bounds() {
+        assert_eq!(still_pose(0.0, 1440.0), (0.0, 0.0, 1.0));
+        let (_, _, half) = still_pose(STILL_BREATH / 2.0, 1440.0);
+        assert!((half - STILL_DIMMEST).abs() < 1e-4, "{half}");
+        let reach = STILL_WANDER * 1440.0;
+        let (mut far_x, mut far_y) = (0.0f32, 0.0f32);
+        for s in 0..600 {
+            let (dx, dy, light) = still_pose(s as f32, 1440.0);
+            assert!(dx.abs() <= reach + 1e-3 && dy.abs() <= reach + 1e-3);
+            assert!((STILL_DIMMEST - 1e-4..=1.0).contains(&light));
+            far_x = far_x.max(dx.abs());
+            far_y = far_y.max(dy.abs());
+        }
+        assert!(far_x > reach * 0.9 && far_y > reach * 0.9);
     }
 }
 

@@ -13,9 +13,9 @@
 
 use std::path::PathBuf;
 
-use kabuk_core::config::WallpaperKind;
+use kabuk_core::config::{is_live_design, WallpaperKind};
 use kabuk_core::state::Rect;
-use kabuk_core::wallpaper::{BLACK_FILE, DRIFT_PREFIX, GRADIENT_PREFIX};
+use kabuk_core::wallpaper::{BLACK_FILE, DRIFT_PREFIX, GALLERY_PREFIX, GRADIENT_PREFIX};
 
 use super::Shared;
 use crate::wm;
@@ -176,11 +176,100 @@ impl Shared {
                     kabuk_core::wallpaper::bmp(w, h, &kabuk_core::wallpaper::night_gradient(w, h, accent, desk))
                 })
             }
-            WallpaperKind::Black | WallpaperKind::Circuit | WallpaperKind::Constellation | WallpaperKind::Generated => {
-                write(BLACK_FILE, &|| {
-                    let px = vec![0u8; (BLACK_SIDE * BLACK_SIDE * 3) as usize];
-                    kabuk_core::wallpaper::bmp(BLACK_SIDE, BLACK_SIDE, &px)
-                })
+            WallpaperKind::Gallery if !is_live_design(&self.config().wallpaper.gallery_for(m.number)) => {
+                let key = self.config().wallpaper.gallery_for(m.number);
+                self.gallery_still(&key, m, &folder)
+            }
+            WallpaperKind::Black
+            | WallpaperKind::Circuit
+            | WallpaperKind::Constellation
+            | WallpaperKind::Generated
+            | WallpaperKind::Gallery => write(BLACK_FILE, &|| {
+                let px = vec![0u8; (BLACK_SIDE * BLACK_SIDE * 3) as usize];
+                kabuk_core::wallpaper::bmp(BLACK_SIDE, BLACK_SIDE, &px)
+            }),
+        }
+    }
+
+    /// A still design of the gallery (DECISIONS D58) drawn once at monitor `m`'s size into
+    /// the state folder, as a JPEG, at its own full light (a picture, as the user's own);
+    /// `None` (the user's own stays) when it cannot be made.
+    fn gallery_still(&self, key: &str, m: &kabuk_win::shell::Monitor, folder: &std::path::Path) -> Option<PathBuf> {
+        let design = kabuk_wallgen::gallery::find(key).or_else(|| {
+            tracing::warn!(key, "no such gallery design; the user's own stays");
+            None
+        })?;
+        let (w, h) = (
+            u32::try_from(m.rect.right - m.rect.left).ok()?,
+            u32::try_from(m.rect.bottom - m.rect.top).ok()?,
+        );
+        let version = {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            (design.toml, design.hlsl).hash(&mut hasher);
+            hasher.finish()
+        };
+        let path = folder.join(kabuk_core::wallpaper::gallery_file(key, w, h, version));
+        if path.exists() {
+            return Some(path);
+        }
+        let started = std::time::Instant::now();
+        let (manifest, hlsl) = kabuk_wallgen::gallery::load(key)?;
+        let shader = self
+            .gpu
+            .compile_wall(&manifest, hlsl)
+            .map_err(|e| tracing::error!(key, error = %e, "gallery design does not compile"))
+            .ok()?;
+        let colors: Vec<(&str, (f32, f32, f32))> = kabuk_wallgen::format::TOKENS
+            .iter()
+            .filter_map(|(_, t)| {
+                let c = self.look.tokens.color(t)?;
+                let f = |v: u8| f32::from(v) / 255.0;
+                Some((*t, (f(c.r), f(c.g), f(c.b))))
+            })
+            .collect();
+        let tokens = |name: &str| colors.iter().find(|(n, _)| *n == name).map(|(_, c)| *c);
+        let values = manifest.defaults();
+        let inputs = kabuk_ui::render::WallInputs {
+            tokens: &tokens,
+            values: &values,
+            brightness: 1.0,
+        };
+        let frame = self
+            .gpu
+            .wall_frames(&shader, inputs, (w, h), &[0.0])
+            .map_err(|e| tracing::error!(key, error = %e, "gallery design not drawn"))
+            .ok()?
+            .into_iter()
+            .next()?;
+        let bgr: Vec<u8> = frame.rgba.chunks_exact(4).flat_map(|p| [p[2], p[1], p[0]]).collect();
+        if let Err(e) = kabuk_win::picture::save_jpeg(&path, w, h, &bgr) {
+            tracing::error!(key, error = %e, "gallery picture not written");
+            return None;
+        }
+        tracing::info!(
+            key,
+            w,
+            h,
+            ms = started.elapsed().as_millis() as u64,
+            "gallery picture made"
+        );
+        Some(path)
+    }
+
+    /// Drops the gallery's pictures no monitor shows any more.
+    fn forget_gallery_pictures(&self, kept: &[(Rect, Option<PathBuf>)]) {
+        let Some(folder) = wm::lock(&self.state).path().parent().map(std::path::Path::to_path_buf) else {
+            return;
+        };
+        let Ok(entries) = std::fs::read_dir(&folder) else {
+            return;
+        };
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let shown = kept.iter().any(|(_, p)| p.as_deref() == Some(e.path().as_path()));
+            if name.starts_with(GALLERY_PREFIX) && !shown {
+                let _ = std::fs::remove_file(e.path());
             }
         }
     }
@@ -193,9 +282,10 @@ impl Shared {
         let monitors = kabuk_win::shell::monitors();
         let animated: Vec<String> = monitors
             .iter()
-            .filter(|m| w.for_monitor(m.number).0.animated())
+            .filter(|m| w.animated_for(m.number))
             .map(|m| match w.for_monitor(m.number).0 {
                 WallpaperKind::Generated => format!("{}=Generated:{}", m.number, w.generated_for(m.number)),
+                WallpaperKind::Gallery => format!("{}=Gallery:{}", m.number, w.gallery_for(m.number)),
                 kind => format!("{}={kind:?}", m.number),
             })
             .collect();
@@ -320,6 +410,7 @@ impl Shared {
                 Err(e) => tracing::error!(error = %e, picture = %p.display(), "wallpaper not set"),
             }
         }
+        self.forget_gallery_pictures(&targets);
         self.wallpaper.applied = Some(targets);
         self.schedule_drift();
     }

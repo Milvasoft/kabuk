@@ -105,9 +105,9 @@ async function main() {
     route.fulfill({ status: 200, contentType: MIME[path.extname(file)] || "application/octet-stream", body: fs.readFileSync(file) });
   });
   // The bridge answers in order; the page sees each answer as WebView2's message event.
-  // The Create tab's steps and the update check's result come from another thread and
-  // answer nothing.
-  const UNASKED = ["gen-step", "gen-done", "gen-failed"];
+  // The Create tab's steps, the update check's result and the gallery's previews come from
+  // another thread and answer nothing.
+  const UNASKED = ["gen-step", "gen-done", "gen-failed", "gallery-preview"];
   const unasked = (m) => UNASKED.includes(m.op) || (m.op === "update" && m.state !== "checking");
   let sent = 0, answered = 0, refused = 0;
   const pending = [];
@@ -212,6 +212,22 @@ async function main() {
   check(/kind = "gradient"/.test(toml()), "wallpaper: night gradient");
   await page.click(`[data-wall="windows"]`); await settled();
   check(/kind = "windows"/.test(toml()), "wallpaper: Windows' own");
+  // DECISIONS D58: the gallery's wallpapers, live and still, each with its preview as the
+  // bridge draws it; one chosen.
+  check((await page.locator(`[data-wall="gallery"]`).count()) >= 20, "gallery: twenty wallpapers or more");
+  check((await page.locator(".set-main").innerText()).includes("Galeri · canlı duvar kâğıtları"), "gallery: its sections named");
+  await page.click(`[data-gal="wall-live/aurora-shore"]`); await settled();
+  check(/kind = "gallery"/.test(toml()) && /gallery = "wall-live\/aurora-shore"/.test(toml()), "gallery: a live wallpaper chosen");
+  await page.click(`[data-gal="wall-still/agate-slice"]`); await settled();
+  check(/gallery = "wall-still\/agate-slice"/.test(toml()), "gallery: a still wallpaper chosen");
+  await page.waitForFunction(() => document.querySelectorAll("img[data-gprev][src^='data:image/jpeg']").length >= 20, null, { timeout: 120000 }).catch(() => {});
+  check((await page.locator("img[data-gprev][src^='data:image/jpeg']").count()) >= 20, "gallery: the previews came");
+  await page.click(`[data-wall="windows"]`); await settled();
+  await go("saver");
+  check((await page.locator(`[data-saver-gal]`).count()) >= 20, "gallery: twenty screen savers or more");
+  await page.click(`[data-saver-gal="saver-still/ember-enso"]`); await settled();
+  check(/\[screensaver\][^[]*kind = "gallery"/.test(toml()) && /gallery = "saver-still\/ember-enso"/.test(toml()), "gallery: a still screen saver chosen");
+  await page.click(`[data-set="screensaver.kind"][data-val='"circuit"']`); await settled();
 
   await go("look");
   await page.click(`[data-set="appearance.look"][data-val='"cizgi"']`); await settled();

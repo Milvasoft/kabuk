@@ -5,6 +5,7 @@
 
 pub mod check;
 pub mod format;
+pub mod gallery;
 pub mod pipeline;
 pub mod prompt;
 pub mod providers;

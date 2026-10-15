@@ -18,6 +18,9 @@ mod bridge;
 #[path = "../src/create.rs"]
 mod create;
 #[allow(dead_code)]
+#[path = "../src/gallery.rs"]
+mod gallery;
+#[allow(dead_code)]
 #[path = "../src/resources.rs"]
 mod resources;
 

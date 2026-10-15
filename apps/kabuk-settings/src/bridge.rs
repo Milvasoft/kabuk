@@ -23,6 +23,9 @@
 //!   release against this version.
 //! - `{"op":"update-open","page":…}` → `{"op":"update","state":"opened"}`: the release's
 //!   page in the browser (only a page of Kabuk's repository is opened).
+//! - `{"op":"gallery-previews"}` → `{"op":"gallery-previews","started":true}`, then from a
+//!   thread one `{"op":"gallery-preview","key":…,"url":…}` per design of the gallery
+//!   (DECISIONS D58; [`crate::gallery`]).
 //! - `gen-…`: the Create tab ([`crate::create`]).
 
 use std::path::PathBuf;
@@ -113,6 +116,14 @@ impl Bridge {
             "preview-saver" => self.preview_saver(),
             "quit" => self.quit(),
             "update-check" => self.check_update(),
+            "gallery-previews" => {
+                crate::gallery::send_previews(
+                    &self.state_dir,
+                    crate::create::colors(&self.config()),
+                    self.outbox.clone(),
+                );
+                json!({ "op": "gallery-previews", "started": true })
+            }
             "update-open" => {
                 let page = m.get("page").and_then(Value::as_str)?;
                 open_release_page(page)?
@@ -194,6 +205,7 @@ impl Bridge {
             "accent_adapted": resolved.and_then(|r| r.accent_adapted),
             "info": self.info()["info"].clone(),
             "create": self.create_state(),
+            "gallery": crate::gallery::list(),
             "version": env!("CARGO_PKG_VERSION"),
             // Each language's own name, as the language choice shows them.
             "lang_names": {

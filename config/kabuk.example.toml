@@ -23,7 +23,8 @@ cursor_size = "normal"    # with Kabuk's sets: normal, large, huge
 colors = false            # Windows' mode and accent colour follow Kabuk's (recorded, given back on exit)
 
 [wallpaper]
-kind = "windows"          # windows (your own, untouched), black, gradient, image, circuit, constellation, generated
+kind = "windows"          # windows (your own, untouched), black, gradient, image, circuit, constellation, generated, gallery
+# gallery = "wall-live/aurora-shore"   # with kind = "gallery": wall-live/… is played, wall-still/… is drawn once
 brightness = 60           # peak brightness, 10-100 %
 pause_when_hidden = true  # stop animating when covered, in full screen, in game mode, on battery
 drift = true              # your own still picture drifts by two pixels, too slowly to see (OLED)
@@ -36,7 +37,8 @@ kind = "image"
 image = "D:\\Pictures\\night.png"
 
 [screensaver]
-kind = "circuit"          # circuit, constellation, none (turn the display off)
+kind = "circuit"          # circuit, constellation, gallery, none (turn the display off)
+# gallery = "saver-live/comet-calligraphy"   # with kind = "gallery": saver-live/… or saver-still/…
 wait_minutes = 5          # 3, 5, 10, 15
 respect_video = true      # don't start while a video keeps the display on
 

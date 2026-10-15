@@ -27,6 +27,8 @@
     prompt: "",
     gen: { phase: "idle", step: 0, attempt: 1, ms: null, average: null, reason: "", name: "", preview: null },
     update: null, // null: not asked; { state, version, page } from the bridge
+    previews: {}, // the gallery's previews by design key (DECISIONS D58), as they come
+    previewsAsked: false,
   };
 
   // The design page's keys are camelCase; the language files use kebab-case
@@ -193,6 +195,27 @@
     const e = monitorEntry(Number(ui.wallMon));
     return e ? e.generated : w.generated;
   }
+  /** The gallery design chosen where the choice applies (`null` when another kind). */
+  function wallGalNow() {
+    const w = cfg().wallpaper;
+    if (ui.wallMon === "all") return (w.monitor || []).length ? null : w.gallery;
+    const e = monitorEntry(Number(ui.wallMon));
+    return e ? e.gallery : w.gallery;
+  }
+  // The gallery's cards (DECISIONS D58): each design's preview as the bridge draws it.
+  function galleryCards(designs, isOn, attrs, hint) {
+    return designs.map((d) => {
+      const on = isOn(d.key);
+      const url = ui.previews[d.key];
+      const img = `<img data-gprev="${escapeHtml(d.key)}" ${url ? `src="${url}"` : ""} alt="" style="width:100%;height:100%;object-fit:cover;display:block">`;
+      return `<button class="saver${on ? " on" : ""}" type="button" ${attrs(d)} aria-pressed="${on}"><span class="sp">${img}</span><span class="sn">${t(d.name)}<span>${hint(d)}</span></span></button>`;
+    }).join("");
+  }
+  function askPreviews() {
+    if (ui.previewsAsked) return;
+    ui.previewsAsked = true;
+    post({ op: "gallery-previews" });
+  }
   function wallNow() {
     const w = cfg().wallpaper;
     if (ui.wallMon === "all") return (w.monitor || []).length ? null : w.kind;
@@ -207,11 +230,12 @@
     const scene = { circuit: ["milva", 7], constellation: ["stars", 11], image: ["image", 3] }[kind];
     return `<div class="wall">${A.wallSvg(scene[0], 400, 225, scene[1])}</div>`;
   }
-  function chooseWall(kind, image, generated) {
+  function chooseWall(kind, image, generated, gallery) {
     const w = cfg().wallpaper;
     if (ui.wallMon === "all") {
       if (image) set("wallpaper.image", image);
       if (generated) set("wallpaper.generated", generated);
+      if (gallery) set("wallpaper.gallery", gallery);
       set("wallpaper.kind", kind);
       if ((w.monitor || []).length) set("wallpaper.monitor", null);
       return;
@@ -224,6 +248,8 @@
     if (img) entry.image = img;
     const gen = generated || (kind === "generated" ? old.generated : "");
     if (gen) entry.generated = gen;
+    const gal = gallery || (kind === "gallery" ? old.gallery : "");
+    if (gal) entry.gallery = gal;
     set("wallpaper.monitor", [...others, entry].sort((a, b) => a.index - b.index));
   }
   const genSeed = (id) => Number(String(id).replace(/\D/g, "").slice(-6)) || 7;
@@ -279,9 +305,15 @@
       }).join("");
     const w = cfg().wallpaper;
     const image = ui.wallMon === "all" ? w.image : (monitorEntry(Number(ui.wallMon)) || {}).image;
+    askPreviews();
+    const designs = (cat) => (S.gallery || []).filter((d) => d.category === cat);
+    const wallCards = (cat) => galleryCards(designs(cat), (k) => now === "gallery" && wallGalNow() === k, (d) => `data-wall="gallery" data-gal="${escapeHtml(d.key)}"`, (d) => t(d.name + "-h"));
+    const gallery = [["wall-live", "galWallsLive"], ["wall-still", "galWallsStill"]]
+      .map(([cat, title]) => `<div class="set-grp"><span class="gl">${t(title)}</span><div class="walls">${wallCards(cat)}</div></div>`).join("");
     return top + `
       <div class="set-grp">${row(t("wMon"), t("wMonH"), monSeg)}</div>
       <div class="walls">${cards}</div>
+      ${gallery}
       <div class="set-grp">${now === "image" ? row(t("wPick"), image ? escapeHtml(image) : t("wPickH"), `<button class="set-btn ghost" type="button" data-pick="image">${t("wPick")}</button>`) : ""}
         ${row(t("wBright"), t("wBrightH"), `<span class="rng"><input type="range" id="wall-bright" data-range="wallpaper.brightness" data-unit="%" min="${RANGES.bright[0]}" max="${RANGES.bright[1]}" step="${RANGES.bright[2]}" value="${w.brightness}" aria-label="${t("wBright")}"><span class="v" data-v="wall-bright">${w.brightness}%</span></span>`)}
         ${tgl("wallpaper.pause_when_hidden", t("wPause"), t("wPauseH"))}</div>`;
@@ -291,8 +323,14 @@
     const art = A.saverArt();
     const kind = cfg().screensaver.kind;
     const savers = [["circuit", "milva", "Milvasoft", t("sMilvaH")], ["constellation", "stars", t("sStars"), t("sStarsH")], ["none", "off", t("sOff"), t("sOffH")]];
+    askPreviews();
+    const designs = (cat) => (S.gallery || []).filter((d) => d.category === cat);
+    const saverCards = (cat) => galleryCards(designs(cat), (k) => kind === "gallery" && cfg().screensaver.gallery === k, (d) => `data-saver-gal="${escapeHtml(d.key)}"`, (d) => (d.live ? t(d.name + "-h") : `${t(d.name + "-h")}. ${t("galStillSaverH")}`));
+    const gallery = [["saver-live", "galSaversLive"], ["saver-still", "galSaversStill"]]
+      .map(([cat, title]) => `<div class="set-grp"><span class="gl">${t(title)}</span><div class="savers">${saverCards(cat)}</div></div>`).join("");
     return head(t("navSaver"), t("saverDesc")) + `
       <div class="set-grp"><span class="gl">${t("saverPick")}</span><div class="savers">${savers.map(([k, a, n, h]) => `<button class="saver${kind === k ? " on" : ""}" type="button" data-set="screensaver.kind" data-val='"${k}"' aria-pressed="${kind === k}"><span class="sp">${art[a]}</span><span class="sn">${n}<span>${h}</span></span></button>`).join("")}</div></div>
+      ${gallery}
       <div class="set-grp">${rowFor("screensaver.wait_minutes", t("wait"), t("waitH"), segFor("screensaver.wait_minutes", t("wait"), SAVER_WAITS.map((m) => [m, `${m} ${t("min")}`])))}
       ${tgl("screensaver.respect_video", t("video"), t("videoH"))}
       ${row(t("preview"), t("previewH"), `<button class="set-btn ghost" type="button" data-preview-saver ${kind === "none" ? "disabled" : ""}>${t("previewBtn")}</button>`)}</div>`;
@@ -547,7 +585,13 @@
     if ((el = on("[data-wallmon]"))) { ui.wallMon = el.dataset.wallmon; render(); return; }
     if ((el = on("[data-wall]"))) {
       if (el.dataset.wall === "image") { ui.pending = "wall"; post({ op: "pick", what: "image" }); }
-      else chooseWall(el.dataset.wall, null, el.dataset.gen);
+      else chooseWall(el.dataset.wall, null, el.dataset.gen, el.dataset.gal);
+      return;
+    }
+    if ((el = on("[data-saver-gal]"))) {
+      // The design first: a gallery saver needs one (DECISIONS D58).
+      set("screensaver.gallery", el.dataset.saverGal);
+      set("screensaver.kind", "gallery");
       return;
     }
     if (on("[data-genkey]")) { ui.keyEntry = true; render(); document.getElementById("gen-key")?.focus(); return; }
@@ -701,6 +745,10 @@
       case "apps":
         ui.apps = m.apps;
         render();
+        break;
+      case "gallery-preview":
+        ui.previews[m.key] = m.url;
+        document.querySelectorAll("img[data-gprev]").forEach((img) => { if (img.dataset.gprev === m.key) img.src = m.url; });
         break;
       case "picked":
         if (!m.path) break;

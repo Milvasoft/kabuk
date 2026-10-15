@@ -2041,6 +2041,89 @@ fn a_created_wallpaper_plays_behind_the_icons() {
     assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
 }
 
+/// DECISIONS D58: a live design of the gallery plays behind the icons on every monitor;
+/// a still one becomes Windows' picture, drawn once at each monitor's size into the
+/// state folder (and the player stops); the user's own comes back after.
+#[test]
+fn the_gallery_plays_live_designs_and_draws_still_ones() {
+    kabuk_win::system::com_init();
+    let theirs = kabuk_win::wallpaper::backup().expect("Windows' wallpaper readable");
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(
+        sandbox.config_file(),
+        "schema = 1\n[wallpaper]\nkind = \"gallery\"\ngallery = \"wall-live/aurora-shore\"\n",
+    )
+    .unwrap();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let monitors = kabuk_win::shell::monitors();
+    let played = |targets: usize, created: usize| {
+        sandbox
+            .last_log_line(&["scenes play", "Wallpaper"])
+            .is_some_and(|l| l.contains(&format!("targets={targets} ")) && l.contains(&format!("created={created}")))
+    };
+    assert!(
+        wait_until(SETTLE, || played(monitors.len(), monitors.len())).is_some(),
+        "{:?}",
+        sandbox.last_log_line(&["scenes play"])
+    );
+    // A still design: one picture per monitor size, set as Windows' wallpaper.
+    std::fs::write(
+        sandbox.config_file(),
+        "schema = 1\n[wallpaper]\nkind = \"gallery\"\ngallery = \"wall-still/agate-slice\"\n",
+    )
+    .unwrap();
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("animated wallpaper stopped") >= 1).is_some(),
+        "the player went on"
+    );
+    let pictures = || -> Vec<String> {
+        std::fs::read_dir(sandbox.state_dir())
+            .map(|d| {
+                d.flatten()
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .filter(|n| n.starts_with(kabuk_core::wallpaper::GALLERY_PREFIX))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    // Each monitor's picture is drawn in turn; every one is set once all are.
+    let all_set = || {
+        kabuk_win::wallpaper::current().is_some_and(|w| {
+            w.monitors.iter().all(|(_, p)| {
+                p.as_deref().is_some_and(|p| {
+                    p.contains("wallpaper-gallery-wall-still-agate-slice-") && kabuk_core::wallpaper::is_kabuks(p)
+                })
+            })
+        })
+    };
+    assert!(
+        wait_until(SETTLE, all_set).is_some(),
+        "{:?}",
+        kabuk_win::wallpaper::current()
+    );
+    let made = pictures();
+    for m in &monitors {
+        let size = format!("-{}x{}-", m.rect.right - m.rect.left, m.rect.bottom - m.rect.top);
+        assert!(made.iter().any(|n| n.contains(&size)), "{size} not in {made:?}");
+    }
+    // An unknown design: the user's own stays, nothing breaks.
+    std::fs::write(
+        sandbox.config_file(),
+        "schema = 1\n[wallpaper]\nkind = \"gallery\"\ngallery = \"wall-still/nope\"\n",
+    )
+    .unwrap();
+    assert!(wait_until(SETTLE, || sandbox.log_lines("no such gallery design") >= 1).is_some());
+    assert_eq!(sandbox.restore().0, 0);
+    assert_eq!(
+        kabuk_win::wallpaper::current().as_ref(),
+        Some(&theirs),
+        "the user's wallpaper did not come back"
+    );
+    assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
+}
+
 /// SPEC §2.8: the animated wallpaper pauses in game mode. The player stops while a
 /// full-screen program covers a monitor (the shell's ABN_FULLSCREENAPP is posted by the
 /// test, as Explorer would send it) and starts again when the program leaves full screen.

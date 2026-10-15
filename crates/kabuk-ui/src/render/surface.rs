@@ -136,6 +136,54 @@ impl WindowSurface {
         Ok(())
     }
 
+    /// Puts a still picture (drawn once into `canvas`) on the whole surface over black,
+    /// moved `dx`, `dy` pixels and at `light` of its brightness (a still screen saver
+    /// wandering and breathing, DECISIONS D58).
+    pub fn draw_wall_moved(&mut self, canvas: &super::WallCanvas, dx: f32, dy: f32, light: f32) -> Result<()> {
+        let update = RECT {
+            left: 0,
+            top: 0,
+            right: self.width as i32,
+            bottom: self.height as i32,
+        };
+        let mut offset = POINT::default();
+        let (w, h) = canvas.size();
+        // SAFETY: BeginDraw/EndDraw bracket the drawing calls; the bitmap is of this device.
+        unsafe {
+            let ctx: ID2D1DeviceContext = self.surface.BeginDraw(Some(&update), &mut offset).ctx("begin draw")?;
+            ctx.SetDpi(Scale::BASE_DPI, Scale::BASE_DPI);
+            ctx.SetTransform(&Matrix3x2::translation(offset.x as f32, offset.y as f32));
+            ctx.Clear(Some(&D2D1_COLOR_F {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 1.0,
+            }));
+            let dest = D2D_RECT_F {
+                left: dx,
+                top: dy,
+                right: self.width as f32 + dx,
+                bottom: self.height as f32 + dy,
+            };
+            let src = D2D_RECT_F {
+                left: 0.0,
+                top: 0.0,
+                right: w as f32,
+                bottom: h as f32,
+            };
+            ctx.DrawBitmap(
+                &canvas.bitmap,
+                Some(&dest),
+                light.clamp(0.0, 1.0),
+                D2D1_INTERPOLATION_MODE_LINEAR,
+                Some(&src),
+                None,
+            );
+            self.surface.EndDraw().ctx("end draw")?;
+        }
+        Ok(())
+    }
+
     /// Resizes (physical pixels). The next render must be full.
     pub fn resize(&mut self, gpu: &Gpu, width: u32, height: u32) -> Result<()> {
         if (width, height) == (self.width, self.height) {
