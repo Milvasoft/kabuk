@@ -1919,6 +1919,89 @@ fn a_hot_corner_reached_does_what_was_chosen() {
     assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
 }
 
+/// Found by the user: editing the app grid, after one app was hidden the next badge
+/// pressed hid another app, and a press on an app ended editing (presses were found at
+/// the places of the slide's first frame). Pressed where they are drawn, badges hide the
+/// app drawn there, one after another, and a press on an app keeps editing.
+#[test]
+fn the_app_grids_badges_hide_the_app_drawn_under_them() {
+    use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_APP_GRID};
+    use kabuk_win::msgloop::{post_message, Msg};
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
+    let grid = |what: usize, place: isize| {
+        post_message(
+            control,
+            Msg {
+                id: MSG_TEST_APP_GRID,
+                wparam: what,
+                lparam: place,
+            },
+        )
+        .unwrap()
+    };
+    // The apps of the page on screen, in order, as the grid says them.
+    let shown = || -> Vec<String> {
+        sandbox
+            .last_log_line(&["app grid page"])
+            .and_then(|l| {
+                l.split("apps=")
+                    .nth(1)
+                    .map(|a| a.split(" | ").map(|n| n.trim().to_string()).collect())
+            })
+            .unwrap_or_default()
+    };
+    grid(1, 0);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("app grid shown") == 1).is_some());
+    // Every icon is in first: an icon coming later draws the grid again, which would
+    // hide a press map left behind.
+    assert!(
+        wait_until(SETTLE, || sandbox
+            .last_log_line(&["app grid pictures arrived"])
+            .is_some_and(|l| l.contains("waiting=0")))
+        .is_some(),
+        "the icons"
+    );
+    grid(2, 0);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("app grid editing on=true") == 1).is_some());
+    // The bug lived in the apps' slide, which only plays while they wiggle.
+    assert!(
+        sandbox.log_lines("app grid editing on=true wiggles=true") == 1,
+        "no wiggle here (Windows' animation effects off?)"
+    );
+    let apps = shown();
+    assert!(apps.len() >= 4, "{apps:?}");
+    // The first badge, then the first badge again: the app now drawn first.
+    for (n, name) in apps.iter().take(2).enumerate() {
+        grid(3, 0);
+        assert!(
+            wait_until(SETTLE, || sandbox.log_lines("app grid app hidden") == n + 1).is_some(),
+            "badge {n}"
+        );
+        let hidden = sandbox.last_log_line(&["app grid app hidden"]).unwrap();
+        assert!(hidden.ends_with(&format!("app={name}")), "{hidden} (wanted {name})");
+        // The others slide into the gap; the next press waits until they are there.
+        std::thread::sleep(Duration::from_millis(400));
+    }
+    // A press on an app while editing keeps editing.
+    grid(4, 1);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("app grid test press") == 3).is_some());
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(sandbox.log_lines("app grid editing on=false"), 0, "editing ended");
+    grid(0, 0);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("app grid closed") == 1).is_some());
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
+}
+
 /// Found by the user in a video: editing the app grid drew its apps over the desktop, the
 /// grid's blurred picture gone, and the icons blank for a moment. A tray icon's change
 /// cleared every picture but the tray's and the bar's apps' from the store. The grid

@@ -20,6 +20,8 @@ pub struct Pictures {
     /// The renderer's key of each loaded source's picture.
     pub loaded: HashMap<String, u64>,
     asked: HashSet<String>,
+    /// Asked for and not back from the worker yet.
+    pending: usize,
     /// To the worker: (source, side in pixels).
     worker: Option<mpsc::Sender<(String, u32)>>,
     /// From the worker.
@@ -65,6 +67,7 @@ impl Pictures {
         Pictures {
             loaded: HashMap::new(),
             asked: HashSet::new(),
+            pending: 0,
             worker,
             done,
             owner,
@@ -98,8 +101,14 @@ impl Pictures {
             }
             if w.send((source.clone(), side)).is_ok() {
                 self.asked.insert(source);
+                self.pending += 1;
             }
         }
+    }
+
+    /// How many pictures asked for the worker has not given back yet.
+    pub fn pending(&self) -> usize {
+        self.pending
     }
 
     /// Puts the pictures the worker finished into `store`; how many came.
@@ -110,6 +119,7 @@ impl Pictures {
             .map(|mut d| std::mem::take(&mut *d))
             .unwrap_or_default();
         let count = done.len();
+        self.pending = self.pending.saturating_sub(count);
         for (source, side, px) in done {
             match px {
                 Some(px) => {

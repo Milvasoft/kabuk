@@ -442,7 +442,7 @@ impl Shared {
         if on && o.grid.clear() {
             o.slots = model::slots(o.grid.page(), o.grid.pages());
         }
-        tracing::info!(on, "app grid editing");
+        tracing::info!(on, wiggles, "app grid editing");
         self.render_app_grid(true, true);
     }
 
@@ -490,6 +490,10 @@ impl Shared {
                 tracing::debug!(error = %e, "app grid wiggle not drawn");
             }
         }
+        // Presses find the apps where this frame draws them (found by the user: after a
+        // hide the places of the slide's first frame stayed, so a badge pressed hid
+        // another app and a press on an app ended editing).
+        o.page_layout = kabuk_ui::node::layout(&view::page(&o.grid, o.slots[1], &frame), Point::default(), &gpu.text);
         let _ = gpu.commit();
     }
 
@@ -778,9 +782,10 @@ impl Shared {
                     tracing::warn!(error = %e, "app grid pages not drawn");
                 }
             }
-            // Found by the user: taken mid-slide, the old places got the clicks.
+            // Where presses are found: the page as drawn now (the wiggle's frames keep it
+            // up to date while the apps slide).
             o.page_layout =
-                kabuk_ui::node::layout(&view::hits_of(&o.grid, o.slots[1], &frame), Point::default(), &gpu.text);
+                kabuk_ui::node::layout(&view::page(&o.grid, o.slots[1], &frame), Point::default(), &gpu.text);
             let names: Vec<&str> = o
                 .slots
                 .get(1)
@@ -799,6 +804,11 @@ impl Shared {
     /// Icons the worker loaded: an open grid shows them.
     pub(super) fn app_grid_pictures_arrived(&mut self) {
         let came = self.app_grid.pictures.arrived(&self.gpu.images);
+        tracing::debug!(
+            came,
+            waiting = self.app_grid.pictures.pending(),
+            "app grid pictures arrived"
+        );
         if came > 0
             && self
                 .app_grid
@@ -1193,8 +1203,11 @@ impl Shared {
 
     /// Integration tests: open on the primary monitor without the keyboard, or close.
     #[cfg(feature = "integration")]
-    /// `what`: 0 closes the grid, 1 opens it on the primary monitor, 2 starts editing.
-    pub(super) fn test_app_grid(&mut self, what: usize) {
+    /// `what`: 0 closes the grid, 1 opens it on the primary monitor, 2 starts editing,
+    /// 3 presses the badge of the app at place `place`, 4 presses that app: the mouse's
+    /// own messages to the pages' window, at the middle of what is drawn there now (tests
+    /// never move the real mouse).
+    pub(super) fn test_app_grid(&mut self, what: usize, place: usize) {
         match what {
             0 => self.close_app_grid(),
             1 => {
@@ -1203,8 +1216,47 @@ impl Shared {
                     self.open_app_grid(primary, false);
                 }
             }
-            _ => self.app_grid_edit(true),
+            2 => self.app_grid_edit(true),
+            _ => self.test_app_grid_press(if what == 3 { view::hit::HIDE } else { view::hit::APP }, place),
         }
+    }
+
+    /// A press and release in the middle of where `module` `place` is drawn on the page
+    /// on screen now (its slide included), as the mouse would send them.
+    fn test_app_grid_press(&mut self, module: &str, place: usize) {
+        let Some(o) = self.app_grid.open.as_ref() else { return };
+        let frame = view::Frame {
+            size: o.size,
+            i18n: &self.i18n,
+            text_scale: self.look.style.text_scale,
+            pictures: &self.app_grid.pictures.loaded,
+            backdrop: o.backdrop,
+            editing: o.editing,
+            drag: o.drag,
+            wiggle: None,
+            reflow: reflow_now(&o.reflow),
+        };
+        let drawn = kabuk_ui::node::layout(
+            &view::page(&o.grid, o.slots[1], &frame),
+            Point::default(),
+            &self.gpu.text,
+        );
+        let Some(r) = drawn
+            .hits
+            .iter()
+            .find(|(_, h)| h.module == module && h.value as usize == place)
+            .map(|(r, _)| *r)
+        else {
+            tracing::warn!(module, place, "app grid test press: nothing drawn there");
+            return;
+        };
+        let (x, y) = (o.scale.px(r.x + r.w / 2.0), o.scale.px(r.y + r.h / 2.0));
+        let at = ((y as u32 & 0xFFFF) << 16 | (x as u32 & 0xFFFF)) as isize;
+        let window = o.sheet.window().hwnd();
+        for (id, wparam) in [(msg::LBUTTONDOWN, msg::MK_LBUTTON), (msg::LBUTTONUP, 0)] {
+            let _ = msgloop::post_message(window, Msg { id, wparam, lparam: at });
+        }
+        tracing::info!(module, place, x, y, "app grid test press");
     }
 }
 

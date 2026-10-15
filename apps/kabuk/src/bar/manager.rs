@@ -1092,7 +1092,7 @@ impl Shared {
             }
             #[cfg(feature = "integration")]
             MSG_TEST_APP_GRID => {
-                self.test_app_grid(m.wparam);
+                self.test_app_grid(m.wparam, m.lparam as usize);
                 Some(0)
             }
             #[cfg(feature = "integration")]
