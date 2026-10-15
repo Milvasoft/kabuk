@@ -214,7 +214,7 @@ mod tests {
             .collect();
         let mut failures = Vec::new();
         let mut measured = 0;
-        for look in ["a", "b", "c", "d", "e", "f", "g"] {
+        for look in ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"] {
             for mode in [Mode::Dark, Mode::Light] {
                 for accent in &accents {
                     let r = resolve(look, mode, *accent).unwrap();
@@ -227,7 +227,7 @@ mod tests {
                 }
             }
         }
-        assert!(measured > 7 * 2 * 8 * 10, "{measured} measurements");
+        assert!(measured > 10 * 2 * 8 * 10, "{measured} measurements");
         assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 }

@@ -118,7 +118,7 @@ function inPage(opts) {
   const env = process.env;
   const out = await p.evaluate(inPage, {
     modes: (env.MODES || "dark,light").split(","),
-    looks: (env.LOOKS || "abcdefg").split(""),
+    looks: (env.LOOKS || "abcdefghij").split(""),
     accents: (env.ACC ?? ",#8fd3ff,#fbc419,#7fe0b5,#ff8f6b,#b9a7ff,#ff7eb6,#ecebe7").split(","),
   });
   const groups = new Map();

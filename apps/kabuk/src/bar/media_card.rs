@@ -68,6 +68,8 @@ fn text(words: &str, color: Role, size: f32, weight: u16, max: Option<f32>) -> N
             weight,
             after: 0.0,
             underline: false,
+            italic: false,
+            spacing: 0.0,
         }],
         font: FontRole::Ui,
         size,

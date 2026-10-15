@@ -99,6 +99,8 @@ pub fn view(text_scale: f32, tip: &TipStyle, s: &PreviewStyle, shots: &[Shot]) -
                         weight: 400,
                         after: 0.0,
                         underline: false,
+                        italic: false,
+                        spacing: 0.0,
                     }],
                     font: FontRole::Ui,
                     size,

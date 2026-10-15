@@ -321,7 +321,7 @@ mod tests {
         let text = include_str!("../../../tests/fixtures/contrast.json");
         let fixture: serde_json::Value = serde_json::from_str(text).unwrap();
         let cases = fixture["cases"].as_array().unwrap();
-        assert!(cases.len() >= 7 * 2 * 8, "fixture covers looks × modes × accents");
+        assert!(cases.len() >= 10 * 2 * 8, "fixture covers looks × modes × accents");
         let mut failures = Vec::new();
         for (i, case) in cases.iter().enumerate() {
             let input = case["input"].as_object().unwrap();

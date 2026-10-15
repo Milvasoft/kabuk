@@ -7,6 +7,8 @@ use kabuk_core::config::Look;
 use kabuk_ui::geom::Insets;
 use kabuk_ui::node::{Paint, Role};
 
+pub use crate::bar::style::Typo;
+
 /// Where a notice shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToastPlace {
@@ -14,6 +16,8 @@ pub enum ToastPlace {
     Corner,
     /// Etkinlik: top centre, as GNOME's banners.
     Centre,
+    /// Pano: as [`ToastPlace::Corner`], but above a bottom bar at the bottom right.
+    NearBar,
 }
 
 /// `.toast .ti`: the icon's box.
@@ -49,7 +53,9 @@ pub struct NotifyStyle {
     pub icon_size: f32,
     pub title_size: f32,
     pub title_weight: u16,
+    pub title_typo: Typo,
     pub sub_size: f32,
+    pub sub_typo: Typo,
     /// Distance under a top bar (`top: calc(edge + bar-h + 12px)`) and from the side.
     pub toast_margin: f32,
     /// How long a notice stays (`showToast`: 3.6 s), in milliseconds.
@@ -65,6 +71,7 @@ pub struct NotifyStyle {
     /// `.osd .v { width: 34px }`.
     pub value_width: f32,
     pub value_size: f32,
+    pub value_weight: u16,
     /// How long the OSD stays (`showOsd`: 1.6 s), in milliseconds.
     pub osd_ms: u32,
 }
@@ -94,7 +101,9 @@ fn ada() -> NotifyStyle {
         icon_size: 16.0,
         title_size: 14.0,
         title_weight: 600,
+        title_typo: Typo::PLAIN,
         sub_size: 13.0,
+        sub_typo: Typo::PLAIN,
         toast_margin: 12.0,
         toast_ms: 3600,
         osd_pad: Insets::symmetric(18.0, 12.0),
@@ -112,6 +121,7 @@ fn ada() -> NotifyStyle {
         },
         value_width: 34.0,
         value_size: 13.0,
+        value_weight: 400,
         osd_ms: 1600,
     }
 }
@@ -216,6 +226,57 @@ impl NotifyStyle {
                 toast_margin: 10.0,
                 ..base
             },
+            Look::Pano => NotifyStyle {
+                look,
+                toast_place: ToastPlace::NearBar,
+                toast_panel: panel(Role::Surface, Some((Role::SurfaceLine, 1.0)), 8.0),
+                icon_box: IconBox {
+                    paint: panel(Role::SurfaceSel, None, 6.0),
+                    ..base.icon_box
+                },
+                osd_panel: panel(Role::Surface, Some((Role::SurfaceLine, 1.0)), 8.0),
+                ..base
+            },
+            Look::Izgara => NotifyStyle {
+                look,
+                toast_panel: panel(Role::Desk, Some((Role::Fg, 3.0)), 0.0),
+                title_weight: 800,
+                title_typo: Typo::caps(0.06),
+                icon_box: IconBox {
+                    paint: panel(Role::AccentFill, None, 0.0),
+                    icon: Role::OnAccent,
+                    ..base.icon_box
+                },
+                toast_margin: 16.0,
+                osd_panel: panel(Role::Desk, Some((Role::Fg, 3.0)), 0.0),
+                track: Track {
+                    height: 8.0,
+                    radius: 0.0,
+                    ..base.track
+                },
+                value_weight: 900,
+                ..base
+            },
+            Look::Defter => NotifyStyle {
+                look,
+                toast_panel: panel(Role::Surface, Some((Role::SurfaceLine, 1.0)), 3.0),
+                title_size: 16.0,
+                // `.toast span { font-style: italic }` holds the title too.
+                title_typo: Typo::italic(),
+                sub_size: 14.0,
+                sub_typo: Typo::italic(),
+                icon_box: IconBox {
+                    paint: panel(Role::Clear, Some((Role::SurfaceLine, 1.0)), base.icon_box.size / 2.0),
+                    ..base.icon_box
+                },
+                osd_panel: panel(Role::Surface, Some((Role::SurfaceLine, 1.0)), 3.0),
+                track: Track {
+                    height: 2.0,
+                    radius: 0.0,
+                    ..base.track
+                },
+                ..base
+            },
         }
     }
 }
@@ -243,5 +304,15 @@ mod tests {
         );
         assert_eq!(NotifyStyle::of(Look::Rihtim).icon_box.icon, Role::OnAccent);
         assert_eq!(NotifyStyle::of(Look::Cizgi).toast_panel.radius, 0.0);
+        let h = NotifyStyle::of(Look::Pano);
+        assert_eq!(
+            (h.toast_place, h.toast_panel.radius, h.icon_box.paint.fill),
+            (ToastPlace::NearBar, 8.0, Role::SurfaceSel)
+        );
+        let i = NotifyStyle::of(Look::Izgara);
+        assert!(i.title_typo.caps && i.toast_panel.border == Some((Role::Fg, 3.0)));
+        assert_eq!((i.track.height, i.value_weight, i.toast_margin), (8.0, 900, 16.0));
+        let j = NotifyStyle::of(Look::Defter);
+        assert!(j.title_typo.italic && j.sub_typo.italic && j.track.height == 2.0 && j.title_size == 16.0);
     }
 }

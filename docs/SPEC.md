@@ -25,7 +25,7 @@ Target platform: Windows 11 22H2 and later. Windows 10 22H2 is supported on a be
 ### 2.1 Bar
 
 - A separate bar on every monitor. Settings offer "All" or "Main only".
-- Position: top, bottom, left, right. Every look has a default position (Ada, Çizgi, Devre, Rıhtım, Etkinlik: top; Ray: left; Konsol: bottom). If the user changes it, "Use default" restores it.
+- Position: top, bottom, left, right. Every look has a default position (Ada, Çizgi, Devre, Rıhtım, Etkinlik, Izgara, Defter: top; Ray: left; Konsol, Pano: bottom). If the user changes it, "Use default" restores it.
 - The bar reserves space from the Windows work area on the chosen edge; maximised windows do not go under the bar.
 - In vertical positions (left, right) the clock is written stacked; the window title, date, media text and network speed are hidden.
 - Modules (each can be turned on and off individually in settings; a disabled module leaves the bar immediately):
@@ -87,7 +87,7 @@ Target platform: Windows 11 22H2 and later. Windows 10 22H2 is supported on a be
 
 ### 2.5 Launcher
 
-- Default shortcut `Win+R`. Depending on the look it opens centred (Ada, Devre, Rıhtım, Etkinlik), full-width under the bar (Çizgi), beside the rail (Ray) or from the bottom like fzf (Konsol).
+- Default shortcut `Win+R`. Depending on the look it opens centred (Ada, Devre, Rıhtım, Etkinlik, Defter), full-width under the bar (Çizgi), beside the rail (Ray), from the bottom like fzf (Konsol), at the bar's start corner like a start menu (Pano) or against the bar at its start corner (Izgara).
 - Layout profiles (requested by the user on 2026-10-15; DECISIONS D65): the windows open now saved under a name (Settings › Windows), opened again in one go from the settings, the launcher or `kabuk msg profile <name>`: open programs go to their places, the rest start and their windows go there.
 - Sources: open windows on all workspaces (selecting one switches to that workspace and focuses it; stands in for Alt+Tab), installed applications (Start menu shortcuts and Store apps), recent files, files and folders in indexed folders, browser bookmarks, system commands (lock, sleep, start screen saver, restart, shut down), calculator (`12*8` → result, Enter copies to the clipboard).
 - Fuzzy search; matched letters are highlighted. Turkish case handling works correctly: searching "EKRANI" finds "Ekranı kilitle" (Lock screen), and the "ı/I" and "i/İ" distinction is preserved.
@@ -159,7 +159,7 @@ Everything a layer changes is recorded first and comes back when the layer is tu
 
 ## 3. Looks
 
-Seven looks; each in dark and light mode. All colours are tokens (the `.screen[data-dir="x"]` and `.screen[data-mode="light"][data-dir="x"]` blocks on the design page). Detailed visuals: the design page.
+Ten looks; each in dark and light mode. All colours are tokens (the `.screen[data-dir="x"]` and `.screen[data-mode="light"][data-dir="x"]` blocks on the design page). Detailed visuals: the design page.
 
 | Code | Name | Essence | Default bar | Accent (dark / light) |
 | --- | --- | --- | --- | --- |
@@ -170,6 +170,11 @@ Seven looks; each in dark and light mode. All colours are tokens (the `.screen[d
 | e | Konsol (Console) | tmux status line, named workspaces, fzf launcher | Bottom | `#ff7eb6` / `#c2367a` |
 | f | Rıhtım (Dock) | macOS-like: translucent menu bar, dock on the opposite edge, Spotlight launcher | Top | `#0a84ff` / `#0a7aff` |
 | g | Etkinlik (Activities) | GNOME-like: pill workspace indicator, centred clock, single system menu; the bar is black in light mode too | Top | `#3584e4` / `#3584e4` |
+| h | Pano (Panel) | A task-list panel: the apps as buttons with their names, the time over the date, a start-menu launcher | Bottom | `#4fd1c5` / `#0f766e` |
+| i | Izgara (Grid) | Swiss grid: heavy capitals, workspace blocks the bar's height, a 3 px rule, square corners | Top | `#ff4b3e` / `#d4231b` |
+| j | Defter (Notebook) | Editorial serif: Roman numerals, italics, small capitals, a double rule, a `·` between groups | Top | `#a8d5a2` / `#2f6b3a` |
+
+The design page's eleventh look, Piksel (`k`), is not part of Kabuk (decided by the user, 2026-10-15; `DECISIONS.md` D67).
 
 Default look: Rıhtım (`DECISIONS.md` D2).
 
@@ -250,7 +255,7 @@ Each is measurable; each is verified in every release with the tests in PLAN.
 13. **Floating windows** (§2.2).
 14. **Bar position** works on all four edges, and the work area is updated accordingly.
 15. **Multilingual interface** (§7).
-16. **Light and dark mode** in all seven looks, with the four mode options.
+16. **Light and dark mode** in all ten looks, with the four mode options.
 17. **Bar modules** turn on and off individually, reflected instantly.
 18. **Readability** (§4).
 19. **Fluid feel.** Kabuk's own surfaces (bar, launcher, notification, OSD) animate at 60 fps or more without dropping frames; window layout transitions do not stutter (see ARCHITECTURE §Animation). Animation setting Full/Reduced/Off; off if Windows' "Animation effects" is off.

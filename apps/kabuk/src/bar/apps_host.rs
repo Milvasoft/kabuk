@@ -56,6 +56,8 @@ pub(super) struct AppsState {
     ids: HashMap<u64, Option<String>>,
     /// The pictures' side in pixels (bar or dock size at the monitor's scale, oversampled).
     side: u32,
+    /// Each app's name by its program (or pin), for a look listing the apps as tasks.
+    names: std::cell::RefCell<HashMap<String, String>>,
 }
 
 /// Kabuk's pins file: the pins in their order and the Windows pins already taken in.
@@ -357,13 +359,26 @@ impl Shared {
         self.apps.list.iter().map(|a| self.picture_key(&a.icon)).collect()
     }
 
+    /// The name app `a` goes by, looked up once.
+    fn app_name(&self, a: &App) -> String {
+        let key = a.link.clone().unwrap_or_else(|| a.source.clone());
+        self.apps
+            .names
+            .borrow_mut()
+            .entry(key)
+            .or_insert_with(|| super::app_menu_host::display_name(a))
+            .clone()
+    }
+
     pub(super) fn app_icons(&self) -> Vec<AppIcon> {
+        let tasks = self.look.style.tasks.is_some();
         let ids = apps::slide_ids(&self.apps.list);
         self.apps
             .list
             .iter()
             .enumerate()
             .map(|(i, a)| AppIcon {
+                label: if tasks { self.app_name(a) } else { String::new() },
                 image: self.picture_key(&a.icon),
                 running: !a.windows.is_empty(),
                 focused: a.focused,

@@ -640,8 +640,8 @@ fn resolve_look(cfg: &Config, windows_light: bool, hour: u8) -> Look {
 }
 
 /// The frame other programs' windows get in `look` (DECISIONS D30): `--win-bg` and
-/// `--fg-s`, the corners as the design draws the look's windows (Çizgi's and Konsol's
-/// square).
+/// `--fg-s`, the corners as the design draws the look's windows (Çizgi's, Konsol's and
+/// Izgara's square, Defter's barely rounded).
 pub fn frame_style(look: config::Look, t: &Tokens) -> kabuk_win::window::FrameStyle {
     use kabuk_win::window::{Corners, FrameStyle};
     let rgb = |name: &str, fallback: kabuk_theme::Color| {
@@ -652,7 +652,8 @@ pub fn frame_style(look: config::Look, t: &Tokens) -> kabuk_win::window::FrameSt
         caption: rgb("win-bg", kabuk_theme::Color::BLACK),
         text: rgb("fg-s", kabuk_theme::Color::WHITE),
         corners: match look {
-            config::Look::Cizgi | config::Look::Konsol => Corners::Square,
+            config::Look::Cizgi | config::Look::Konsol | config::Look::Izgara => Corners::Square,
+            config::Look::Defter => Corners::RoundSmall,
             _ => Corners::Round,
         },
     }
@@ -3209,6 +3210,19 @@ mod tests {
         assert_eq!(
             frame_style(config::Look::Konsol, &tokens("e", Mode::Dark)).corners,
             Corners::Square
+        );
+        // `--radius: 0px` in Izgara, `3px` in Defter, `8px` in Pano.
+        assert_eq!(
+            frame_style(config::Look::Izgara, &tokens("i", Mode::Dark)).corners,
+            Corners::Square
+        );
+        assert_eq!(
+            frame_style(config::Look::Defter, &tokens("j", Mode::Dark)).corners,
+            Corners::RoundSmall
+        );
+        assert_eq!(
+            frame_style(config::Look::Pano, &tokens("h", Mode::Dark)).corners,
+            Corners::Round
         );
         let light = frame_style(config::Look::Ada, &tokens("a", Mode::Light));
         let lum = |(r, g, b): (u8, u8, u8)| u32::from(r) + u32::from(g) + u32::from(b);

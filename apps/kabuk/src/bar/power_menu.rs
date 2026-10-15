@@ -66,6 +66,8 @@ pub fn view(i18n: &I18n, text_scale: f32, s: &TipStyle, mark: u64) -> Node {
                         weight: 400,
                         after: 0.0,
                         underline: false,
+                        italic: false,
+                        spacing: 0.0,
                     }],
                     font: FontRole::Ui,
                     size: s.text * text_scale,

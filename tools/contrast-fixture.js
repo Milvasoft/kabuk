@@ -31,7 +31,7 @@ const out = path.resolve(process.argv[3] || "tests/fixtures/contrast.json");
     const res = [];
     for (const mode of ["dark", "light"]) {
       click(`[data-pagemode="${mode}"]`);
-      for (const look of "abcdefg") {
+      for (const look of "abcdefghij") {
         click(`#dir-${look}`);
         for (const acc of accents) {
           click('#set-stage [data-page="look"]');

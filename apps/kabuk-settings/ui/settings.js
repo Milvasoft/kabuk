@@ -39,7 +39,8 @@
   const escapeHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
   const icon = (id, cls = "i") => `<svg class="${cls}" aria-hidden="true"><use href="#i-${id}"></use></svg>`;
 
-  const LOOK_NAMES = { a: "ada", b: "cizgi", c: "devre", d: "ray", e: "konsol", f: "rihtim", g: "etkinlik" };
+  // The design's looks Kabuk has (not Piksel, which the user did not want).
+  const LOOK_NAMES = { a: "ada", b: "cizgi", c: "devre", d: "ray", e: "konsol", f: "rihtim", g: "etkinlik", h: "pano", i: "izgara", j: "defter" };
   const DIM_MIN = 10, DIM_MAX = 3600, DIM_PRESETS = [30, 60, 120];
   const SAVER_WAITS = [3, 5, 10, 15];
   const RANGES = { height: [24, 72], tray: [0, 12], gap: [0, 32], bright: [10, 100, 5], dropdown: [20, 90, 5] };
@@ -146,7 +147,7 @@
     const accent = cfg().appearance.accent;
     const own = accent === "theme";
     const accentNow = own ? A.lookDefaults[c] : accent;
-    const cards = A.looks.map((d) => {
+    const cards = A.looks.filter((d) => LOOK_NAMES[d]).map((d) => {
       const on = d === c;
       return `<button class="theme-card${on ? " on" : ""}" type="button" data-set="appearance.look" data-val='"${LOOK_NAMES[d]}"' aria-pressed="${on}"><span class="tp">${A.miniLook[d].replaceAll("VAR", on ? accentNow : A.lookDefaults[d])}</span><span class="tn">${t("looks-" + d)}<span>${on ? t("inUse") : t("apply")}</span></span></button>`;
     }).join("");

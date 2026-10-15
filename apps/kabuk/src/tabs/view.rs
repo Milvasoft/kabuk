@@ -37,6 +37,8 @@ pub fn strip(tabs: &[Tab], width: f32, s: &TabStyle, text_scale: f32) -> Node {
                     weight,
                     after: 0.0,
                     underline: false,
+                    italic: false,
+                    spacing: 0.0,
                 }],
                 font: FontRole::Ui,
                 size: s.text * text_scale,

@@ -68,9 +68,25 @@ fn defaults_follow_the_spec() {
     assert_eq!(c.bar.position.edge(Look::Ray), Edge::Left);
     assert_eq!(c.bar.position.edge(Look::Konsol), Edge::Bottom);
     assert_eq!(c.bar.position.edge(Look::Rihtim), Edge::Top);
+    // Pano is a bottom panel (the design's `lookPos`); Izgara and Defter sit on top.
+    assert_eq!(c.bar.position.edge(Look::Pano), Edge::Bottom);
+    assert_eq!(c.bar.position.edge(Look::Izgara), Edge::Top);
+    assert_eq!(c.bar.position.edge(Look::Defter), Edge::Top);
     assert_eq!(BarPosition::Right.edge(Look::Ray), Edge::Right);
+    // The design's looks but Piksel (`k`), which the user did not want (2026-10-15).
     let codes: Vec<&str> = Look::ALL.iter().map(|l| l.code()).collect();
-    assert_eq!(codes, vec!["a", "b", "c", "d", "e", "f", "g"]);
+    assert_eq!(codes, vec!["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]);
+}
+
+/// The new looks are written by their ASCII names, like the others.
+#[test]
+fn new_looks_parse_by_name() {
+    for (name, look) in [("pano", Look::Pano), ("izgara", Look::Izgara), ("defter", Look::Defter)] {
+        let loaded = parse(&format!("schema = 1\n[appearance]\nlook = \"{name}\"\n")).unwrap();
+        assert_eq!(loaded.config.appearance.look, look);
+        assert!(loaded.warnings.is_empty(), "{name}: {:?}", loaded.warnings);
+    }
+    assert!(parse("schema = 1\n[appearance]\nlook = \"piksel\"\n").is_err());
 }
 
 #[test]

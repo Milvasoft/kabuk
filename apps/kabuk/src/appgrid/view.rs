@@ -104,6 +104,8 @@ fn text(words: String, color: Role, size: f32, max_width: Option<f32>) -> Node {
             weight: 400,
             after: 0.0,
             underline: false,
+            italic: false,
+            spacing: 0.0,
         }],
         font: FontRole::Ui,
         size,

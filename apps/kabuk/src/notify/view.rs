@@ -1,6 +1,7 @@
 //! The notice (`.toast`: the icon's box, the title and the line under it) and the volume
 //! OSD (`.osd`: the speaker, the level's track and the number). Pure: node trees.
 
+use kabuk_i18n::I18n;
 use kabuk_ui::geom::Insets;
 use kabuk_ui::node::{Align, FontRole, Node, Paint, Role, Span, TextSpec};
 
@@ -13,6 +14,8 @@ fn span(text: impl Into<String>, color: Role, weight: u16) -> Span {
         weight,
         after: 0.0,
         underline: false,
+        italic: false,
+        spacing: 0.0,
     }
 }
 
@@ -26,7 +29,7 @@ fn text(spans: Vec<Span>, font: FontRole, size: f32, max_width: Option<f32>) -> 
 }
 
 /// A notice: `title` and `sub` (empty: title only) beside `icon` in its box.
-pub fn toast(title: &str, sub: &str, icon: &'static str, s: &NotifyStyle, text_scale: f32) -> Node {
+pub fn toast(title: &str, sub: &str, icon: &'static str, s: &NotifyStyle, text_scale: f32, i18n: &I18n) -> Node {
     let b = &s.icon_box;
     let inset = (b.size - s.icon_size) / 2.0;
     let icon_box = Node::row(vec![Node::icon(icon, s.icon_size, b.icon)])
@@ -35,17 +38,19 @@ pub fn toast(title: &str, sub: &str, icon: &'static str, s: &NotifyStyle, text_s
         .padding(Insets::symmetric(inset, 0.0))
         .paint(b.paint);
     let words_width = s.toast_width - s.toast_pad.left - s.toast_pad.right - b.size - s.toast_gap;
+    let title_size = s.title_size * text_scale;
     let mut words = vec![text(
-        vec![span(title, Role::Fg, s.title_weight)],
+        vec![s.title_typo.span(title, Role::Fg, s.title_weight, title_size, i18n)],
         FontRole::Ui,
-        s.title_size * text_scale,
+        title_size,
         Some(words_width),
     )];
     if !sub.is_empty() {
+        let sub_size = s.sub_size * text_scale;
         words.push(text(
-            vec![span(sub, Role::Dim, 400)],
+            vec![s.sub_typo.span(sub, Role::Dim, 400, sub_size, i18n)],
             FontRole::Ui,
-            s.sub_size * text_scale,
+            sub_size,
             Some(words_width),
         ));
     }
@@ -86,7 +91,7 @@ pub(crate) fn track(t: &Track, level: f32) -> Node {
 /// The volume OSD at `percent` (0-100).
 pub fn osd(percent: u8, s: &NotifyStyle, text_scale: f32) -> Node {
     let value = Node::row(vec![text(
-        vec![span(percent.to_string(), Role::Fg, 400)],
+        vec![span(percent.to_string(), Role::Fg, s.value_weight)],
         FontRole::Num,
         s.value_size * text_scale,
         None,
@@ -139,7 +144,14 @@ mod tests {
     fn a_notice_has_the_designs_parts() {
         let s = NotifyStyle::of(Look::Ada);
         let l = layout(
-            &toast("Game mode off", "Previous layout restored", "pad", &s, 1.0),
+            &toast(
+                "Game mode off",
+                "Previous layout restored",
+                "pad",
+                &s,
+                1.0,
+                &kabuk_i18n::I18n::new(kabuk_i18n::Lang::En),
+            ),
             Point::default(),
             &Fake,
         );
@@ -151,15 +163,29 @@ mod tests {
             .iter()
             .any(|d| matches!(d, Draw::Icon { spec, .. } if spec.name == "pad")));
         let short = layout(
-            &toast("Copied to clipboard", "", "check", &s, 1.0),
+            &toast(
+                "Copied to clipboard",
+                "",
+                "check",
+                &s,
+                1.0,
+                &kabuk_i18n::I18n::new(kabuk_i18n::Lang::En),
+            ),
             Point::default(),
             &Fake,
         );
         assert_eq!(short.draws.iter().filter(|d| matches!(d, Draw::Text { .. })).count(), 1);
         // The icon box in the accent tint.
-        assert!(panels(&toast("x", "", "check", &s, 1.0))
-            .iter()
-            .any(|(w, r)| *w == 34.0 && *r == Role::AccentTint(14)));
+        assert!(panels(&toast(
+            "x",
+            "",
+            "check",
+            &s,
+            1.0,
+            &kabuk_i18n::I18n::new(kabuk_i18n::Lang::En)
+        ))
+        .iter()
+        .any(|(w, r)| *w == 34.0 && *r == Role::AccentTint(14)));
     }
 
     #[test]

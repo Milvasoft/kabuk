@@ -132,6 +132,8 @@ fn line(text: String, color: Role, size: f32) -> Node {
             weight: 400,
             after: 0.0,
             underline: false,
+            italic: false,
+            spacing: 0.0,
         }],
         font: FontRole::Ui,
         size,

@@ -29,6 +29,8 @@ pub enum Corners {
     Default,
     Square,
     Round,
+    /// Slightly rounded (Defter's 3 px).
+    RoundSmall,
 }
 
 /// What Kabuk gives other programs' frames to follow the look (DECISIONS D30): the
@@ -490,13 +492,14 @@ impl Hwnd {
     pub fn set_frame_style(self, style: Option<FrameStyle>) -> bool {
         use windows::Win32::Graphics::Dwm::{
             DWMWA_CAPTION_COLOR, DWMWA_COLOR_DEFAULT, DWMWA_TEXT_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DEFAULT,
-            DWMWCP_DONOTROUND, DWMWCP_ROUND,
+            DWMWCP_DONOTROUND, DWMWCP_ROUND, DWMWCP_ROUNDSMALL,
         };
         let colorref = |c: Option<(u8, u8, u8)>| c.map_or(DWMWA_COLOR_DEFAULT, |(r, g, b)| colorref(r, g, b));
         let corners = match style.map(|s| s.corners) {
             None | Some(Corners::Default) => DWMWCP_DEFAULT,
             Some(Corners::Square) => DWMWCP_DONOTROUND,
             Some(Corners::Round) => DWMWCP_ROUND,
+            Some(Corners::RoundSmall) => DWMWCP_ROUNDSMALL,
         };
         let caption = self.dwm_set(DWMWA_CAPTION_COLOR, colorref(style.map(|s| s.caption)));
         let text = self.dwm_set(DWMWA_TEXT_COLOR, colorref(style.map(|s| s.text)));

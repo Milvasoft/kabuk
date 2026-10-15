@@ -68,6 +68,11 @@ pub struct Span {
     pub after: f32,
     /// Drawn with a line under it (Çizgi's matched letters in the launcher).
     pub underline: bool,
+    /// Drawn in the face's italic (Defter's titles and dates).
+    pub italic: bool,
+    /// Extra space after every character, in DIPs (CSS `letter-spacing`, Izgara's
+    /// capitals).
+    pub spacing: f32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -89,6 +94,9 @@ impl std::hash::Hash for TextSpec {
             s.color.hash(h);
             s.weight.hash(h);
             s.after.to_bits().hash(h);
+            s.underline.hash(h);
+            s.italic.hash(h);
+            s.spacing.to_bits().hash(h);
         }
         self.font.hash(h);
         self.size.to_bits().hash(h);
@@ -650,6 +658,8 @@ mod tests {
                 weight: 400,
                 after: 0.0,
                 underline: false,
+                italic: false,
+                spacing: 0.0,
             }],
             font: FontRole::Ui,
             size,
@@ -796,6 +806,8 @@ mod tests {
                 weight: 400,
                 after: 0.0,
                 underline: false,
+                italic: false,
+                spacing: 0.0,
             }],
             font: FontRole::Ui,
             size: 13.5,

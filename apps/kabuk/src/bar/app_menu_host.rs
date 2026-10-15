@@ -58,7 +58,7 @@ pub(super) struct AppMenu {
 /// The name an app goes by, as Windows' taskbar names it: a packaged app's own name, a
 /// program's name in the Start menu ("Google Chrome", not "chrome"), else its pin's or
 /// program's file name without the extension.
-fn display_name(app: &crate::bar::apps::App) -> String {
+pub(super) fn display_name(app: &crate::bar::apps::App) -> String {
     let path = app.link.as_deref().unwrap_or(&app.source);
     /// How the shell names a packaged app by its app id.
     const APPS_FOLDER: &str = "shell:AppsFolder\\";

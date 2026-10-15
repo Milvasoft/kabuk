@@ -41,7 +41,7 @@ Kabuk runs on the user's everyday desktop; a bug loses windows or leaves the mac
 - Hue (H) is preserved (±1° for non-gray colors).
 - A color that already passes is returned unchanged.
 - `fillPair`: text on the fill ≥ 4.5:1.
-- Sample inputs taken from the design page (7 looks × 2 modes × 8 accents) give the same hex value with the native engine. The expected values are generated from the design page with the script under `tools/` and stored as `tests/fixtures/contrast.json`.
+- Sample inputs taken from the design page (10 looks × 2 modes × 8 accents) give the same hex value with the native engine. The expected values are generated from the design page with the script under `tools/` and stored as `tests/fixtures/contrast.json`.
 
 **Search (`kabuk-search`)**:
 - Turkish letters: "EKRANI" → "Ekranı kilitle"; "istanbul" → "İstanbul"; "ılık" ≠ "ilik".

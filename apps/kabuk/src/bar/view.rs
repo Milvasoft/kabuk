@@ -7,7 +7,7 @@
 //! hidden and the clock is stacked (SPEC §2.1). How each part looks comes from the
 //! look's [`Style`].
 
-use kabuk_core::config::{Edge, Look, Modules};
+use kabuk_core::config::{Edge, Modules};
 use kabuk_i18n::{I18n, TimeText};
 use kabuk_ui::geom::{Insets, Point, Rect, Size};
 use kabuk_ui::node::{
@@ -15,7 +15,7 @@ use kabuk_ui::node::{
 };
 use kabuk_ui::render::CSS_LINE_HEIGHT;
 
-use super::style::{Arrangement, Between, Group, LayoutIndicator, Style, Ws, MEDIA_BAR_HEIGHTS};
+use super::style::{Arrangement, Between, Group, LayoutIndicator, Style, Typo, Ws, MEDIA_BAR_HEIGHTS};
 
 /// Module ids, also used for hit testing.
 pub mod hit {
@@ -49,6 +49,8 @@ pub mod hit {
 
 /// Konsol names its first workspaces like tmux windows (`1:code`).
 const NAMED_WORKSPACES: u32 = 6;
+/// Defter's mark between groups (`.grp + .grp::before { content: "·" }`).
+const GROUP_GLYPH: &str = "·";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Workspace {
@@ -129,8 +131,10 @@ pub struct BarData {
 }
 
 /// An app of the apps module as the bar draws it.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct AppIcon {
+    /// Its name, for a look that lists the apps as tasks (Pano); empty otherwise.
+    pub label: String,
     /// The key of its picture in the GPU's image store.
     pub image: u64,
     pub running: bool,
@@ -174,7 +178,14 @@ fn span(text: impl Into<String>, color: Role, weight: u16) -> Span {
         weight,
         after: 0.0,
         underline: false,
+        italic: false,
+        spacing: 0.0,
     }
+}
+
+/// A span set as `typo` says at font size `size` (capitals in the user's language).
+fn typed(text: &str, color: Role, weight: u16, typo: Typo, size: f32, i18n: &I18n) -> Span {
+    typo.span(text, color, weight, size, i18n)
 }
 
 fn text(spans: Vec<Span>, font: FontRole, size: f32) -> Node {
@@ -231,6 +242,7 @@ fn workspace_label(ws: &Workspace, s: &Style, vertical: bool, i18n: &I18n) -> St
             format!("{}{}{}", ws.number, name, if ws.active { "*" } else { "" })
         }
         Ws::Dots { .. } => String::new(),
+        Ws::Roman { .. } => kabuk_i18n::roman(ws.number),
         _ => ws.number.to_string(),
     }
 }
@@ -243,15 +255,23 @@ fn workspaces(d: &BarData, s: &Style, i18n: &I18n, thickness: f32) -> Node {
         .map(|ws| {
             let label = workspace_label(ws, s, v, i18n);
             let (color, weight) = match (s.ws, ws.active) {
-                (Ws::Pill { .. } | Ws::Circle { .. } | Ws::Square { .. }, true) => (Role::OnAccent, s.ws_active_weight),
+                (Ws::Pill { .. } | Ws::Circle { .. } | Ws::Square { .. } | Ws::Block { .. }, true) => {
+                    (Role::OnAccent, s.ws_active_weight)
+                }
                 (Ws::Named { .. }, true) => (Role::Accent, s.ws_active_weight),
                 (_, true) => (Role::Fg, s.ws_active_weight),
                 (Ws::Underline { .. }, false) if ws.busy => (Role::Busy, s.ws_weight),
-                (Ws::Circle { .. }, false) if ws.busy => (Role::Fg, s.ws_weight),
+                (Ws::Circle { .. } | Ws::Block { .. }, false) if ws.busy => (Role::Fg, s.ws_weight),
                 _ => (Role::Dim, s.ws_weight),
             };
+            let size = s.size(s.ws_size);
             let label_node = |w: Option<f32>, h: Option<f32>| {
-                text(vec![span(label.clone(), color, weight)], s.ws_font, s.size(s.ws_size)).size(w, h)
+                text(
+                    vec![typed(&label, color, weight, s.ws_typo, size, i18n)],
+                    s.ws_font,
+                    size,
+                )
+                .size(w, h)
             };
             let mut layers: Vec<Node> = Vec::new();
             match s.ws {
@@ -394,6 +414,82 @@ fn workspaces(d: &BarData, s: &Style, i18n: &I18n, thickness: f32) -> Node {
                         radius: size / 2.0 + 0.5,
                     }));
                 }
+                Ws::Tab {
+                    size,
+                    radius,
+                    busy_w,
+                    busy_h,
+                    busy_offset,
+                } => {
+                    let mut n = label_node(Some(size), Some(size));
+                    if ws.active {
+                        n = n.paint(Paint {
+                            fill: Role::SurfaceSel,
+                            border: None,
+                            radius,
+                        });
+                    }
+                    layers.push(n);
+                    if ws.busy && !ws.active {
+                        // `bottom: 3px` inside the tab.
+                        layers.push(
+                            Node::spacer(busy_w, busy_h)
+                                .align(Align::End)
+                                .offset(0.0, -busy_offset)
+                                .paint(Paint {
+                                    fill: Role::Dim,
+                                    border: None,
+                                    radius: busy_h / 2.0,
+                                }),
+                        );
+                    }
+                }
+                Ws::Block { w, vertical_h } => {
+                    let n = if v {
+                        label_node(Some(thickness), Some(vertical_h))
+                    } else {
+                        label_node(Some(w), Some(thickness))
+                    };
+                    layers.push(if ws.active {
+                        n.paint(Paint {
+                            fill: Role::AccentFill,
+                            border: None,
+                            radius: 0.0,
+                        })
+                    } else {
+                        n
+                    });
+                }
+                Ws::Roman {
+                    min_w,
+                    h,
+                    line,
+                    inset,
+                    bottom,
+                } => {
+                    // At least `min_w` wide, the numeral in the middle.
+                    layers.push(Node::spacer(min_w, h));
+                    layers.push(label_node(None, Some(h)));
+                    if ws.active {
+                        let mark = if v {
+                            // `right: -6px; top: 6px; bottom: 6px; width: 2px`, beside the
+                            // widest numeral's box.
+                            Node::spacer(line, 0.0)
+                                .fill(Axis::Column, inset)
+                                .offset(min_w / 2.0 + inset - line / 2.0, 0.0)
+                        } else {
+                            Node::spacer(0.0, line)
+                                .align(Align::End)
+                                .fill(Axis::Row, inset)
+                                .offset(0.0, -bottom)
+                        };
+                        layers.push(mark.paint(Paint {
+                            fill: Role::AccentFill,
+                            border: None,
+                            radius: 0.0,
+                        }));
+                    }
+                }
             }
             Node::layer(layers).hit(hit::WORKSPACE, ws.number)
         })
@@ -411,7 +507,14 @@ fn layout_indicator(d: &BarData, s: &Style, i18n: &I18n) -> Option<Node> {
     } else {
         "layout-tile"
     };
-    let label = |color: Role, t: String| text(vec![span(t, color, 400)], FontRole::Ui, s.size(s.layout_size));
+    let size = s.size(s.layout_size);
+    let label = |color: Role, t: String| {
+        text(
+            vec![typed(&t, color, 400, s.layout_typo, size, i18n)],
+            FontRole::Ui,
+            size,
+        )
+    };
     match s.layout {
         LayoutIndicator::Hidden => None,
         _ if d.vertical() => match s.layout {
@@ -430,22 +533,43 @@ fn layout_indicator(d: &BarData, s: &Style, i18n: &I18n) -> Option<Node> {
     }
 }
 
-fn title(t: &Title, s: &Style) -> Node {
-    let mut spans = vec![span(&t.main, s.title_main_color, s.title_main_weight)];
+fn title(t: &Title, s: &Style, i18n: &I18n) -> Node {
+    let size = s.size(s.title_size);
+    let main_typo = Typo {
+        // `.title b` takes the title's letter spacing and capitals, and its own style.
+        caps: s.title_typo.caps,
+        spacing: s.title_typo.spacing,
+        ..s.title_main_typo
+    };
+    let mut spans = vec![typed(
+        &t.main,
+        s.title_main_color,
+        s.title_main_weight,
+        main_typo,
+        size,
+        i18n,
+    )];
     if !t.rest.is_empty() {
         spans[0].after = s.title_main_after;
         // The design writes two spaces, which HTML collapses into one.
-        spans.push(span(format!(" {}", t.rest), s.title_rest_color, 400));
+        spans.push(typed(
+            &format!(" {}", t.rest),
+            s.title_rest_color,
+            400,
+            s.title_typo,
+            size,
+            i18n,
+        ));
     }
     Node::text(TextSpec {
         spans,
         font: FontRole::Ui,
-        size: s.size(s.title_size),
+        size,
         max_width: Some(s.title_max_w),
     })
 }
 
-fn clock(d: &BarData, s: &Style) -> Option<Node> {
+fn clock(d: &BarData, s: &Style, i18n: &I18n) -> Option<Node> {
     let c = &s.clock;
     let show_time = d.modules.clock;
     let show_date = d.primary && d.modules.date && !d.vertical();
@@ -466,14 +590,18 @@ fn clock(d: &BarData, s: &Style) -> Option<Node> {
     }
     let mut time = None;
     if show_time {
+        let size = s.size(c.time_size);
         let mut t = vec![text(
-            vec![span(
-                format!("{}:{}", d.time.hours, d.time.minutes),
+            vec![typed(
+                &format!("{}:{}", d.time.hours, d.time.minutes),
                 c.time_color,
                 c.time_weight,
+                c.time_typo,
+                size,
+                i18n,
             )],
             c.time_font,
-            s.size(c.time_size),
+            size,
         )];
         if let Some(suffix) = &d.time.suffix {
             t.push(
@@ -491,12 +619,24 @@ fn clock(d: &BarData, s: &Style) -> Option<Node> {
         time = Some(Node::row(t).align(Align::Center));
     }
     let date = show_date.then(|| {
+        let size = s.size(c.date_size);
         text(
-            vec![span(&d.date, c.date_color, c.date_weight)],
+            vec![typed(&d.date, c.date_color, c.date_weight, c.date_typo, size, i18n)],
             FontRole::Ui,
-            s.size(c.date_size),
+            size,
         )
     });
+    if let Some(line_height) = c.stacked {
+        // Pano: the time over the date at the trailing end, lines `line_height` ems high
+        // where Kabuk's text boxes are `CSS_LINE_HEIGHT`.
+        let tighten = |px: f32| px * (CSS_LINE_HEIGHT - line_height) / 2.0;
+        let parts: Vec<Node> = [time, date].into_iter().flatten().collect();
+        return Some(
+            Node::column(parts)
+                .gap(-(tighten(s.size(c.time_size)) + tighten(s.size(c.date_size))))
+                .align(Align::End),
+        );
+    }
     let parts: Vec<Node> = if c.date_first { [date, time] } else { [time, date] }
         .into_iter()
         .flatten()
@@ -504,7 +644,7 @@ fn clock(d: &BarData, s: &Style) -> Option<Node> {
     Some(Node::row(parts).gap(c.gap).align(Align::Baseline))
 }
 
-fn media(d: &BarData, s: &Style) -> Option<Node> {
+fn media(d: &BarData, s: &Style, i18n: &I18n) -> Option<Node> {
     let title = d.media.as_ref()?;
     if !(d.primary && d.modules.media && s.media_group) {
         return None;
@@ -517,7 +657,7 @@ fn media(d: &BarData, s: &Style) -> Option<Node> {
                 Node::spacer(s.media_bar_w, h).paint(Paint {
                     fill: role,
                     border: None,
-                    radius: s.media_bar_w / 2.0,
+                    radius: s.media_bar_radius,
                 })
             })
             .collect();
@@ -532,10 +672,11 @@ fn media(d: &BarData, s: &Style) -> Option<Node> {
         items.push(Node::icon("music", s.icon, Role::Dim));
     }
     if !d.vertical() {
+        let size = s.size(s.media_size.unwrap_or(s.mod_size));
         items.push(text(
-            vec![span(title, Role::Dim, 400)],
+            vec![typed(title, Role::Dim, 400, s.media_typo, size, i18n)],
             FontRole::Ui,
-            s.size(s.mod_size),
+            size,
         ));
     }
     if items.is_empty() {
@@ -554,7 +695,9 @@ fn stats(d: &BarData, s: &Style, i18n: &I18n) -> Vec<Node> {
     let value_size = s.size(if v { s.mod_size_vertical } else { s.mod_size });
     let module = |icon: &'static str, label_key: &str, value: String| {
         let lead = if s.labels {
-            text(vec![span(i18n.tr(label_key), Role::Dim, 400)], FontRole::Ui, value_size)
+            let size = s.label_size.map_or(value_size, |px| s.size(px));
+            s.label_typo
+                .node(&i18n.tr(label_key), Role::Dim, 400, FontRole::Ui, size, i18n)
         } else {
             Node::icon(icon, s.icon, s.mod_icon_color)
         };
@@ -668,11 +811,7 @@ fn bell_and_power(d: &BarData, s: &Style) -> Option<Node> {
         if let Some(n) = d.notif_count.filter(|n| *n > 0) {
             let (h, min_w, size, pad) = BADGE;
             // `.screen[data-dir="c"] .bell .n { border-radius: 3px }`, Konsol's square.
-            let radius = match s.look {
-                Look::Devre => 3.0,
-                Look::Konsol => 0.0,
-                _ => h / 2.0,
-            };
+            let radius = s.badge_radius.unwrap_or(h / 2.0);
             let digits = n.to_string();
             let w = (digits.len() as f32 * size * 0.62 + 2.0 * pad).max(min_w);
             bell.push(
@@ -713,6 +852,9 @@ fn app_icons(d: &BarData, s: &Style) -> Option<Vec<Node>> {
     if !d.modules.taskbar || d.apps.is_empty() || crate::bar::dock::shown(s.look) {
         return None;
     }
+    if let Some(t) = s.tasks {
+        return Some(tasks(d, s, &t));
+    }
     let icons = d
         .apps
         .iter()
@@ -743,6 +885,61 @@ fn app_icons(d: &BarData, s: &Style) -> Option<Vec<Node>> {
     Some(icons)
 }
 
+/// Pano's task list: each app a button with its icon and name, the focused one on the
+/// selection surface with the accent's tick; down a side bar only the icons.
+fn tasks(d: &BarData, s: &Style, t: &super::style::Tasks) -> Vec<Node> {
+    let v = d.vertical();
+    d.apps
+        .iter()
+        .enumerate()
+        .map(|(i, a)| {
+            let size = s.size(t.size);
+            let mut row = vec![Node::image(a.image, t.icon)];
+            if !v && !a.label.is_empty() {
+                let color = if a.focused { Role::Fg } else { Role::Dim };
+                row.push(Node::text(TextSpec {
+                    spans: vec![span(&a.label, color, 400)],
+                    font: FontRole::Ui,
+                    size,
+                    // `.task { max-width }` holds the padding and the icon too.
+                    max_width: Some((t.max_w - 2.0 * t.pad - t.icon - t.inner_gap).max(0.0)),
+                }));
+            }
+            let pad = if v { t.pad_vertical } else { t.pad };
+            let mut button = Node::row(row)
+                .gap(t.inner_gap)
+                .align(Align::Center)
+                .padding(Insets::symmetric(pad, 0.0))
+                .size(None, Some(t.h));
+            if a.focused {
+                button = button.paint(Paint {
+                    fill: Role::SurfaceSel,
+                    border: None,
+                    radius: t.radius,
+                });
+            }
+            let mut layers = vec![button];
+            if a.focused {
+                let (w, h) = t.tick;
+                let tick = if v {
+                    // `left: 2px; bottom: 50%; width: 3px; height: 16px`.
+                    Node::spacer(h, t.tick_vertical).offset(-(t.icon / 2.0 + pad - t.tick_bottom - h / 2.0), 0.0)
+                } else {
+                    Node::spacer(w, h).align(Align::End).offset(0.0, -t.tick_bottom)
+                };
+                layers.push(tick.paint(Paint {
+                    fill: Role::AccentFill,
+                    border: None,
+                    radius: h / 2.0,
+                }));
+            }
+            Node::layer(layers)
+                .offset(a.shift.0, a.shift.1)
+                .hit(hit::APP, u32::try_from(i).unwrap_or(u32::MAX))
+        })
+        .collect()
+}
+
 /// The apps' group, which a bar too short for all of them cuts (found by the user: on a
 /// bar at the side the apps ran under the clock): its place among the start's groups, the
 /// icons, and the "+n" shown for `n` icons left out (index `n - 1`).
@@ -763,7 +960,31 @@ impl AppsGroup {
         }
         // Down the rail on a vertical bar, as the tray does.
         let list = if vertical { Node::column(list) } else { Node::row(list) };
-        group(vec![list.gap(s.tray_gap).align(Align::Center)], s, vertical, thickness)
+        let Some(t) = s.tasks else {
+            return group(vec![list.gap(s.tray_gap).align(Align::Center)], s, vertical, thickness);
+        };
+        // Pano's `.tasks`: a line before the list, `lead` from it, the tasks `gap` apart.
+        let list = list.gap(t.gap).align(Align::Center);
+        let line = Paint {
+            fill: Role::Line,
+            border: None,
+            radius: 0.0,
+        };
+        if vertical {
+            Node::column(vec![Node::spacer(thickness, 1.0).paint(line), list])
+                .gap(t.lead)
+                .align(Align::Center)
+                .size(Some(thickness), None)
+        } else {
+            Node::row(vec![Node::spacer(1.0, t.h).paint(line), list])
+                .gap(t.lead)
+                .align(Align::Center)
+                .padding(Insets {
+                    right: s.group_pad_h,
+                    ..Insets::default()
+                })
+                .size(None, Some(thickness))
+        }
     }
 }
 
@@ -784,7 +1005,8 @@ pub fn regions(d: &BarData, s: &Style, i18n: &I18n, thickness: f32) -> Regions {
     // Before the workspaces, as Launchpad leads macOS's dock, in every look: it stands
     // where Rıhtım's logo ring and Etkinlik's "Activities" stood (asked for by the user).
     if d.modules.app_grid {
-        first.push(Node::icon("app", s.tray_icon, s.mod_icon_color).hit(hit::APP_GRID, 0));
+        let color = s.app_grid_color.unwrap_or(s.mod_icon_color);
+        first.push(Node::icon("app", s.tray_icon, color).hit(hit::APP_GRID, 0));
     }
     first.push(workspaces(d, s, i18n, thickness));
     let mut start = vec![g(first)];
@@ -815,24 +1037,28 @@ pub fn regions(d: &BarData, s: &Style, i18n: &I18n, thickness: f32) -> Regions {
             .into_iter()
             .collect();
         if let (true, false, true, true, Some(t)) = (s.title, v, d.primary, d.modules.title, &d.title) {
-            second.push(title(t, s));
+            second.push(title(t, s, i18n));
         }
         if !second.is_empty() {
             start.push(g(second));
         }
     }
 
-    let center = clock(d, s)
+    let center = clock(d, s, i18n)
         .map(|c| vec![g(vec![c.hit(hit::CLOCK, 0)])])
         .unwrap_or_default();
 
     let mut end = Vec::new();
-    if let Some(media) = media(d, s) {
+    if let Some(media) = media(d, s, i18n) {
         end.push(g(vec![media]));
     }
     let st = stats(d, s, i18n);
     if !st.is_empty() {
-        end.push(g(st));
+        let mut figures = g(st);
+        if let (Some(gap), false) = (s.mod_between, v) {
+            figures = figures.gap(gap);
+        }
+        end.push(figures);
     }
     if let Some(t) = tray(d, s, i18n) {
         end.push(g(vec![t]));
@@ -865,17 +1091,30 @@ fn joined(nodes: &[Node], s: &Style, vertical: bool, thickness: f32) -> Node {
         if i > 0 {
             match s.between {
                 Between::Nothing => {}
-                Between::Separator { width } => {
+                Between::Separator { width, color } => {
                     let line = if vertical {
                         Node::spacer(thickness, width)
                     } else {
                         Node::spacer(width, thickness)
                     };
                     items.push(line.paint(Paint {
-                        fill: Role::Line,
+                        fill: color,
                         border: None,
                         radius: 0.0,
                     }));
+                }
+                Between::Glyph { color, size, after } => {
+                    if !vertical {
+                        // CSS sets it inside the next group's padding, right before its
+                        // content: drawn there, as far on as that padding.
+                        let glyph = text(vec![span(GROUP_GLYPH, color, 400)], FontRole::Ui, s.size(size))
+                            .padding(Insets {
+                                right: after,
+                                ..Insets::default()
+                            })
+                            .offset(s.group_pad_h, 0.0);
+                        items.push(Node::layer(vec![glyph]));
+                    }
                 }
                 Between::Connector { width, dot } => {
                     let gap = s.group_gap;
@@ -945,21 +1184,30 @@ pub fn compose(r: &Regions, size: Size, s: &Style, edge: Edge, measure: &dyn Tex
             paint,
         });
     }
-    if let Some(w) = s.bar_line {
-        let rect = match edge {
-            Edge::Top => Rect::new(0.0, size.h - w, size.w, w),
-            Edge::Bottom => Rect::new(0.0, 0.0, size.w, w),
-            Edge::Left => Rect::new(size.w - w, 0.0, w, size.h),
-            Edge::Right => Rect::new(0.0, 0.0, w, size.h),
+    if let Some(line) = s.bar_line {
+        // `border-style: double`: the outer and inner thirds.
+        let strokes: &[(f32, f32)] = if line.double {
+            &[(0.0, line.width / 3.0), (line.width * 2.0 / 3.0, line.width / 3.0)]
+        } else {
+            &[(0.0, line.width)]
         };
-        out.draws.push(Draw::Panel {
-            rect,
-            paint: Paint {
-                fill: Role::Line,
-                border: None,
-                radius: 0.0,
-            },
-        });
+        for &(from, w) in strokes {
+            // `from` is measured from the bar's side facing the desktop.
+            let rect = match edge {
+                Edge::Top => Rect::new(0.0, size.h - from - w, size.w, w),
+                Edge::Bottom => Rect::new(0.0, from, size.w, w),
+                Edge::Left => Rect::new(size.w - from - w, 0.0, w, size.h),
+                Edge::Right => Rect::new(from, 0.0, w, size.h),
+            };
+            out.draws.push(Draw::Panel {
+                rect,
+                paint: Paint {
+                    fill: line.color,
+                    border: None,
+                    radius: 0.0,
+                },
+            });
+        }
     }
     let mut add = |node: Node, place: &dyn Fn(Size) -> Point| {
         let laid = layout(&node, Point::default(), measure);
@@ -1017,7 +1265,11 @@ pub fn compose(r: &Regions, size: Size, s: &Style, edge: Edge, measure: &dyn Tex
     // then it moves aside, a group gap from that end's group.
     let lowest = length(&start).map_or(pad, |l| pad + l + gap);
     let highest = length(&end).map_or(main - pad, |l| main - pad - l - gap);
-    let center_at = ((main - center_len) / 2.0).min(highest - center_len).max(lowest);
+    let center_at = if s.arrangement == Arrangement::Between {
+        (lowest + (highest - lowest - center_len) / 2.0).max(lowest)
+    } else {
+        ((main - center_len) / 2.0).min(highest - center_len).max(lowest)
+    };
     if let Some(n) = start {
         add(n, &|sz| pos(pad, sz));
     }
@@ -1349,10 +1601,216 @@ mod tests {
                 assert!(apart(media, clock), "{look:?}: media {media:?} over clock {clock:?}");
             }
             if s.title {
-                let title = text_rect(&l, "Uzun");
+                // Izgara writes it in capitals.
+                let start = if s.title_typo.caps {
+                    tr.upper("Uzun")
+                } else {
+                    "Uzun".to_string()
+                };
+                let title = text_rect(&l, &start);
                 assert!(apart(title, clock), "{look:?}: title over clock");
             }
         }
+    }
+
+    fn panels(l: &Layout) -> Vec<(Rect, Paint)> {
+        l.draws
+            .iter()
+            .filter_map(|d| match d {
+                Draw::Panel { rect, paint } => Some((*rect, *paint)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn spec_of<'a>(l: &'a Layout, starts: &str) -> &'a TextSpec {
+        l.draws
+            .iter()
+            .find_map(|d| match d {
+                Draw::Text { spec, .. } if spec.plain().starts_with(starts) => Some(spec),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no text starting with {starts}"))
+    }
+
+    fn workspace_rect(l: &Layout, n: u32) -> Rect {
+        l.hits
+            .iter()
+            .find(|(_, h)| h.module == hit::WORKSPACE && h.value == n)
+            .map(|(r, _)| *r)
+            .expect("workspace drawn")
+    }
+
+    /// `.screen[data-dir="j"]`: Roman numerals, the active one underlined in the accent;
+    /// the date and the title in italics, the title's own part upright; a `·` between
+    /// groups; a 3 px double rule (two 1 px lines) on the side facing the desktop.
+    #[test]
+    fn defter_writes_roman_numerals_in_italics_under_a_double_rule() {
+        let tr = I18n::new(Lang::Tr);
+        let d = data(&tr);
+        let l = render_look(Look::Defter, &d, &tr);
+        let t = texts(&l);
+        for n in ["I", "II", "III"] {
+            assert!(t.iter().any(|s| s == n), "{n} in {t:?}");
+        }
+        assert!(t.iter().any(|s| s == GROUP_GLYPH), "{t:?}");
+        assert!(spec_of(&l, &d.date).spans[0].italic);
+        let title = spec_of(&l, "MilvaScene");
+        assert!(!title.spans[0].italic && title.spans[1].italic);
+        let active = workspace_rect(&l, 1);
+        let line = panels(&l)
+            .into_iter()
+            .find(|(r, p)| p.fill == Role::AccentFill && r.h == 2.0)
+            .expect("the active numeral's line")
+            .0;
+        assert!((line.bottom() - (active.bottom() - 2.0)).abs() < 0.01);
+        assert!((line.x - (active.x + 6.0)).abs() < 0.01 && (line.right() - (active.right() - 6.0)).abs() < 0.01);
+        let h = thickness(Look::Defter, false);
+        let rule: Vec<Rect> = panels(&l)
+            .into_iter()
+            .filter(|(r, p)| p.fill == Role::Line && r.w == 1892.0)
+            .map(|(r, _)| r)
+            .collect();
+        assert_eq!(
+            rule,
+            vec![
+                Rect::new(0.0, h - 1.0, 1892.0, 1.0),
+                Rect::new(0.0, h - 3.0, 1892.0, 1.0)
+            ]
+        );
+        // No `·` down a side bar.
+        let side = render_look(
+            Look::Defter,
+            &BarData {
+                edge: Edge::Left,
+                ..data(&tr)
+            },
+            &tr,
+        );
+        assert!(!texts(&side).iter().any(|s| s == GROUP_GLYPH));
+    }
+
+    /// `.screen[data-dir="i"]`: capitals in the user's language, values as they are;
+    /// blocks the bar's height, the active one on the accent; faint rules between groups.
+    #[test]
+    fn izgara_sets_its_bar_in_heavy_capitals() {
+        let tr = I18n::new(Lang::Tr);
+        let d = data(&tr);
+        let l = render_look(Look::Izgara, &d, &tr);
+        let t = texts(&l);
+        assert!(t.contains(&tr.upper(&tr.tr("lbl-cpu"))), "{t:?}");
+        assert!(t.contains(&tr.upper(&d.date)), "{t:?}");
+        assert!(t.iter().any(|s| s.starts_with(&tr.upper("MilvaScene.cs"))), "{t:?}");
+        let cpu = spec_of(&l, &tr.upper(&tr.tr("lbl-cpu")));
+        assert!((cpu.spans[0].spacing - 0.1 * cpu.size).abs() < 1e-4);
+        let h = thickness(Look::Izgara, false);
+        let active = workspace_rect(&l, 1);
+        assert!(panels(&l)
+            .iter()
+            .any(|(r, p)| *r == active && p.fill == Role::AccentFill));
+        assert_eq!((active.w, active.h), (46.0, h));
+        assert!(panels(&l).iter().any(|(r, p)| p.fill == Role::Faint && r.w == 1.0));
+        assert!(panels(&l)
+            .iter()
+            .any(|(r, p)| p.fill == Role::Fg && r.h == 3.0 && r.y == h - 3.0));
+    }
+
+    /// `auto 1fr auto`: Izgara's centre sits in the middle of the room the sides leave,
+    /// not of the bar.
+    #[test]
+    fn izgara_centres_the_clock_between_start_and_end() {
+        let s = Style::of(Look::Izgara);
+        let block = |w: f32, fill: Role| {
+            Node::spacer(w, 10.0).paint(Paint {
+                fill,
+                border: None,
+                radius: 0.0,
+            })
+        };
+        let r = Regions {
+            start: vec![block(300.0, Role::Fg)],
+            center: vec![block(100.0, Role::Accent)],
+            end: vec![block(100.0, Role::Dim)],
+            apps: None,
+        };
+        let size = Size { w: 1892.0, h: 52.0 };
+        let l = compose(&r, size, &s, Edge::Top, &Fake);
+        let centre = panels(&l).into_iter().find(|(_, p)| p.fill == Role::Accent).unwrap().0;
+        assert!((centre.x - (300.0 + (1892.0 - 300.0 - 100.0 - 100.0) / 2.0)).abs() < 0.01);
+        // Elsewhere it stays in the middle of the bar.
+        let l = compose(&r, size, &Style::of(Look::Ada), Edge::Top, &Fake);
+        let centre = panels(&l).into_iter().find(|(_, p)| p.fill == Role::Accent).unwrap().0;
+        assert!((centre.x - (1892.0 - 100.0) / 2.0).abs() < 0.01);
+    }
+
+    /// `.screen[data-dir="h"]`: the apps as tasks with their names, the focused one on
+    /// the selection surface with the accent's tick; tabs with a busy bar inside; the
+    /// time over the date at the trailing end; names hidden down a side bar.
+    #[test]
+    fn pano_lists_the_apps_as_tasks() {
+        let tr = I18n::new(Lang::Tr);
+        let app = |image, label: &str, focused| AppIcon {
+            label: label.into(),
+            image,
+            running: true,
+            focused,
+            grow: 0.0,
+            shift: (0.0, 0.0),
+        };
+        let d = BarData {
+            edge: Edge::Bottom,
+            apps: vec![app(1, "Visual Studio Code", true), app(2, "Notes", false)],
+            ..data(&tr)
+        };
+        let l = render_look(Look::Pano, &d, &tr);
+        let t = texts(&l);
+        assert!(
+            t.contains(&"Visual Studio Code".to_string()) && t.contains(&"Notes".to_string()),
+            "{t:?}"
+        );
+        let tasks: Vec<Rect> = l
+            .hits
+            .iter()
+            .filter(|(_, h)| h.module == hit::APP)
+            .map(|(r, _)| *r)
+            .collect();
+        assert_eq!(tasks.len(), 2);
+        assert_eq!(tasks[0].h, 36.0);
+        assert!(panels(&l)
+            .iter()
+            .any(|(r, p)| *r == tasks[0] && p.fill == Role::SurfaceSel));
+        let tick = panels(&l)
+            .into_iter()
+            .find(|(r, p)| p.fill == Role::AccentFill && (r.w, r.h) == (18.0, 3.0))
+            .expect("the focused task's tick")
+            .0;
+        assert!((tick.bottom() - (tasks[0].bottom() - 2.0)).abs() < 0.01);
+        assert!(!panels(&l)
+            .iter()
+            .any(|(r, p)| *r == tasks[1] && p.fill == Role::SurfaceSel));
+        // The busy, inactive tab's bar sits 3 px up inside it.
+        let tab = workspace_rect(&l, 2);
+        let busy = panels(&l)
+            .into_iter()
+            .find(|(r, p)| p.fill == Role::Dim && (r.w, r.h) == (8.0, 2.0))
+            .expect("a busy mark")
+            .0;
+        assert!((busy.bottom() - (tab.bottom() - 3.0)).abs() < 0.01 && tab.h == 26.0);
+        // The clock: the time over the date, both ending at the bar's trailing end.
+        let time = text_rect(&l, "20:31");
+        let date = text_rect(&l, &d.date);
+        assert!(time.y < date.y && (time.right() - date.right()).abs() < 0.01);
+        assert!(time.right() > 1892.0 - 6.0 - 8.0 - 0.01, "the clock comes last");
+        // The all-apps button stands for its accent start button.
+        assert!(l
+            .draws
+            .iter()
+            .any(|d| matches!(d, Draw::Icon { spec, .. } if spec.name == "app" && spec.color == Role::Accent)));
+        let side = render_look(Look::Pano, &BarData { edge: Edge::Left, ..d }, &tr);
+        assert!(
+            !texts(&side).contains(&"Notes".to_string()),
+            "names hidden on a side bar"
+        );
     }
 
     /// Asked for by the user (macOS's dock): a dragged or sliding app's picture is drawn
@@ -1361,6 +1819,7 @@ mod tests {
     fn a_shifted_apps_picture_moves_and_its_place_stays() {
         let tr = I18n::new(Lang::Tr);
         let icon = |shift| AppIcon {
+            label: String::new(),
             image: 31,
             running: true,
             focused: false,
@@ -1408,6 +1867,7 @@ mod tests {
         let d = BarData {
             apps: vec![
                 AppIcon {
+                    label: String::new(),
                     image: 21,
                     running: true,
                     focused: true,
@@ -1415,6 +1875,7 @@ mod tests {
                     shift: (0.0, 0.0),
                 },
                 AppIcon {
+                    label: String::new(),
                     image: 22,
                     running: false,
                     focused: false,
@@ -1499,6 +1960,7 @@ mod tests {
     fn the_clock_never_covers_the_apps_on_a_side_bar() {
         let tr = I18n::new(Lang::Tr);
         let icon = AppIcon {
+            label: String::new(),
             image: 31,
             running: false,
             focused: false,
@@ -1507,7 +1969,7 @@ mod tests {
         };
         let d = BarData {
             edge: Edge::Left,
-            apps: vec![icon; 16],
+            apps: vec![icon.clone(); 16],
             ..data(&tr)
         };
         let overlaps = |a: &Rect, b: &Rect| a.x < b.right() && b.x < a.right() && a.y < b.bottom() && b.y < a.bottom();
@@ -2058,7 +2520,7 @@ mod tests {
             main: "MilvaScene.cs".into(),
             rest: "OledSaver".into(),
         };
-        let spans = |look| match title(&t, &Style::of(look)).kind {
+        let spans = |look| match title(&t, &Style::of(look), &I18n::new(Lang::Tr)).kind {
             Kind::Text(spec) => spec.spans,
             _ => unreachable!("the title is text"),
         };
@@ -2069,7 +2531,9 @@ mod tests {
             main: "Notes".into(),
             rest: String::new(),
         };
-        assert!(matches!(title(&alone, &Style::of(Look::Rihtim)).kind, Kind::Text(s) if s.spans[0].after == 0.0));
+        assert!(
+            matches!(title(&alone, &Style::of(Look::Rihtim), &I18n::new(Lang::Tr)).kind, Kind::Text(s) if s.spans[0].after == 0.0)
+        );
     }
 
     /// DECISIONS D28: the strip is drawn first, over the whole window, in the desk colour;

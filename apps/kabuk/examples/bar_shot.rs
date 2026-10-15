@@ -19,6 +19,9 @@ use kabuk_theme::Mode;
 use kabuk_ui::geom::{Scale, Size};
 use kabuk_ui::render::Gpu;
 
+/// The design page's window names (`winNames`).
+const TASK_NAMES: [&str; 4] = ["MilvaScene.cs", "pwsh", "Milvaion", "Notes"];
+
 fn arg(name: &str) -> Option<String> {
     let args: Vec<String> = std::env::args().collect();
     args.iter()
@@ -42,7 +45,7 @@ fn square(gpu: &Gpu, key: u64) -> u64 {
 fn main() {
     let out = std::env::args().nth(1).unwrap_or_else(|| "bar.png".into());
     let code = arg("--look").unwrap_or_else(|| "a".into());
-    let look = Look::ALL.into_iter().find(|l| l.code() == code).expect("look a-g");
+    let look = Look::ALL.into_iter().find(|l| l.code() == code).expect("look a-j");
     let mode = if arg("--mode").as_deref() == Some("light") {
         Mode::Light
     } else {
@@ -83,7 +86,7 @@ fn main() {
     let notice = arg("--toast").map(|t| {
         let (title, sub) = t.split_once('|').unwrap_or((t.as_str(), ""));
         let s = kabuk::notify::style::NotifyStyle::of(look);
-        kabuk::notify::view::toast(title, sub, "check", &s, 1.0)
+        kabuk::notify::view::toast(title, sub, "check", &s, 1.0, &i18n)
     });
     let volume = arg("--osd").and_then(|v| v.parse::<u8>().ok()).map(|p| {
         let s = kabuk::notify::style::NotifyStyle::of(look);
@@ -205,6 +208,12 @@ fn main() {
         notif_count: arg("--notif").and_then(|v| v.parse().ok()),
         apps: (0..number("--apps"))
             .map(|i| AppIcon {
+                // The design's window names, which Pano's task list shows.
+                label: if style.tasks.is_some() {
+                    TASK_NAMES[i % TASK_NAMES.len()].to_string()
+                } else {
+                    String::new()
+                },
                 image: square(&gpu, 200 + i as u64),
                 running: i % 3 != 2,
                 focused: i == 0,

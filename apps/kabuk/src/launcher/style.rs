@@ -6,6 +6,8 @@ use kabuk_core::config::Look;
 use kabuk_ui::geom::Insets;
 use kabuk_ui::node::{FontRole, Paint, Role};
 
+pub use crate::bar::style::Typo;
+
 /// Where the launcher opens (`.launcher` positions).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Place {
@@ -20,6 +22,21 @@ pub enum Place {
     /// Konsol: centred, `gap` from a horizontal bar (above a bottom one, below a top
     /// one), or `bottom` above the bottom edge beside a vertical bar.
     Prompt { gap: f32, bottom: f32 },
+    /// Pano: like a start menu, `gap` from the bar's start corner; beside a vertical bar
+    /// at the bottom.
+    Menu { gap: f32 },
+    /// Izgara: against the bar at its start corner; beside a vertical bar at the top.
+    Flush,
+}
+
+/// How a line is drawn (CSS `border-style`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stroke {
+    Solid,
+    /// Two lines, each a third of the width, a third apart (Defter's input).
+    Double,
+    /// Dots as wide as the line, as far apart (Defter's rows).
+    Dotted,
 }
 
 /// A one-sided line between parts (CSS `border-bottom` / `border-top`).
@@ -27,6 +44,17 @@ pub enum Place {
 pub struct Rule {
     pub color: Role,
     pub width: f32,
+    pub stroke: Stroke,
+}
+
+impl Rule {
+    pub const fn solid(color: Role, width: f32) -> Rule {
+        Rule {
+            color,
+            width,
+            stroke: Stroke::Solid,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -36,6 +64,7 @@ pub struct Foot {
     pub size: f32,
     /// Konsol: a line between the hints and the list.
     pub rule: Option<Rule>,
+    pub typo: Typo,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -44,7 +73,7 @@ pub struct LauncherStyle {
     pub place: Place,
     pub width: f32,
     pub panel: Option<Paint>,
-    pub panel_pad: f32,
+    pub panel_pad: Insets,
     /// Between the input, the list and the hints (Etkinlik: separate pieces).
     pub section_gap: f32,
 
@@ -57,6 +86,9 @@ pub struct LauncherStyle {
     pub input_size: f32,
     pub input_font: FontRole,
     pub input_weight: u16,
+    pub input_typo: Typo,
+    /// The search icon's colour (`.l-in { color }`).
+    pub input_icon: Role,
     pub input_gap: f32,
     /// Devre and Konsol: a `›` prompt (colour, size, weight) instead of the search icon.
     pub prompt: Option<(Role, f32, u16)>,
@@ -74,8 +106,12 @@ pub struct LauncherStyle {
     pub icon_column: f32,
     pub icon: f32,
     pub title_size: f32,
+    pub title_weight: u16,
     pub sub_size: f32,
+    pub sub_typo: Typo,
     pub kind_size: f32,
+    pub kind_weight: u16,
+    pub kind_typo: Typo,
     /// Konsol: the subtitle follows the title on the same line, this far after it.
     pub sub_inline: Option<f32>,
     /// Çizgi: a line under every row.
@@ -109,6 +145,9 @@ impl LauncherStyle {
             Look::Konsol => konsol(),
             Look::Rihtim => rihtim(),
             Look::Etkinlik => etkinlik(),
+            Look::Pano => pano(),
+            Look::Izgara => izgara(),
+            Look::Defter => defter(),
         }
     }
 }
@@ -133,18 +172,17 @@ fn ada() -> LauncherStyle {
             border: Some((Role::SurfaceLine, 1.0)),
             radius: 22.0,
         }),
-        panel_pad: 10.0,
+        panel_pad: Insets::all(10.0),
         section_gap: 0.0,
         input_pad: insets(10.0, 12.0, 14.0, 12.0),
-        input_rule: Some(Rule {
-            color: Role::Line,
-            width: 1.0,
-        }),
+        input_rule: Some(Rule::solid(Role::Line, 1.0)),
         input_panel: None,
         input_height: None,
         input_size: 21.0,
         input_font: FontRole::Ui,
         input_weight: 400,
+        input_typo: Typo::PLAIN,
+        input_icon: Role::Dim,
         input_gap: 12.0,
         prompt: None,
         caret: 1.5,
@@ -158,8 +196,12 @@ fn ada() -> LauncherStyle {
         icon_column: 22.0,
         icon: 16.0,
         title_size: 14.0,
+        title_weight: 400,
         sub_size: 12.5,
+        sub_typo: Typo::PLAIN,
         kind_size: 12.0,
+        kind_weight: 400,
+        kind_typo: Typo::PLAIN,
         sub_inline: None,
         row_rule: None,
         row_border: None,
@@ -178,6 +220,7 @@ fn ada() -> LauncherStyle {
             gap: 16.0,
             size: 12.0,
             rule: None,
+            typo: Typo::PLAIN,
         }),
     }
 }
@@ -193,7 +236,7 @@ fn cizgi() -> LauncherStyle {
             border: None,
             radius: 0.0,
         }),
-        panel_pad: 0.0,
+        panel_pad: Insets::all(0.0),
         input_pad: insets(0.0, 28.0, 0.0, 28.0),
         input_height: Some(64.0),
         input_size: 24.0,
@@ -202,10 +245,7 @@ fn cizgi() -> LauncherStyle {
         columns: 2,
         row_pad: insets(12.0, 14.0, 12.0, 14.0),
         row_radius: 0.0,
-        row_rule: Some(Rule {
-            color: Role::SurfaceSel,
-            width: 1.0,
-        }),
+        row_rule: Some(Rule::solid(Role::SurfaceSel, 1.0)),
         // Matches keep the text colour and are underlined.
         mark: Role::Fg,
         mark_underline: true,
@@ -231,12 +271,9 @@ fn devre() -> LauncherStyle {
             border: Some((Role::Accent, 1.5)),
             radius: 6.0,
         }),
-        panel_pad: 0.0,
+        panel_pad: Insets::all(0.0),
         input_pad: insets(16.0, 18.0, 16.0, 18.0),
-        input_rule: Some(Rule {
-            color: Role::Trace,
-            width: 1.5,
-        }),
+        input_rule: Some(Rule::solid(Role::Trace, 1.5)),
         input_size: 20.0,
         input_font: FontRole::Num,
         prompt: Some((Role::Accent, 22.0, 700)),
@@ -261,7 +298,7 @@ fn ray() -> LauncherStyle {
             border: Some((Role::Line, 1.0)),
             radius: 20.0,
         }),
-        panel_pad: 14.0,
+        panel_pad: Insets::all(14.0),
         input_pad: insets(8.0, 10.0, 16.0, 10.0),
         list_pad: insets(10.0, 0.0, 0.0, 0.0),
         list_gap: 4.0,
@@ -285,7 +322,7 @@ fn konsol() -> LauncherStyle {
             border: Some((Role::Accent, 1.0)),
             radius: 0.0,
         }),
-        panel_pad: 0.0,
+        panel_pad: Insets::all(0.0),
         input_pad: insets(12.0, 16.0, 12.0, 16.0),
         input_size: 17.0,
         prompt: Some((Role::Accent, 18.0, 400)),
@@ -300,10 +337,7 @@ fn konsol() -> LauncherStyle {
         marker: Some(16.0),
         foot: Some(Foot {
             pad: insets(8.0, 16.0, 8.0, 16.0),
-            rule: Some(Rule {
-                color: Role::Line,
-                width: 1.0,
-            }),
+            rule: Some(Rule::solid(Role::Line, 1.0)),
             ..a.foot.expect("the shared rules have hints")
         }),
         ..a
@@ -321,12 +355,9 @@ fn rihtim() -> LauncherStyle {
             border: Some((Role::GlassLine, 1.0)),
             radius: 16.0,
         }),
-        panel_pad: 0.0,
+        panel_pad: Insets::all(0.0),
         input_pad: insets(16.0, 18.0, 16.0, 18.0),
-        input_rule: Some(Rule {
-            color: Role::GlassLine,
-            width: 1.0,
-        }),
+        input_rule: Some(Rule::solid(Role::GlassLine, 1.0)),
         input_size: 24.0,
         input_weight: 300,
         list_pad: Insets::all(6.0),
@@ -349,7 +380,7 @@ fn etkinlik() -> LauncherStyle {
         place: Place::Centered { top: 120.0 },
         width: 640.0,
         panel: None,
-        panel_pad: 0.0,
+        panel_pad: Insets::all(0.0),
         section_gap: 16.0,
         input_pad: insets(12.0, 20.0, 12.0, 20.0),
         input_rule: None,
@@ -370,6 +401,133 @@ fn etkinlik() -> LauncherStyle {
         icon_color: Role::Accent,
         sel_kind: None,
         foot: None,
+        ..a
+    }
+}
+
+/// `.screen[data-dir="h"] .launcher`: a start menu over the bar's corner.
+fn pano() -> LauncherStyle {
+    let a = ada();
+    LauncherStyle {
+        look: Look::Pano,
+        place: Place::Menu { gap: 8.0 },
+        width: 600.0,
+        panel: Some(Paint {
+            fill: Role::Surface,
+            border: Some((Role::SurfaceLine, 1.0)),
+            radius: 10.0,
+        }),
+        panel_pad: Insets::all(12.0),
+        input_pad: insets(9.0, 12.0, 9.0, 12.0),
+        // `border-bottom: 2px solid var(--accent-s)` under the box's own border.
+        input_rule: Some(Rule::solid(Role::Accent, 2.0)),
+        input_panel: Some(Paint {
+            fill: Role::SurfaceAlt,
+            border: Some((Role::SurfaceLine, 1.0)),
+            radius: 6.0,
+        }),
+        input_size: 15.0,
+        list_pad: insets(10.0, 0.0, 0.0, 0.0),
+        list_gap: 2.0,
+        row_pad: insets(8.0, 10.0, 8.0, 10.0),
+        row_radius: 6.0,
+        icon_color: Role::Accent,
+        sel_kind: None,
+        ..a
+    }
+}
+
+/// `.screen[data-dir="i"] .launcher`: a heavy block against the bar.
+fn izgara() -> LauncherStyle {
+    let a = ada();
+    let rule = |color| Rule::solid(color, 1.0);
+    LauncherStyle {
+        look: Look::Izgara,
+        place: Place::Flush,
+        width: 820.0,
+        panel: Some(Paint {
+            fill: Role::Desk,
+            border: Some((Role::Fg, 3.0)),
+            radius: 0.0,
+        }),
+        panel_pad: Insets::all(0.0),
+        input_pad: insets(20.0, 24.0, 20.0, 24.0),
+        input_rule: Some(Rule::solid(Role::Fg, 3.0)),
+        input_size: 40.0,
+        input_weight: 900,
+        input_typo: Typo::spaced(-0.03),
+        input_icon: Role::Fg,
+        list_pad: Insets::all(0.0),
+        list_gap: 0.0,
+        row_pad: insets(14.0, 24.0, 14.0, 24.0),
+        row_radius: 0.0,
+        row_rule: Some(rule(Role::Faint)),
+        title_weight: 600,
+        kind_size: 11.0,
+        kind_weight: 700,
+        kind_typo: Typo::caps(0.1),
+        // Matches keep the text colour and are underlined.
+        mark: Role::Fg,
+        mark_underline: true,
+        sel_fill: Role::Fg,
+        sel_text: Some(Role::Desk),
+        sel_kind: Some(Role::Desk),
+        foot: Some(Foot {
+            pad: insets(12.0, 24.0, 12.0, 24.0),
+            size: 11.0,
+            typo: Typo::caps(0.08),
+            ..a.foot.expect("the shared rules have hints")
+        }),
+        ..a
+    }
+}
+
+/// `.screen[data-dir="j"] .launcher`: a page of a notebook, centred.
+fn defter() -> LauncherStyle {
+    let a = ada();
+    LauncherStyle {
+        look: Look::Defter,
+        place: Place::Centered { top: 200.0 },
+        width: 720.0,
+        panel: Some(Paint {
+            fill: Role::Surface,
+            border: Some((Role::SurfaceLine, 1.0)),
+            radius: 3.0,
+        }),
+        panel_pad: insets(26.0, 34.0, 18.0, 34.0),
+        input_pad: insets(0.0, 0.0, 12.0, 0.0),
+        input_rule: Some(Rule {
+            color: Role::SurfaceLine,
+            width: 3.0,
+            stroke: Stroke::Double,
+        }),
+        input_size: 30.0,
+        input_typo: Typo::italic(),
+        list_pad: insets(6.0, 0.0, 0.0, 0.0),
+        list_gap: 0.0,
+        row_pad: insets(11.0, 4.0, 11.0, 4.0),
+        row_radius: 0.0,
+        row_rule: Some(Rule {
+            color: Role::SurfaceLine,
+            width: 1.0,
+            stroke: Stroke::Dotted,
+        }),
+        title_size: 16.0,
+        sub_size: 14.0,
+        sub_typo: Typo::italic(),
+        kind_size: 14.0,
+        kind_typo: Typo::small_caps(0.05),
+        // `mark { color: var(--fg-s); text-decoration-color: var(--accent-s) }`: one
+        // colour per letter here, the accent's.
+        mark: Role::Accent,
+        mark_underline: true,
+        sel_kind: None,
+        foot: Some(Foot {
+            pad: insets(12.0, 4.0, 0.0, 4.0),
+            size: 13.0,
+            typo: Typo::italic(),
+            ..a.foot.expect("the shared rules have hints")
+        }),
         ..a
     }
 }

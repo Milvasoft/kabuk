@@ -142,7 +142,7 @@ impl Shared {
     fn show_toast(&mut self, n: Notice) {
         let style = NotifyStyle::of(self.look.style.look);
         let (title, sub) = n.words(&self.i18n);
-        let node = notify::view::toast(&title, &sub, n.icon(), &style, self.look.style.text_scale);
+        let node = notify::view::toast(&title, &sub, n.icon(), &style, self.look.style.text_scale, &self.i18n);
         let Some((_, monitor, bar)) = self.notice_monitor() else {
             return;
         };

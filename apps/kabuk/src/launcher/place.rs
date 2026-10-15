@@ -87,6 +87,18 @@ pub fn position(style: &LauncherStyle, monitor: Size, bar: Option<BarSpace>, siz
             Some(Edge::Bottom) => (centre_x, monitor.h - reserved - gap - size.h),
             _ => (centre_x, monitor.h - bottom - size.h),
         },
+        Place::Menu { gap } => match edge {
+            Some(Edge::Bottom) => (distance + gap, monitor.h - reserved - gap - size.h),
+            Some(Edge::Left) => (reserved + gap, monitor.h - distance - gap - size.h),
+            Some(Edge::Right) => (monitor.w - reserved - gap - size.w, monitor.h - distance - gap - size.h),
+            Some(Edge::Top) | None => (distance + gap, reserved + gap),
+        },
+        Place::Flush => match edge {
+            Some(Edge::Bottom) => (distance, monitor.h - reserved - size.h),
+            Some(Edge::Left) => (reserved, distance),
+            Some(Edge::Right) => (monitor.w - reserved - size.w, distance),
+            Some(Edge::Top) | None => (distance, reserved),
+        },
     };
     Point { x, y }
 }
@@ -170,6 +182,42 @@ mod tests {
             at(Look::Ray, bar(Edge::Right, 12.0, 58.0), SIZE),
             (2048.0 - 82.0 - 700.0, 12.0)
         );
+    }
+
+    /// `.screen[data-dir="h"] .launcher`: 8 px from the bar's start corner, at the bottom
+    /// beside a vertical bar.
+    #[test]
+    fn pano_opens_like_a_start_menu() {
+        let bottom = bar(Edge::Bottom, 0.0, 48.0);
+        assert_eq!(at(Look::Pano, bottom, SIZE), (8.0, 1152.0 - 48.0 - 8.0 - 380.0));
+        assert_eq!(at(Look::Pano, bar(Edge::Top, 0.0, 48.0), SIZE), (8.0, 56.0));
+        assert_eq!(
+            at(Look::Pano, bar(Edge::Left, 0.0, 64.0), SIZE),
+            (72.0, 1152.0 - 8.0 - 380.0)
+        );
+        assert_eq!(
+            at(Look::Pano, bar(Edge::Right, 0.0, 64.0), SIZE),
+            (2048.0 - 72.0 - 700.0, 1152.0 - 8.0 - 380.0)
+        );
+        let s = shape(&LauncherStyle::of(Look::Pano), MONITOR, bottom);
+        assert_eq!((s.width, s.height, s.bottom_up), (600.0, None, false));
+    }
+
+    /// `.screen[data-dir="i"] .launcher`: against the bar, at the top beside a side bar.
+    #[test]
+    fn izgara_opens_against_its_bar() {
+        assert_eq!(at(Look::Izgara, bar(Edge::Top, 0.0, 52.0), SIZE), (0.0, 52.0));
+        assert_eq!(
+            at(Look::Izgara, bar(Edge::Bottom, 0.0, 52.0), SIZE),
+            (0.0, 1152.0 - 52.0 - 380.0)
+        );
+        assert_eq!(at(Look::Izgara, bar(Edge::Left, 0.0, 76.0), SIZE), (76.0, 0.0));
+        assert_eq!(
+            at(Look::Izgara, bar(Edge::Right, 0.0, 76.0), SIZE),
+            (2048.0 - 76.0 - 700.0, 0.0)
+        );
+        // Defter is centred, 200 px down.
+        assert_eq!(at(Look::Defter, bar(Edge::Top, 0.0, 50.0), SIZE), (674.0, 200.0));
     }
 
     #[test]

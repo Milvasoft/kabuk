@@ -8,16 +8,24 @@ use super::style::{NotifyStyle, ToastPlace};
 use crate::launcher::place::BarSpace;
 
 /// The notice's top-left corner: under a top bar (or `pad` from the top), `pad` from
-/// the right edge or beside a right-hand bar; Etkinlik centred.
+/// the right edge or beside a right-hand bar; Etkinlik centred; Pano's above a bottom
+/// bar.
 pub fn toast(s: &NotifyStyle, monitor: Size, bar: Option<BarSpace>, pad: f32, size: Size) -> Point {
     let reserved = |edge: Edge| bar.filter(|b| b.edge == edge).map_or(0.0, |b| b.reserved);
     let top = match reserved(Edge::Top) {
         0.0 => pad + s.toast_margin,
         r => r + s.toast_margin,
     };
+    if let (ToastPlace::NearBar, Some(b)) = (s.toast_place, bar.filter(|b| b.edge == Edge::Bottom)) {
+        // `bottom: calc(var(--bar-h) + 12px); right: 12px`.
+        return Point {
+            x: monitor.w - b.distance - s.toast_margin - size.w,
+            y: monitor.h - b.reserved - s.toast_margin - size.h,
+        };
+    }
     let x = match s.toast_place {
         ToastPlace::Centre => (monitor.w - size.w) / 2.0,
-        ToastPlace::Corner => {
+        ToastPlace::Corner | ToastPlace::NearBar => {
             let right = match reserved(Edge::Right) {
                 0.0 => pad.max(s.toast_margin),
                 r => r + s.toast_margin,
@@ -72,6 +80,30 @@ mod tests {
         );
         let g = NotifyStyle::of(Look::Etkinlik);
         assert_eq!(toast(&g, MON, bar(Edge::Top, 32.0), 16.0, T).x, 770.0);
+    }
+
+    /// `.screen[data-dir="h"][data-pos="bottom"] .toast`: above the bar at the right;
+    /// with the bar elsewhere, where every look puts it.
+    #[test]
+    fn pano_notices_sit_above_a_bottom_bar() {
+        let h = NotifyStyle::of(Look::Pano);
+        let bottom = Some(BarSpace {
+            edge: Edge::Bottom,
+            distance: 0.0,
+            reserved: 48.0,
+        });
+        assert_eq!(
+            toast(&h, MON, bottom, 10.0, T),
+            Point {
+                x: 1920.0 - 12.0 - 380.0,
+                y: 1080.0 - 48.0 - 12.0 - 70.0
+            }
+        );
+        let a = NotifyStyle::of(Look::Ada);
+        assert_eq!(
+            toast(&h, MON, bar(Edge::Top, 48.0), 10.0, T),
+            toast(&a, MON, bar(Edge::Top, 48.0), 10.0, T)
+        );
     }
 
     #[test]

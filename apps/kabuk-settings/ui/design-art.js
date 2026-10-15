@@ -2,10 +2,10 @@
 // The page's own drawing code, run with the settings page's `t` and `escapeHtml`.
 "use strict";
 window.kabukDesignArt = function (t, escapeHtml) {
-  const looks = ["a", "b", "c", "d", "e", "f", "g"];
-  const lookDefaults = { a: "#8fd3ff", b: "#ecebe7", c: "#fbc419", d: "#ff8f6b", e: "#ff7eb6", f: "#0a84ff", g: "#3584e4" };
-  const lookGaps = { a: 14, b: 1, c: 12, d: 12, e: 12, f: 10, g: 10 };
-  const lookPos = { a: "top", b: "top", c: "top", d: "left", e: "bottom", f: "top", g: "top" };
+  const looks = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"];
+  const lookDefaults = { a: "#8fd3ff", b: "#ecebe7", c: "#fbc419", d: "#ff8f6b", e: "#ff7eb6", f: "#0a84ff", g: "#3584e4", h: "#4fd1c5", i: "#ff4b3e", j: "#a8d5a2", k: "#7b8cff" };
+  const lookGaps = { a: 14, b: 1, c: 12, d: 12, e: 12, f: 10, g: 10, h: 8, i: 1, j: 18, k: 6 };
+  const lookPos = { a: "top", b: "top", c: "top", d: "left", e: "bottom", f: "top", g: "top", h: "bottom", i: "top", j: "top", k: "top" };
   const accentList = ["#8fd3ff", "#fbc419", "#7fe0b5", "#ff8f6b", "#b9a7ff", "#ff7eb6", "#ecebe7"];
 
   const seeded = (seed) => () => { seed = (seed + 0x6d2b79f5) | 0; let x = Math.imul(seed ^ (seed >>> 15), 1 | seed); x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x; return ((x ^ (x >>> 14)) >>> 0) / 4294967296; };
@@ -65,6 +65,14 @@ window.kabukDesignArt = function (t, escapeHtml) {
   miniLook.f = `<div style="position:absolute;left:0;right:0;top:0;height:9px;background:#1c1c1e;display:flex;align-items:center;gap:4px;padding:0 5px"><span style="width:5px;height:5px;border-radius:50%;border:1.5px solid #ddd"></span><span style="width:16px;height:2px;background:#ddd"></span><span style="flex:1"></span><span style="width:14px;height:2px;background:#888"></span></div>
         <div style="position:absolute;left:5px;right:5px;top:13px;bottom:20px;display:grid;grid-template-columns:1.3fr 1fr;grid-template-rows:1fr 1fr;gap:4px"><span style="grid-row:span 2;border:1px solid #3a3a3e;border-radius:4px;box-shadow:0 4px 8px #000"></span><span style="border:1px solid #2a2a2d;border-radius:4px"></span><span style="border:1px solid #2a2a2d;border-radius:4px"></span></div>
         <div style="position:absolute;left:50%;bottom:3px;transform:translateX(-50%);height:13px;padding:2px 3px;display:flex;gap:2px;background:#1c1c1e;border-radius:4px"><i style="width:9px;border-radius:2px;background:VAR"></i><i style="width:9px;border-radius:2px;background:#3a3a3c"></i><i style="width:9px;border-radius:2px;background:#2fc4b2"></i><i style="width:9px;border-radius:2px;background:#8e6cf7"></i></div>`;
+  miniLook.h = `<div style="position:absolute;left:5px;right:5px;top:5px;bottom:16px;display:grid;grid-template-columns:1.3fr 1fr;grid-template-rows:1fr 1fr;gap:3px"><span style="grid-row:span 2;border:1px solid VAR;border-radius:3px"></span><span style="border:1px solid #24282e;border-radius:3px"></span><span style="border:1px solid #24282e;border-radius:3px"></span></div>
+        <div style="position:absolute;left:0;right:0;bottom:0;height:12px;background:#121418;border-top:1px solid #262a30;display:flex;align-items:center;gap:3px;padding:0 4px"><i style="width:6px;height:6px;background:VAR"></i><i style="width:20px;height:7px;border-radius:2px;background:#1f232a;box-shadow:inset 0 -1px 0 VAR"></i><i style="width:16px;height:7px;border-radius:2px;background:#16191e"></i><i style="width:16px;height:7px;border-radius:2px;background:#16191e"></i><i style="flex:1"></i><i style="width:12px;height:2px;background:#a3a8b0"></i></div>`;
+  miniLook.i = `<div style="position:absolute;left:0;right:0;top:0;height:13px;border-bottom:2px solid #f4f2ee;display:flex;align-items:center;justify-content:space-between;padding-right:5px"><span style="display:flex;height:100%"><i style="width:11px;height:100%;background:VAR"></i><i style="width:11px"></i><i style="width:11px"></i></span><span style="width:20px;height:5px;background:#f4f2ee"></span></div>
+        <div style="position:absolute;left:0;right:0;top:15px;bottom:0;display:grid;grid-template-columns:1.3fr 1fr;grid-template-rows:1fr 1fr;gap:1px;background:#3a3833"><span style="grid-row:span 2;background:#000;box-shadow:inset 0 3px 0 VAR"></span><span style="background:#000"></span><span style="background:#000"></span></div>`;
+  miniLook.j = `<div style="position:absolute;left:0;right:0;top:0;height:12px;border-bottom:3px double #3a352c;display:flex;align-items:center;justify-content:space-between;padding:0 6px"><span style="font:italic 8px Newsreader,serif;color:#ece4d4">I <u style="text-decoration-color:VAR">II</u> III</span><span style="font:9px Newsreader,serif;color:#ece4d4">16:42</span><span style="width:16px;height:2px;background:#a59c8a"></span></div>
+        <div style="position:absolute;left:7px;right:7px;top:20px;bottom:7px;display:grid;grid-template-columns:1.3fr 1fr;grid-template-rows:1fr 1fr;gap:6px"><span style="grid-row:span 2;box-shadow:0 0 0 1px #3a352c, inset 0 6px 0 -4px VAR"></span><span style="box-shadow:0 0 0 1px #2a261f"></span><span style="box-shadow:0 0 0 1px #2a261f"></span></div>`;
+  miniLook.k = `<div style="position:absolute;left:0;right:0;top:0;height:12px;background:#1e1e23;box-shadow:inset 1px 1px 0 #4c4c56, inset -1px -1px 0 #000;display:flex;align-items:center;gap:2px;padding:0 3px"><i style="width:8px;height:7px;background:#2c2c34;box-shadow:inset 1px 1px 0 #000, inset -1px -1px 0 #4c4c56"></i><i style="width:8px;height:7px;background:#1e1e23;box-shadow:inset 1px 1px 0 #4c4c56, inset -1px -1px 0 #000"></i><i style="flex:1"></i><i style="width:18px;height:7px;background:#141418;box-shadow:inset 1px 1px 0 #000, inset -1px -1px 0 #4c4c56"></i></div>
+        <div style="position:absolute;left:4px;right:4px;top:16px;bottom:4px;display:grid;grid-template-columns:1.3fr 1fr;grid-template-rows:1fr 1fr;gap:3px"><span style="grid-row:span 2;background:#1e1e23;box-shadow:inset 1px 1px 0 #4c4c56, inset -1px -1px 0 #000;border-top:5px solid VAR"></span><span style="background:#1e1e23;box-shadow:inset 1px 1px 0 #4c4c56, inset -1px -1px 0 #000;border-top:5px solid #2c2c34"></span><span style="background:#1e1e23;box-shadow:inset 1px 1px 0 #4c4c56, inset -1px -1px 0 #000;border-top:5px solid #2c2c34"></span></div>`;
   miniLook.g = `<div style="position:absolute;left:0;right:0;top:0;height:10px;background:#000;display:flex;align-items:center;justify-content:space-between;padding:0 5px"><span style="display:flex;gap:2px;align-items:center"><i style="width:10px;height:2px;background:#ddd"></i><i style="width:7px;height:3px;border-radius:2px;background:VAR"></i><i style="width:3px;height:3px;border-radius:2px;background:#777"></i></span><span style="width:16px;height:2px;background:#ddd"></span><span style="width:12px;height:5px;border-radius:3px;background:#2e2e32"></span></div>
         <div style="position:absolute;left:5px;right:5px;top:14px;bottom:5px;display:grid;grid-template-columns:1.3fr 1fr;grid-template-rows:1fr 1fr;gap:4px"><span style="grid-row:span 2;border:1px solid #3a3a3a;border-radius:5px"></span><span style="border:1px solid #262626;border-radius:5px"></span><span style="border:1px solid #262626;border-radius:5px"></span></div>`;
   const saverArt = () => ({
@@ -77,7 +85,7 @@ window.kabukDesignArt = function (t, escapeHtml) {
      grid from the look's tokens, so they follow its mode and accent. Kabuk renders the
      same drawings into Windows' .ico files. Each look keeps its own character: Ada soft
      and filled, Çizgi hairlines, Devre traces and vias, Ray bold, Konsol square with a
-     block cursor, Rıhtım macOS-like, Etkinlik Adwaita-like. */
+     block cursor, Rıhtım macOS-like, Etkinlik Adwaita-like, Pano Windows-like, Izgara square and heavy, Defter fine pen, Piksel 90s chunky. */
   const SYS_ICONS = ["folder", "folderOpen", "drive", "pc", "binEmpty", "binFull", "text", "image", "audio", "video", "archive", "code", "pdf", "program", "other"];
   const sysIconLook = {
     a: { r: 3, sw: 1.6, solid: true, page: "surf-sel", ink: "dim" },
@@ -88,6 +96,12 @@ window.kabukDesignArt = function (t, escapeHtml) {
     // Rıhtım's and Etkinlik's pages are light in both modes, as on macOS and GNOME.
     f: { r: 2.5, sw: 1, solid: true, page: { dark: "fg-s", light: "surf" }, ink: "faint", soft: true },
     g: { r: 2.5, sw: 1, solid: true, page: { dark: "fg-s", light: "surf" }, ink: "faint", twoTone: true, roundPage: true },
+    // Pano: Windows 11-like, solid folders on light pages. Izgara: square, heavy outlines, colour only in the glyph.
+    h: { r: 1.5, sw: 1.2, solid: true, page: { dark: "fg-s", light: "surf" }, ink: "faint" },
+    i: { r: 0, sw: 2.2, solid: false, page: "", ink: "fg-s" },
+    // Defter: fine pen lines. Piksel: chunky filled pages with a block cursor, like 90s icons.
+    j: { r: 1, sw: 1.1, solid: false, page: "", ink: "fg-s" },
+    k: { r: 0, sw: 2, solid: true, page: "surf-sel", ink: "fg-s", block: true },
   };
   function systemIcon(kind, dir, mode) {
     const look = sysIconLook[dir] || sysIconLook.a;

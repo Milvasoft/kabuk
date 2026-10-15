@@ -14,7 +14,7 @@ const path = require("path");
 const root = path.resolve(__dirname, "..");
 const page = path.join(root, "docs", "design", "kabuk-tasarim.html");
 const outDir = path.join(root, "themes");
-const looks = ["a", "b", "c", "d", "e", "f", "g"];
+const looks = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"];
 
 function styleText(html) {
   const blocks = [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map((m) => m[1]);

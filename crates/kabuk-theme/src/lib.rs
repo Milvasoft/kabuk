@@ -1,4 +1,4 @@
-//! Theme tokens of the seven looks, generated from the design page into
+//! Theme tokens of the ten looks, generated from the design page into
 //! `themes/<code>.toml` by `tools/extract-themes.js` and embedded here.
 //!
 //! M1 provides token lookup (colours, sizes, fonts) per look and mode. The contrast
@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
-const SOURCES: [(&str, &str); 7] = [
+const SOURCES: [(&str, &str); 10] = [
     ("a", include_str!("../../../themes/a.toml")),
     ("b", include_str!("../../../themes/b.toml")),
     ("c", include_str!("../../../themes/c.toml")),
@@ -25,6 +25,9 @@ const SOURCES: [(&str, &str); 7] = [
     ("e", include_str!("../../../themes/e.toml")),
     ("f", include_str!("../../../themes/f.toml")),
     ("g", include_str!("../../../themes/g.toml")),
+    ("h", include_str!("../../../themes/h.toml")),
+    ("i", include_str!("../../../themes/i.toml")),
+    ("j", include_str!("../../../themes/j.toml")),
 ];
 
 /// Straight (not premultiplied) sRGB colour, 0-255 channels and 0-1 alpha.
@@ -310,7 +313,7 @@ mod tests {
 
     #[test]
     fn every_look_loads_in_both_modes() {
-        for code in ["a", "b", "c", "d", "e", "f", "g"] {
+        for code in ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"] {
             let t = theme(code).unwrap_or_else(|| panic!("theme {code}"));
             assert_eq!(t.code, code);
             for mode in [Mode::Dark, Mode::Light] {

@@ -285,6 +285,16 @@ impl TextEngine {
                 if span.underline {
                     layout.SetUnderline(true, range).ctx("underline")?;
                 }
+                if span.italic {
+                    layout.SetFontStyle(DWRITE_FONT_STYLE_ITALIC, range).ctx("italic")?;
+                }
+                if span.spacing != 0.0 && len > 0 {
+                    layout
+                        .cast::<IDWriteTextLayout1>()
+                        .ctx("text layout 1")?
+                        .SetCharacterSpacing(0.0, span.spacing, 0.0, range)
+                        .ctx("letter spacing")?;
+                }
                 if span.after > 0.0 && len > 0 {
                     let last = DWRITE_TEXT_RANGE {
                         startPosition: start + len - 1,
@@ -293,7 +303,7 @@ impl TextEngine {
                     layout
                         .cast::<IDWriteTextLayout1>()
                         .ctx("text layout 1")?
-                        .SetCharacterSpacing(0.0, span.after, 0.0, last)
+                        .SetCharacterSpacing(0.0, span.spacing + span.after, 0.0, last)
                         .ctx("character spacing")?;
                 }
                 start += len;

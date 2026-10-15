@@ -7,7 +7,7 @@ use kabuk_ui::geom::Insets;
 use kabuk_ui::node::{Align, FontRole, Node, Paint, Role, Span, TextMeasure, TextSpec};
 
 use super::model::{Model, Row};
-use super::style::{LauncherStyle, Rule};
+use super::style::{LauncherStyle, Rule, Stroke, Typo};
 
 /// Hit-test id of a row; the value is its index among the shown rows.
 pub const HIT_ROW: &str = "launcher-row";
@@ -48,17 +48,6 @@ impl Ctx<'_> {
             max_width,
         })
     }
-
-    fn width_of(&self, text: &str, font: FontRole, size: f32, weight: u16) -> f32 {
-        self.m
-            .measure(&TextSpec {
-                spans: vec![span(text, Role::Fg, weight)],
-                font,
-                size: self.size(size),
-                max_width: None,
-            })
-            .width
-    }
 }
 
 fn span(text: impl Into<String>, color: Role, weight: u16) -> Span {
@@ -68,20 +57,41 @@ fn span(text: impl Into<String>, color: Role, weight: u16) -> Span {
         weight,
         after: 0.0,
         underline: false,
+        italic: false,
+        spacing: 0.0,
     }
 }
 
 fn rule(r: Rule, width: f32) -> Node {
-    Node::spacer(width, r.width).paint(Paint {
+    let paint = Paint {
         fill: r.color,
         border: None,
         radius: 0.0,
-    })
+    };
+    match r.stroke {
+        Stroke::Solid => Node::spacer(width, r.width).paint(paint),
+        Stroke::Double => {
+            let third = r.width / 3.0;
+            Node::column(vec![
+                Node::spacer(width, third).paint(paint),
+                Node::spacer(width, third),
+                Node::spacer(width, third).paint(paint),
+            ])
+        }
+        Stroke::Dotted => {
+            // Whole dots only, as far apart as they are wide.
+            let dots = ((width / r.width + 1.0) / 2.0).floor().max(0.0) as usize;
+            Node::row((0..dots).map(|_| Node::spacer(r.width, r.width).paint(paint)).collect())
+                .gap(r.width)
+                .align(Align::Start)
+                .size(Some(width), None)
+        }
+    }
 }
 
 /// Splits `title` into spans, the characters at `positions` in `mark` (and underlined
 /// where the look underlines matches).
-fn marked(title: &str, positions: &[usize], color: Role, mark: Role, underline: bool) -> Vec<Span> {
+fn marked(title: &str, positions: &[usize], color: Role, mark: Role, underline: bool, weight: u16) -> Vec<Span> {
     let mut spans: Vec<Span> = Vec::new();
     for (i, c) in title.chars().enumerate() {
         let hit = positions.binary_search(&i).is_ok();
@@ -90,21 +100,26 @@ fn marked(title: &str, positions: &[usize], color: Role, mark: Role, underline: 
             Some(s) if s.color == col && s.underline == line => s.text.push(c),
             _ => spans.push(Span {
                 underline: line,
-                ..span(c.to_string(), col, 400)
+                ..span(c.to_string(), col, weight)
             }),
         }
     }
     if spans.is_empty() {
-        spans.push(span("", color, 400));
+        spans.push(span("", color, weight));
     }
     spans
+}
+
+/// `text` set as `typo` says at the launcher's size `size` (before the text size).
+fn typed(cx: &Ctx, text: &str, color: Role, weight: u16, typo: Typo, size: f32) -> Span {
+    typo.span(text, color, weight, cx.size(size), cx.f.i18n)
 }
 
 /// The whole launcher.
 pub fn view(model: &Model, f: Frame, m: &dyn TextMeasure) -> Node {
     let cx = Ctx { f, m };
     let s = f.style;
-    let inner = f.width - 2.0 * s.panel_pad - s.panel.and_then(|p| p.border).map_or(0.0, |(_, w)| 2.0 * w);
+    let inner = f.width - s.panel_pad.horizontal() - s.panel.and_then(|p| p.border).map_or(0.0, |(_, w)| 2.0 * w);
     let input = input(&cx, model, inner);
     let list = list(&cx, model, inner);
     let foot = foot(&cx, inner);
@@ -128,12 +143,16 @@ pub fn view(model: &Model, f: Frame, m: &dyn TextMeasure) -> Node {
             parts.extend(foot);
         }
     }
+    let border = s.panel.and_then(|p| p.border).map_or(0.0, |(_, w)| w);
     let mut panel = Node::column(parts)
         .gap(s.section_gap)
         .align(Align::Start)
-        .padding(Insets::all(
-            s.panel_pad + s.panel.and_then(|p| p.border).map_or(0.0, |(_, w)| w),
-        ))
+        .padding(Insets {
+            left: s.panel_pad.left + border,
+            top: s.panel_pad.top + border,
+            right: s.panel_pad.right + border,
+            bottom: s.panel_pad.bottom + border,
+        })
         .size(Some(f.width), f.height);
     if let Some(p) = s.panel {
         panel = panel.paint(p);
@@ -146,7 +165,7 @@ fn input(cx: &Ctx, model: &Model, width: f32) -> Node {
     let mut children = Vec::new();
     match s.prompt {
         Some((color, size, weight)) => children.push(cx.text(vec![span("›", color, weight)], s.input_font, size, None)),
-        None => children.push(Node::icon("search", s.icon, Role::Dim)),
+        None => children.push(Node::icon("search", s.icon, s.input_icon)),
     }
     let line = cx.size(s.input_size) * LINE_HEIGHT;
     let caret = Node::spacer(s.caret, line).paint(Paint {
@@ -161,7 +180,14 @@ fn input(cx: &Ctx, model: &Model, width: f32) -> Node {
         Node::row(vec![
             caret,
             cx.text(
-                vec![span(cx.f.i18n.tr("l-placeholder"), Role::Dim, s.input_weight)],
+                vec![typed(
+                    cx,
+                    &cx.f.i18n.tr("l-placeholder"),
+                    Role::Dim,
+                    s.input_weight,
+                    s.input_typo,
+                    s.input_size,
+                )],
                 s.input_font,
                 s.input_size,
                 Some(room),
@@ -170,7 +196,7 @@ fn input(cx: &Ctx, model: &Model, width: f32) -> Node {
     } else {
         Node::row(vec![
             cx.text(
-                vec![span(query, Role::Fg, s.input_weight)],
+                vec![typed(cx, query, Role::Fg, s.input_weight, s.input_typo, s.input_size)],
                 s.input_font,
                 s.input_size,
                 Some(room),
@@ -292,14 +318,24 @@ fn row(cx: &Ctx, model: &Model, r: &Row, i: usize, width: f32) -> Node {
     } else {
         Role::Dim
     };
-    let kind_text = i18n.tr(kind.label_key());
-    let kind_w = cx.width_of(&kind_text, FontRole::Ui, s.kind_size, 400);
+    let kind_node = s.kind_typo.node(
+        &i18n.tr(kind.label_key()),
+        kind_color,
+        s.kind_weight,
+        FontRole::Ui,
+        cx.size(s.kind_size),
+        i18n,
+    );
+    let kind_w = kabuk_ui::node::layout(&kind_node, kabuk_ui::geom::Point::default(), cx.m)
+        .size
+        .w;
     let border = s.row_border.unwrap_or(0.0);
     let marker = s.marker.unwrap_or(0.0);
     let gaps = s.row_gap * if s.marker.is_some() { 3.0 } else { 2.0 };
     let text_w = (width - s.row_pad.horizontal() - 2.0 * border - marker - s.icon_column - kind_w - gaps).max(0.0);
 
-    let mut spans = marked(&title, positions, text_color, mark, s.mark_underline);
+    let mut spans = marked(&title, positions, text_color, mark, s.mark_underline, s.title_weight);
+    let sub = typed(cx, &subtitle, dim, 400, s.sub_typo, s.sub_size);
     let texts = match s.sub_inline {
         Some(after) => {
             if let Some(last) = spans.last_mut() {
@@ -310,7 +346,7 @@ fn row(cx: &Ctx, model: &Model, r: &Row, i: usize, width: f32) -> Node {
         }
         None => Node::column(vec![
             cx.text(spans, FontRole::Ui, s.title_size, Some(text_w)),
-            cx.text(vec![span(subtitle, dim, 400)], FontRole::Ui, s.sub_size, Some(text_w)),
+            cx.text(vec![sub], FontRole::Ui, s.sub_size, Some(text_w)),
         ])
         .align(Align::Start),
     };
@@ -331,7 +367,7 @@ fn row(cx: &Ctx, model: &Model, r: &Row, i: usize, width: f32) -> Node {
     };
     children.push(Node::row(vec![icon]).size(Some(s.icon_column), None));
     children.push(texts);
-    children.push(cx.text(vec![span(kind_text, kind_color, 400)], FontRole::Ui, s.kind_size, None));
+    children.push(kind_node);
     let pad = Insets {
         left: s.row_pad.left + border,
         top: s.row_pad.top + border,
@@ -360,9 +396,21 @@ fn foot(cx: &Ctx, width: f32) -> Option<Vec<Node>> {
     let i18n = cx.f.i18n;
     let hint = |key: &str, label: &str| {
         Node::row(vec![
-            cx.text(vec![span(key, Role::Fg, 400)], FontRole::Num, foot.size, None),
             cx.text(
-                vec![span(format!(" {}", i18n.tr(label)), Role::Dim, 400)],
+                vec![typed(cx, key, Role::Fg, 400, foot.typo, foot.size)],
+                FontRole::Num,
+                foot.size,
+                None,
+            ),
+            cx.text(
+                vec![typed(
+                    cx,
+                    &format!(" {}", i18n.tr(label)),
+                    Role::Dim,
+                    400,
+                    foot.typo,
+                    foot.size,
+                )],
                 FontRole::Ui,
                 foot.size,
                 None,
@@ -511,21 +559,26 @@ mod tests {
             let t = texts(&view(&model(""), f, &Fake));
             assert!(t.iter().any(|s| s == "Uygulama, dosya ya da komut ara"));
             // Hints only where the design shows them.
-            let hints = t.iter().any(|s| s == "Enter");
+            // Izgara writes them in capitals.
+            let hints = t.iter().any(|s| s.eq_ignore_ascii_case("Enter"));
             assert_eq!(hints, style.foot.is_some(), "{look:?}");
         }
     }
 
     #[test]
     fn matched_letters_are_drawn_in_the_accent() {
-        let s = marked("Milvasoft", &[0, 1, 2], Role::Fg, Role::Accent, false);
+        let s = marked("Milvasoft", &[0, 1, 2], Role::Fg, Role::Accent, false, 400);
         assert_eq!(s.len(), 2);
         assert_eq!((s[0].text.as_str(), s[0].color), ("Mil", Role::Accent));
         assert_eq!((s[1].text.as_str(), s[1].color), ("vasoft", Role::Fg));
-        assert_eq!(marked("", &[], Role::Fg, Role::Accent, false).len(), 1);
-        let gaps = marked("abc", &[0, 2], Role::Fg, Role::Accent, false);
+        assert_eq!(marked("", &[], Role::Fg, Role::Accent, false, 400).len(), 1);
+        let gaps = marked("abc", &[0, 2], Role::Fg, Role::Accent, false, 400);
         // Çizgi: matched letters keep the text colour and are underlined.
-        let lined = marked("milva", &[0, 1, 2], Role::Fg, Role::Fg, true);
+        let lined = marked("milva", &[0, 1, 2], Role::Fg, Role::Fg, true, 400);
+        // Izgara's rows are set heavier.
+        assert!(marked("milva", &[0], Role::Fg, Role::Fg, true, 600)
+            .iter()
+            .all(|s| s.weight == 600));
         assert_eq!(lined.len(), 2);
         assert!(lined[0].underline && !lined[1].underline);
         assert_eq!(

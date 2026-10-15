@@ -72,6 +72,8 @@ fn text(s: &str, font: FontRole, size: f32, color: Role) -> TextSpec {
             weight: 400,
             after: 0.0,
             underline: false,
+            italic: false,
+            spacing: 0.0,
         }],
         font,
         size,
@@ -218,6 +220,8 @@ fn space_after_a_span_widens_the_text_by_that_much() {
                 weight: 700,
                 after,
                 underline: false,
+                italic: false,
+                spacing: 0.0,
             },
             Span {
                 text: " rest".into(),
@@ -225,6 +229,8 @@ fn space_after_a_span_widens_the_text_by_that_much() {
                 weight: 400,
                 after: 0.0,
                 underline: false,
+                italic: false,
+                spacing: 0.0,
             },
         ],
         font: FontRole::Ui,
@@ -281,6 +287,8 @@ fn icons_and_spans_use_their_colours() {
                     weight: 500,
                     after: 0.0,
                     underline: false,
+                    italic: false,
+                    spacing: 0.0,
                 },
                 Span {
                     text: "WWW".into(),
@@ -288,6 +296,8 @@ fn icons_and_spans_use_their_colours() {
                     weight: 400,
                     after: 0.0,
                     underline: false,
+                    italic: false,
+                    spacing: 0.0,
                 },
             ],
             font: FontRole::Ui,
@@ -377,6 +387,8 @@ fn a_heavy_first_span_does_not_make_the_rest_heavy() {
                     weight: first,
                     after: 0.0,
                     underline: false,
+                    italic: false,
+                    spacing: 0.0,
                 },
                 Span {
                     text: "vaion Dashboard".into(),
@@ -384,6 +396,8 @@ fn a_heavy_first_span_does_not_make_the_rest_heavy() {
                     weight: rest,
                     after: 0.0,
                     underline: false,
+                    italic: false,
+                    spacing: 0.0,
                 },
             ],
             font: FontRole::Ui,
@@ -410,6 +424,8 @@ fn underlined_spans_get_a_line() {
                 weight: 400,
                 after: 0.0,
                 underline,
+                italic: false,
+                spacing: 0.0,
             }],
             font: FontRole::Ui,
             size: 20.0,
@@ -431,6 +447,47 @@ fn underlined_spans_get_a_line() {
     let plain = draw(false);
     let lined = draw(true);
     assert!(lined > plain + 10, "underline added {} lit pixels", lined - plain);
+}
+
+/// Izgara's and Defter's type: letter spacing adds its width after every character, and
+/// an italic span is drawn slanted (other pixels lit than upright).
+#[test]
+fn spaced_and_italic_spans() {
+    let g = gpu();
+    let spec = |spacing: f32, italic: bool| TextSpec {
+        spans: vec![Span {
+            text: "milva".into(),
+            color: Role::Fg,
+            weight: 400,
+            after: 0.0,
+            underline: false,
+            italic,
+            spacing,
+        }],
+        font: FontRole::Ui,
+        size: 20.0,
+        max_width: None,
+    };
+    let plain = g.text.measure(&spec(0.0, false)).width;
+    let spaced = g.text.measure(&spec(2.0, false)).width;
+    assert!((spaced - plain - 5.0 * 2.0).abs() < 0.5, "{plain} {spaced}");
+    let pixels = |s: TextSpec| {
+        let l = layout(&Node::text(s), Point::default(), &g.text);
+        // One canvas for both, so the pixels compare one to one.
+        let (w, h) = (CANVAS.0, CANVAS.1);
+        assert!(l.size.w < w as f32 && l.size.h <= h as f32);
+        let px = g
+            .render_pixels(&l, &palette(), Scale(1.0), w, h, kabuk_theme::Color::BLACK)
+            .unwrap();
+        (0..h)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .map(|(x, y)| px.at(x, y)[0] > 0x80)
+            .collect::<Vec<bool>>()
+    };
+    const CANVAS: (u32, u32) = (120, 40);
+    let (upright, slanted) = (pixels(spec(0.0, false)), pixels(spec(0.0, true)));
+    let differ = upright.iter().zip(&slanted).filter(|(a, b)| a != b).count();
+    assert!(differ > 20, "italic changed {differ} pixels");
 }
 
 fn l_spec(l: &kabuk_ui::node::Layout) -> TextSpec {
