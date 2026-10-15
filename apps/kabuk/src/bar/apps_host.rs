@@ -394,6 +394,9 @@ impl Shared {
         let Some(app) = self.apps.list.get(i).cloned() else {
             return;
         };
+        // A minimised window can stay Windows' foreground one: it is not in front (found
+        // with a probe: a second click minimised the minimised window again).
+        let front = front.filter(|h| !Hwnd(*h).is_minimized());
         // No preview over what the click does, until the mouse leaves the app.
         self.preview_held = Some(i);
         self.kill(super::timer::APP_PREVIEW);
