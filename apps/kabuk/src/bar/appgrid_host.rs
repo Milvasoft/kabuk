@@ -778,8 +778,9 @@ impl Shared {
                     tracing::warn!(error = %e, "app grid pages not drawn");
                 }
             }
+            // Found by the user: taken mid-slide, the old places got the clicks.
             o.page_layout =
-                kabuk_ui::node::layout(&view::page(&o.grid, o.slots[1], &frame), Point::default(), &gpu.text);
+                kabuk_ui::node::layout(&view::hits_of(&o.grid, o.slots[1], &frame), Point::default(), &gpu.text);
             let names: Vec<&str> = o
                 .slots
                 .get(1)

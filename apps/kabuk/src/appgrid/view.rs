@@ -235,6 +235,12 @@ pub fn page(grid: &Grid, p: Option<usize>, f: &Frame) -> Node {
     Node::layer(layers)
 }
 
+/// Page `p` as clicks find it: every app at the place it goes to, a slide in progress or
+/// not (the drawing slides; a press goes to where the app will be).
+pub fn hits_of(grid: &Grid, p: Option<usize>, f: &Frame) -> Node {
+    page(grid, p, &Frame { reflow: None, ..*f })
+}
+
 /// The strip: the pages in `slots` side by side, left to right.
 pub fn strip(grid: &Grid, slots: [Option<usize>; 3], f: &Frame) -> Node {
     Node::row(slots.into_iter().map(|p| page(grid, p, f)).collect())
@@ -735,6 +741,44 @@ mod tests {
         // Not editing: no badge, the search.
         let l = layout(&page(&g, Some(0), &frame(&i18n, &none, None)), Point::default(), &Fake);
         assert!(hits(&l, hit::HIDE).is_empty());
+    }
+
+    /// Found by the user: after hiding an app the next badge pressed hid another app, and a
+    /// press on an app ended editing. The places clicks are found at were taken from the
+    /// first frame of the others' slide (their old places) and kept. Mid-slide, an app is
+    /// drawn between its places, but it is clicked at the place it goes to.
+    #[test]
+    fn mid_slide_apps_are_clicked_where_they_go() {
+        let i18n = I18n::new(Lang::En);
+        let none = HashMap::new();
+        let g = grid(8);
+        let mut f = frame(&i18n, &none, None);
+        f.editing = true;
+        // Every app was one cell further on (as after the app before them was hidden).
+        let size = f.size;
+        let was: HashMap<String, Rect> = (0..6)
+            .filter_map(|local| Some((g.entry(g.index_at(local)?)?.open.clone(), cell(&g, local + 1, size))))
+            .collect();
+        f.reflow = Some((&was, 0.0));
+        let l = layout(&hits_of(&g, Some(0), &f), Point::default(), &Fake);
+        for (kind, found) in [(hit::APP, hits(&l, hit::APP)), (hit::HIDE, hits(&l, hit::HIDE))] {
+            assert_eq!(found.len(), 6, "{kind}");
+            for (r, at) in found {
+                let goes = cell(&g, at as usize, size);
+                let middle = Point {
+                    x: r.x + r.w / 2.0,
+                    y: r.y + r.h / 2.0,
+                };
+                assert!(goes.contains(middle), "{kind} {at}: {r:?} not in {goes:?}");
+            }
+        }
+        // The drawing still slides from the old places.
+        let drawn = layout(&page(&g, Some(0), &f), Point::default(), &Fake);
+        let first = hits(&drawn, hit::APP).into_iter().find(|(_, v)| *v == 0).unwrap().0;
+        assert!(cell(&g, 1, size).contains(Point {
+            x: first.x + first.w / 2.0,
+            y: first.y + first.h / 2.0
+        }));
     }
 
     /// A dragged app follows the mouse over a gap where it will drop; the cell under the
