@@ -15,17 +15,18 @@ $keyboard = Get-CimAssociatedInstance -InputObject $vm -ResultClassName Msvm_Key
 function Key([string]$method, [int]$code) {
     Invoke-CimMethod -InputObject $keyboard -MethodName $method -Arguments @{ keyCode = [uint32]$code } | Out-Null
 }
-function Type([string]$s) {
+# Not `Type`: PowerShell's `type` alias (Get-Content) would win over the function.
+function Send-Text([string]$s) {
     Invoke-CimMethod -InputObject $keyboard -MethodName TypeText -Arguments @{ asciiText = $s } | Out-Null
 }
 $VK_LWIN = 0x5B; $VK_R = 0x52; $VK_RETURN = 0x0D
 if ($Run) {
     Key PressKey $VK_LWIN; Key TypeKey $VK_R; Key ReleaseKey $VK_LWIN
     Start-Sleep -Milliseconds 800
-    Type $Run
+    Send-Text $Run
     Key TypeKey $VK_RETURN
 }
 if ($Text) {
-    Type $Text
+    Send-Text $Text
     if ($Enter) { Key TypeKey $VK_RETURN }
 }
