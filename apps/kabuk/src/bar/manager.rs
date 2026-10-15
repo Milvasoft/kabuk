@@ -79,6 +79,8 @@ mod app_menu_host;
 mod app_preview_host;
 pub use app_preview_host::MSG_TEST_APP_PREVIEW;
 pub use wallpaper_host::MSG_TEST_DRIFT;
+#[path = "keys_card_host.rs"]
+mod keys_card_host;
 #[path = "power_menu_host.rs"]
 mod power_menu_host;
 #[path = "saver_host.rs"]
@@ -93,6 +95,7 @@ pub use app_menu_host::{
     MSG_TEST_APP_MENU, TEST_CLOSE as APP_MENU_CLOSE, TEST_CLOSE_WINDOWS as APP_MENU_CLOSE_WINDOWS,
     TEST_OPEN as APP_MENU_OPEN, TEST_PIN as APP_MENU_PIN, TEST_TO_FRONT as APP_MENU_TO_FRONT,
 };
+pub use keys_card_host::MSG_TEST_KEYS_CARD;
 pub use power_menu_host::MSG_TEST_POWER_MENU;
 pub use volume_panel_host::MSG_TEST_VOLUME_PANEL;
 /// Windows' notification centre.
@@ -166,6 +169,8 @@ mod timer {
     pub const APP_GRID_HOLD: usize = 29;
     /// An app dragged to a side edge of the grid stayed there: the page turns.
     pub const APP_GRID_EDGE: usize = 30;
+    /// Kabuk's first start: the shortcut card greets the user.
+    pub const GREETING: usize = 31;
 }
 
 /// An auto-hiding bar (SPEC §2.1): how much of it stays on screen for the mouse to reach
@@ -484,6 +489,8 @@ struct Shared {
     saver: saver_host::SaverState,
     /// The power menu while it is open.
     power_menu: Option<power_menu_host::PowerMenu>,
+    /// The shortcut card's shortcuts, and the card while it shows (DECISIONS D61).
+    keys_card: keys_card_host::KeysCardState,
     volume_panel: Option<volume_panel_host::VolumePanel>,
     app_menu: Option<app_menu_host::AppMenu>,
     app_drag: Option<AppDrag>,
@@ -731,6 +738,7 @@ impl BarManager {
                 idle: idle_host::IdleState::default(),
                 saver: saver_host::SaverState::default(),
                 power_menu: None,
+                keys_card: Default::default(),
                 volume_panel: None,
                 app_menu: None,
                 app_drag: None,
@@ -810,6 +818,8 @@ impl BarManager {
             s.bind_overview_keys();
             s.bind_saver_keys();
             s.create_app_grid();
+            s.bind_keys_card_keys();
+            s.schedule_greeting();
             s.load_pins();
             s.apply_cursors();
             s.apply_system_colors();
@@ -856,7 +866,8 @@ impl BarManager {
         })
     }
 
-    /// The control window, where other threads post [`MSG_OPEN_LAUNCHER`] and [`MSG_RELOAD`].
+    /// The control window, where other threads post [`MSG_OPEN_LAUNCHER`], [`MSG_RELOAD`]
+    /// and the hot corners reached (`crate::grab::MSG_HOT_CORNER`).
     pub fn control_window(&self) -> Option<Hwnd> {
         self.shared.try_borrow().ok()?.control.as_ref().map(Window::hwnd)
     }
@@ -1092,6 +1103,14 @@ impl Shared {
                 Some(0)
             }
             #[cfg(feature = "integration")]
+            MSG_TEST_KEYS_CARD => {
+                match m.wparam {
+                    0 => self.close_keys_card(),
+                    w => self.open_keys_card(w == 2, false),
+                }
+                Some(0)
+            }
+            #[cfg(feature = "integration")]
             MSG_TEST_POWER_MENU => {
                 if m.wparam == 1 {
                     let b = self.bars.iter().position(|b| b.primary)?;
@@ -1174,6 +1193,7 @@ impl Shared {
                     timer::APP_GRID_AHEAD => self.app_grid_ahead(),
                     timer::APP_GRID_HOLD => self.app_grid_held(),
                     timer::APP_GRID_EDGE => self.app_grid_edge_due(),
+                    timer::GREETING => self.greeting_due(),
                     timer::TRAY_AGAIN => {
                         self.kill(timer::TRAY_AGAIN);
                         let now = std::time::Instant::now();
@@ -1222,7 +1242,8 @@ impl Shared {
             msgloop::MSG_HOTKEY => (self.launcher_hotkey(m.wparam)
                 || self.overview_hotkey(m.wparam)
                 || self.saver_hotkey(m.wparam)
-                || self.app_grid_hotkey(m.wparam))
+                || self.app_grid_hotkey(m.wparam)
+                || self.keys_card_hotkey(m.wparam))
             .then_some(0),
             MSG_VOLUME_KEY => {
                 self.volume_key(m.wparam);
@@ -1230,6 +1251,10 @@ impl Shared {
             }
             MSG_START_SAVER => {
                 self.start_saver_soon();
+                Some(0)
+            }
+            crate::grab::MSG_HOT_CORNER => {
+                self.hot_corner(m.wparam);
                 Some(0)
             }
             launcher_host::MSG_LAUNCHER_PICTURES => {
@@ -1429,6 +1454,25 @@ impl Shared {
         self.sampler.sample(wants)
     }
 
+    /// The mouse reached a hot corner (`wparam`: the action's place in
+    /// [`config::HotCornerAction::ALL`]): what the user chose for it, on the monitor the
+    /// mouse is on.
+    fn hot_corner(&mut self, wparam: usize) {
+        use config::HotCornerAction;
+        let Some(action) = HotCornerAction::ALL.get(wparam).copied() else {
+            return;
+        };
+        tracing::info!(?action, "hot corner reached");
+        let activate = self.shortcuts;
+        match action {
+            HotCornerAction::None => {}
+            HotCornerAction::AppGrid => self.toggle_app_grid(None, activate),
+            HotCornerAction::Overview => self.toggle_overview(activate),
+            HotCornerAction::Launcher => self.open_launcher(activate),
+            HotCornerAction::ScreenSaver => self.start_saver_soon(),
+        }
+    }
+
     /// A volume key the hook took: the volume steps as Windows' would, and Kabuk's OSD
     /// shows when the change is announced.
     fn volume_key(&mut self, wparam: usize) {
@@ -1488,6 +1532,9 @@ impl Shared {
         }
         if before.shortcuts.app_grid != after.shortcuts.app_grid {
             self.bind_app_grid_keys();
+        }
+        if before.shortcuts.keys_card != after.shortcuts.keys_card {
+            self.bind_keys_card_keys();
         }
         if before.bar.modules.taskbar != after.bar.modules.taskbar {
             self.refresh_apps();

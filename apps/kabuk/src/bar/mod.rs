@@ -5,6 +5,7 @@ pub mod app_preview;
 pub mod apps;
 pub mod dock;
 pub mod geometry;
+pub mod keys_card;
 pub mod manager;
 pub mod pictures;
 pub mod power_menu;

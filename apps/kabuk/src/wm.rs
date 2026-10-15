@@ -241,6 +241,7 @@ type Listener = Arc<Mutex<Option<(Hwnd, u32)>>>;
 pub struct WmHandle {
     /// The mouse hook; stopped before the window manager.
     input: Option<InputThread>,
+    snapshot: SharedSnapshot,
     thread: Option<std::thread::JoinHandle<()>>,
     window: Hwnd,
     queue: Arc<Mutex<VecDeque<Command>>>,
@@ -293,6 +294,13 @@ fn send(queue: &Mutex<VecDeque<Command>>, window: Hwnd, c: Command) {
 }
 
 impl WmHandle {
+    /// Where the mouse hook tells of a hot corner reached: the bar's control window.
+    pub fn set_bar_window(&self, bar: Option<Hwnd>) {
+        if let Ok(mut s) = self.snapshot.lock() {
+            s.bar = bar;
+        }
+    }
+
     /// Starts the thread and waits until it manages the existing windows.
     pub fn start(options: Options) -> std::io::Result<WmHandle> {
         let queue = Arc::new(Mutex::new(VecDeque::new()));
@@ -301,6 +309,7 @@ impl WmHandle {
         let snapshot: SharedSnapshot = Arc::new(Mutex::new(Snapshot::default()));
         if let Ok(mut s) = snapshot.lock() {
             s.set_config(&options.config);
+            s.monitors = kabuk_win::shell::monitors().iter().map(|m| m.rect).collect();
         }
         let (ready_tx, ready_rx) = mpsc::channel();
         let shared = (queue.clone(), view.clone(), listener.clone(), snapshot.clone());
@@ -320,11 +329,12 @@ impl WmHandle {
             Ok(Ok(window)) => {
                 let orders = queue.clone();
                 // Without the hook only Alt+drag and double clicks are missing.
-                let input = InputThread::start(snapshot, move |o| send(&orders, window, Command::Grab(o)))
+                let input = InputThread::start(snapshot.clone(), move |o| send(&orders, window, Command::Grab(o)))
                     .map_err(|e| tracing::error!(error = %e, "mouse hook unavailable"))
                     .ok();
                 Ok(WmHandle {
                     input,
+                    snapshot,
                     thread: Some(thread),
                     window,
                     queue,
@@ -773,6 +783,9 @@ impl Wm {
                     }
                     timer::MONITORS => {
                         self.kill(timer::MONITORS);
+                        if let Ok(mut s) = self.snapshot.lock() {
+                            s.monitors = kabuk_win::shell::monitors().iter().map(|m| m.rect).collect();
+                        }
                         let effects = self.desk.set_monitors(monitors());
                         self.apply(effects);
                     }

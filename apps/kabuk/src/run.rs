@@ -214,6 +214,7 @@ pub fn main(options: Run) -> i32 {
     };
     if let (Some(b), Some(w)) = (&bars, &manager) {
         b.attach_wm(w.link());
+        w.set_bar_window(b.control_window());
     }
     // Last, so every command finds what it drives.
     let commands = crate::ipc::start(crate::ipc::Targets {

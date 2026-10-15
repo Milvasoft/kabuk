@@ -22,6 +22,12 @@ cursor_size = "normal"    # with Kabuk's sets: normal, large, huge
 [system_theme]
 colors = false            # Windows' mode and accent colour follow Kabuk's (recorded, given back on exit)
 
+[hot_corners]             # the mouse pushed into a corner of the screen: none, app_grid, overview, launcher, screen_saver
+top_left = "none"
+top_right = "none"
+bottom_left = "none"
+bottom_right = "none"
+
 [wallpaper]
 kind = "windows"          # windows (your own, untouched), black, gradient, image, circuit, constellation, generated, gallery
 # gallery = "wall-live/aurora-shore"   # with kind = "gallery": wall-live/… is played, wall-still/… is drawn once
@@ -145,6 +151,7 @@ next_tab = ["Alt+Shift+G"]          # show the group's next tab
 overview = ["Alt+O"]                # every workspace at a glance
 start_saver = ["Win+Shift+L"]       # the screen saver now (the display off when none is chosen)
 app_grid = ["Win+Shift+A"]          # every app on a full-screen grid, as macOS's Launchpad
+keys_card = ["Win+F1"]              # the card of Kabuk's main shortcuts (it greets you on the first start)
 drag = "Alt"                      # held while dragging: left button moves, right button resizes
 
 [language]

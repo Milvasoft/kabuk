@@ -1,5 +1,6 @@
 //! The input thread (ARCHITECTURE §3): the low-level mouse hook for grabbing windows with
-//! Alt and for double clicks on a floating window's title (`kabuk_core::grab`).
+//! Alt and for double clicks on a floating window's title (`kabuk_core::grab`), and for
+//! the hot corners (`kabuk_core::hot_corner`), which it tells the bar of.
 //!
 //! Windows calls the hook for every mouse event on the machine and waits for it, so this
 //! thread does nothing else: it decides from a snapshot the window manager keeps up to
@@ -11,7 +12,7 @@ use std::rc::Rc;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
-use kabuk_core::config::Config;
+use kabuk_core::config::{Config, HotCornerAction, HotCorners};
 use kabuk_core::grab::{self, Grabber, Input, Order, Target};
 use kabuk_win::input::{self, MouseHook, MouseKind};
 use kabuk_win::msgloop::{self, msg, Msg, Window};
@@ -42,7 +43,16 @@ pub struct Snapshot {
     pub paused: bool,
     /// The input thread's window, for [`pause`].
     pub window: Option<Hwnd>,
+    /// What each corner does, the monitors' rectangles, and the bar's control window,
+    /// which acts on a corner reached ([`MSG_HOT_CORNER`]).
+    pub corners: HotCorners,
+    pub monitors: Vec<kabuk_core::state::Rect>,
+    pub bar: Option<Hwnd>,
 }
+
+/// Posted to the bar's control window when the mouse reached a hot corner: `wparam` is
+/// the action's place in [`HotCornerAction::ALL`].
+pub const MSG_HOT_CORNER: u32 = msg::APP + 48;
 
 /// Removes the hook (`true`) or puts it back, from any thread.
 pub fn pause(snapshot: &SharedSnapshot, paused: bool) {
@@ -70,6 +80,14 @@ impl Snapshot {
     pub fn set_config(&mut self, cfg: &Config) {
         self.alt_drag = cfg.windows.alt_drag;
         self.double_click_to_tile = cfg.windows.double_click_to_tile;
+        self.corners = cfg.hot_corners;
+    }
+
+    /// Whether any corner does something (else moves cost the hook nothing).
+    fn corners_on(&self) -> bool {
+        kabuk_core::hot_corner::Corner::ALL
+            .iter()
+            .any(|c| c.action(&self.corners) != HotCornerAction::None)
     }
 }
 
@@ -176,7 +194,33 @@ impl InputThread {
 fn hook(snapshot: SharedSnapshot, orders: Rc<dyn Fn(Order)>, me: Rc<Cell<Option<Hwnd>>>) -> std::io::Result<MouseHook> {
     let (double_click_ms, double_click_size) = input::double_click();
     let mut grabber = Grabber::new();
+    let mut corners = kabuk_core::hot_corner::Watch::default();
+    let mut buttons = 0u32;
     MouseHook::start(move |e| {
+        match e.kind {
+            MouseKind::Down(_) => buttons += 1,
+            MouseKind::Up(_) => buttons = buttons.saturating_sub(1),
+            MouseKind::Move => {
+                let snap = snapshot.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                if snap.corners_on() {
+                    let held = buttons > 0 || grabber.holding();
+                    if let Some(c) = corners.moved(e.at, &snap.monitors, held, &snap.corners) {
+                        let action = c.action(&snap.corners);
+                        let wparam = HotCornerAction::ALL.iter().position(|a| *a == action).unwrap_or(0);
+                        if let Some(bar) = snap.bar {
+                            let _ = msgloop::post_message(
+                                bar,
+                                Msg {
+                                    id: MSG_HOT_CORNER,
+                                    wparam,
+                                    lparam: 0,
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+        }
         // Moves come all the time; they matter only while a window is held.
         if e.kind == MouseKind::Move && !grabber.holding() {
             return false;

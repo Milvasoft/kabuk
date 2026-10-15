@@ -402,7 +402,18 @@
       ${rowFor("windows.new_window", t("newWin"), t("newWinH"), segFor("windows.new_window", t("newWin"), [["right", t("right")], ["below", t("below")], ["floating", t("floating")]]))}
       ${tgl("windows.active_border", t("border"), t("borderH"))}
       ${tgl("windows.follow_look", t("setFollowLook"), t("setFollowLookH"))}
-      ${rowFor("windows.minimize_effect", t("setMinimize"), t("setMinimizeH"), segFor("windows.minimize_effect", t("setMinimize"), [["genie", t("setMinimizeGenie")], ["windows", t("setMinimizeWindows")]]))}</div>`;
+      ${rowFor("windows.minimize_effect", t("setMinimize"), t("setMinimizeH"), segFor("windows.minimize_effect", t("setMinimize"), [["genie", t("setMinimizeGenie")], ["windows", t("setMinimizeWindows")]]))}</div>
+      ${hotCornersGroup()}`;
+  }
+
+  // Hot corners (asked for by the user, off by default): what the mouse pushed into each
+  // corner of the screen does.
+  const CORNERS = [["top_left", "hcTopLeft"], ["top_right", "hcTopRight"], ["bottom_left", "hcBottomLeft"], ["bottom_right", "hcBottomRight"]];
+  const CORNER_ACTIONS = [["none", "hcNone"], ["app_grid", "hcAppGrid"], ["overview", "hcOverview"], ["launcher", "hcLauncher"], ["screen_saver", "hcSaver"]];
+  function hotCornersGroup() {
+    const c = cfg().hot_corners;
+    const rows = CORNERS.map(([k, name]) => row(t(name), "", `<span class="num"><select data-select="hot_corners.${k}" aria-label="${t(name)}">${CORNER_ACTIONS.map(([v, n]) => `<option value="${v}"${c[k] === v ? " selected" : ""}>${t(n)}</option>`).join("")}</select></span>`)).join("");
+    return `<div class="set-grp"><span class="gl">${t("hc")}. ${t("hcH")}</span>${rows}</div>`;
   }
 
   function ruleText(r) {
@@ -467,7 +478,7 @@
         <div><button class="set-btn ghost" type="button" data-grid-reset ${g.ordered ? "" : "disabled"}>${t("lpGridReset")}</button></div></div>`;
   }
 
-  const KEYS = ["launcher", "workspace", "move_to_workspace", "focus_left", "focus_down", "focus_up", "focus_right", "move_left", "move_down", "move_up", "move_right", "toggle_float", "close_window", "cycle_layout", "toggle_scratchpad", "to_scratchpad", "toggle_group", "next_tab", "overview", "start_saver", "app_grid", "drag"];
+  const KEYS = ["launcher", "workspace", "move_to_workspace", "focus_left", "focus_down", "focus_up", "focus_right", "move_left", "move_down", "move_up", "move_right", "toggle_float", "close_window", "cycle_layout", "toggle_scratchpad", "to_scratchpad", "toggle_group", "next_tab", "overview", "start_saver", "app_grid", "keys_card", "drag"];
   function keysPage() {
     const any = KEYS.some((k) => changed("shortcuts." + k));
     return head(t("navKeys"), t("keysDesc")) + (any ? `<div><button class="set-btn ghost" type="button" data-reset-keys>${t("setResetKeys")}</button></div>` : "") + `
@@ -700,6 +711,7 @@
     if (el.id === "dim-value" || el.id === "dim-unit") { const sec = readDim(); if (sec != null) set("oled.dim_after_secs", sec); }
     if (el.id === "rule-what") ui.ruleForm.what = el.value;
     if (el.id === "bar-color") set("bar.color", el.value.toUpperCase());
+    if (el.dataset.select) set(el.dataset.select, el.value);
   });
 
   /* ---------- messages from Rust ---------- */

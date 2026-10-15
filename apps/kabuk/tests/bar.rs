@@ -1746,6 +1746,119 @@ fn the_screen_saver_choice_is_set_in_windows_and_comes_back() {
     assert!(wait_until(Duration::from_secs(5), || restored(&areas)).is_some());
 }
 
+/// DECISIONS D61 (suggested and asked for by the user): the shortcut card opens in the
+/// middle of the monitor, as the card or as the greeting, and closes again.
+#[test]
+fn the_shortcut_card_opens_in_the_middle_and_closes() {
+    use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_KEYS_CARD};
+    use kabuk_win::msgloop::{post_message, Msg};
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
+    let card = || {
+        kabuk_win::window::windows_of_class("Kabuk.KeysCard")
+            .into_iter()
+            .find(|w| w.pid() == Some(pid) && w.is_visible())
+    };
+    let post = |wparam: usize| {
+        post_message(
+            control,
+            Msg {
+                id: MSG_TEST_KEYS_CARD,
+                wparam,
+                lparam: 0,
+            },
+        )
+        .unwrap()
+    };
+    // No greeting in a test: the shell runs without its shortcuts.
+    assert_eq!(sandbox.log_lines("keys card shown"), 0);
+    post(1);
+    assert!(wait_until(SETTLE, || card().is_some()).is_some(), "no card");
+    assert_eq!(sandbox.log_lines("keys card shown welcome=false"), 1);
+    let r = card().unwrap().window_rect().unwrap();
+    let m = kabuk_win::shell::monitors()
+        .into_iter()
+        .find(|m| m.work_area.left <= r.left && r.right <= m.work_area.right)
+        .expect("on a monitor");
+    let (cx, mx) = ((r.left + r.right) / 2, (m.work_area.left + m.work_area.right) / 2);
+    let (cy, my) = ((r.top + r.bottom) / 2, (m.work_area.top + m.work_area.bottom) / 2);
+    assert!(
+        (cx - mx).abs() <= 1 && (cy - my).abs() <= 1,
+        "{r:?} in {:?}",
+        m.work_area
+    );
+    post(0);
+    assert!(wait_until(SETTLE, || card().is_none()).is_some(), "the card stayed");
+    post(2);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("keys card shown welcome=true") == 1).is_some());
+    post(0);
+    assert!(wait_until(SETTLE, || card().is_none()).is_some(), "the greeting stayed");
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
+}
+
+/// Asked for by the user (off by default): a hot corner reached does what was chosen
+/// for it. The mouse hook tells the bar's control window; here the test does, as tests
+/// never move the mouse: the grid of every app opens and closes, and no action or an
+/// unknown one does nothing.
+#[test]
+fn a_hot_corner_reached_does_what_was_chosen() {
+    use kabuk::bar::manager::CONTROL_CLASS;
+    use kabuk::grab::MSG_HOT_CORNER;
+    use kabuk_win::msgloop::{post_message, Msg};
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(
+        sandbox.config_file(),
+        "schema = 1\n[hot_corners]\ntop_left = \"app_grid\"\n",
+    )
+    .unwrap();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
+    let post = |wparam: usize| {
+        post_message(
+            control,
+            Msg {
+                id: MSG_HOT_CORNER,
+                wparam,
+                lparam: 0,
+            },
+        )
+        .unwrap()
+    };
+    let none = kabuk_core::config::HotCornerAction::ALL
+        .iter()
+        .position(|a| *a == kabuk_core::config::HotCornerAction::None)
+        .unwrap();
+    let grid = kabuk_core::config::HotCornerAction::ALL
+        .iter()
+        .position(|a| *a == kabuk_core::config::HotCornerAction::AppGrid)
+        .unwrap();
+    post(none);
+    post(99);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("hot corner reached") == 1).is_some());
+    post(grid);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("app grid shown") == 1).is_some());
+    post(grid);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("app grid closed") == 1).is_some());
+    assert_eq!(sandbox.log_lines("app grid shown"), 1);
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
+}
+
 /// Reported by the user: a click on the volume icon showed no slider. The left click's
 /// panel (the level's track, the speaker, Windows' mixer and sound settings) and the right
 /// click's menu (the entries only) open under the volume and close again. No test sets

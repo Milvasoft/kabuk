@@ -28,6 +28,42 @@ pub struct Config {
     pub oled: Oled,
     pub create: Create,
     pub system_theme: SystemTheme,
+    pub hot_corners: HotCorners,
+}
+
+/// `[hot_corners]` (asked for by the user, `kabuk_core::hot_corner`): what the mouse
+/// pushed into each corner of the screen does; nothing by default.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HotCorners {
+    pub top_left: HotCornerAction,
+    pub top_right: HotCornerAction,
+    pub bottom_left: HotCornerAction,
+    pub bottom_right: HotCornerAction,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HotCornerAction {
+    #[default]
+    None,
+    /// Every app on a grid (SPEC 2.5b).
+    AppGrid,
+    /// Every workspace side by side (Win+Tab).
+    Overview,
+    Launcher,
+    /// The screen saver starts (the displays turn off when none is chosen).
+    ScreenSaver,
+}
+
+impl HotCornerAction {
+    pub const ALL: [HotCornerAction; 5] = [
+        HotCornerAction::None,
+        HotCornerAction::AppGrid,
+        HotCornerAction::Overview,
+        HotCornerAction::Launcher,
+        HotCornerAction::ScreenSaver,
+    ];
 }
 
 /// `[system_theme]` (SPEC §2.10, DECISIONS D42): Windows itself follows the look, layer by
@@ -57,6 +93,7 @@ impl Default for Config {
             oled: Oled::default(),
             create: Create::default(),
             system_theme: SystemTheme::default(),
+            hot_corners: HotCorners::default(),
         }
     }
 }
@@ -886,6 +923,8 @@ pub struct Shortcuts {
     pub start_saver: Vec<String>,
     /// Opens the grid of every app, as macOS's Launchpad (DECISIONS D56).
     pub app_grid: Vec<String>,
+    /// Shows the card of Kabuk's main shortcuts (DECISIONS D61).
+    pub keys_card: Vec<String>,
     /// Held while dragging: left button moves, right button resizes.
     pub drag: String,
 }
@@ -920,6 +959,7 @@ impl Default for Shortcuts {
             overview: chords(&["Win+Tab"]),
             start_saver: chords(&["Win+Shift+L"]),
             app_grid: chords(&["Win+Shift+A"]),
+            keys_card: chords(&["Win+F1"]),
             drag: "Alt".into(),
         }
     }

@@ -247,6 +247,15 @@ async function main() {
   check((await page.locator(`[data-saver-gal="wall-live/aurora-shore"]`).innerText()).includes("OLED"), "gallery: a live wallpaper as a saver warns about OLED");
   await page.click(`[data-set="screensaver.kind"][data-val='"circuit"']`); await settled();
 
+  // Hot corners (asked for by the user): none by default, each corner's choice written.
+  await go("windows");
+  check((await page.locator(`[data-select^="hot_corners."]`).count()) === 4, "hot corners: four corners");
+  check(!/\[hot_corners\]/.test(toml()), "hot corners: none by default");
+  await page.selectOption(`[data-select="hot_corners.top_left"]`, "app_grid"); await settled();
+  check(/\[hot_corners\][^[]*top_left = "app_grid"/.test(toml()), "hot corners: top left opens every app");
+  await page.selectOption(`[data-select="hot_corners.top_left"]`, "none"); await settled();
+  check(/top_left = "none"/.test(toml()), "hot corners: back to nothing");
+
   // The all-apps grid (asked for by the user): an app hidden on the grid is listed and
   // shown again, the order goes back to alphabetical.
   const gridFile = path.join(dir, "app-grid.json");

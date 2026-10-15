@@ -98,12 +98,14 @@ Target platform: Windows 11 22H2 and later. Windows 10 22H2 is supported on a be
 - Every app of Windows' "All apps" list on pages, as macOS's Launchpad: large icons with their names, alphabetical (Turkish order in Turkish), uninstallers and help or web links left out. Opened by `Win+Shift+A`, the bar's "All apps" button, a bar's "+n", or `kabuk msg apps`; on the monitor the user works on (the button's own monitor).
 - It covers the monitor, over a blurred, darkened picture of the screen as it was (the wallpaper when the screen cannot be taken). The icons come in from slightly larger as they fade in and go back out the same way; pages slide.
 - Pages: dots at the bottom (a click goes there), the wheel (either way), a drag with the mouse that follows it and turns the page past 15 % of its width (it gives only a little past the first and last page), Page Up/Down, Home/End. Arrow keys select an app and cross onto the next or previous page.
-- Typing searches at once (the launcher's fuzzy matching, Turkish case rules); the best match is selected, Enter opens it, Esc clears the search, then closes. A click on an app opens it; a click anywhere else, or another window, closes the grid.
+- Typing searches at once (the launcher's fuzzy matching, Turkish case rules); the best match is selected, Enter opens it, Esc clears the search, then closes. A click on an app opens it; a click anywhere else, or another window, closes the grid. Clicked or typed into, the search field shows it takes the keys: an accent frame and a caret; the text cursor shows over it (reported by the user on 2026-10-15).
+- Editing (requested by the user on 2026-10-15; DECISIONS D59): a press held on an app, or a right click on it, begins it. Every app carries a "−" badge that hides it; a dragged app follows the mouse over the gap it will drop into, and held at a side edge it turns the page; Done (where the search was), Esc or a click between the apps ends it. The order and the hidden apps are kept; apps not in the order (new ones) come after it alphabetically. Settings › Launcher lists the hidden apps to show them again and puts the order back to alphabetical.
+- Hot corners (requested by the user on 2026-10-15; DECISIONS D60): each corner of the screen can open the app grid, the overview or the launcher, or start the screen saver, when the mouse is pushed into it; nothing by default (Settings › Windows). Only a corner the mouse stops at counts (not one shared by two monitors); it acts once until the mouse leaves it, never during a drag, and not in game mode.
 
 ### 2.6 Notifications and OSD
 
 - Kabuk's own notifications (e.g. "Window is floating", "Game mode on") are shown in a style matching the look and disappear by themselves.
-- When the volume changes, the OSD (volume indicator) appears. The keyboard's volume keys are Kabuk's while it runs (they step the volume by 2 as Windows does), so Windows' own volume flyout does not show beside Kabuk's OSD (reported by the user on 2026-10-14; D50). In game mode they are Windows' again.
+- When the volume changes, the OSD (volume indicator) appears. The keyboard's volume keys are Kabuk's while it runs (they step the volume by 2 as Windows does), so Windows' own volume flyout does not show beside Kabuk's OSD (reported by the user on 2026-10-14; D50). In game mode they are Windows' again (while the window in front is on a full-screen monitor; elsewhere they stay Kabuk's).
 - The notification badge on the bar shows the unread count of Windows notifications (technical risk: see ARCHITECTURE §Notifications).
 
 ### 2.7 Screen saver
@@ -166,7 +168,7 @@ Seven looks; each in dark and light mode. All colours are tokens (the `.screen[d
 | d | Ray (Rail) | Solid vertical rail, stacked clock, launcher beside the rail | Left | `#ff8f6b` / `#d9552f` |
 | e | Konsol (Console) | tmux status line, named workspaces, fzf launcher | Bottom | `#ff7eb6` / `#c2367a` |
 | f | Rıhtım (Dock) | macOS-like: translucent menu bar, dock on the opposite edge, Spotlight launcher | Top | `#0a84ff` / `#0a7aff` |
-| g | Etkinlik (Activities) | GNOME-like: Activities button, pill workspace indicator, centred clock, single system menu; the bar is black in light mode too | Top | `#3584e4` / `#3584e4` |
+| g | Etkinlik (Activities) | GNOME-like: pill workspace indicator, centred clock, single system menu; the bar is black in light mode too | Top | `#3584e4` / `#3584e4` |
 
 Default look: Rıhtım (`DECISIONS.md` D2).
 
@@ -214,6 +216,7 @@ Defaults are on the Win key (the user's decision on 2026-10-14, DECISIONS D40: A
 | Overview of every workspace | `Win+Tab` |
 | Start the screen saver now (the displays turn off when no saver is chosen) | `Win+Shift+L` (requested by the user on 2026-10-14) |
 | Every app on a grid (§2.5b) | `Win+Shift+A` (requested by the user on 2026-10-15) |
+| The card of the main shortcuts (also a greeting on the first start; DECISIONS D61) | `Win+F1` (requested by the user on 2026-10-15) |
 | Emergency exit and restore | `Ctrl+Alt+Shift+End` (cannot be changed) |
 
 On the Turkish Q keyboard there must be no conflict with AltGr (`Ctrl+Alt`) or the input-language switch shortcuts (`Alt+Shift`, `Win+Space`). Pressing and releasing `Alt+Shift` on its own must not break input-language switching.

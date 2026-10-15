@@ -10,6 +10,7 @@ pub mod fullscreen;
 pub mod genie;
 pub mod grab;
 pub mod hang;
+pub mod hot_corner;
 pub mod install;
 pub mod instance;
 pub mod ipc;
