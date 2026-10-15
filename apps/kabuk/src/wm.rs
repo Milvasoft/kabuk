@@ -1050,7 +1050,9 @@ impl Wm {
 
     fn reveal(&mut self, hwnd: u64) {
         let h = Hwnd(hwnd);
-        if self.desk.is_parked(hwnd) {
+        // Minimised though not parked yet: Windows' event comes after (found in the test
+        // VM, slower than the user's machine: the window stayed minimised).
+        if self.desk.is_parked(hwnd) || h.is_minimized() {
             // Windows restores it; MinimizeEnd puts it back in its place. With the genie,
             // its genie is on screen first.
             if self.lead_genie(h, false) {

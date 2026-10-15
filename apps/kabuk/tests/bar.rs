@@ -1637,7 +1637,8 @@ fn other_programs_frames_follow_the_look_and_come_back() {
     assert!(sandbox
         .last_log_line(&["frame back to Windows'", &hwnd])
         .is_some_and(|l| l.contains("reset=true")));
-    assert!(sandbox.state().styled_windows.is_empty());
+    // The record goes once the frame is back (the log line comes first).
+    assert!(wait_until(SETTLE, || sandbox.state().styled_windows.is_empty()).is_some());
 
     std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
     assert!(wait_until(SETTLE, || w.hwnd.corner_preference() == Some(ROUND)).is_some());
