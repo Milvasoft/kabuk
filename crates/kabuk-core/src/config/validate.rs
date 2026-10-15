@@ -20,6 +20,10 @@ pub fn validate(config: &Config) -> Vec<(KeyPath, Problem)> {
     }
 
     // bar
+    let bar_color = &config.bar.color;
+    if !bar_color.is_empty() && parse_hex_color(bar_color).is_none() {
+        push(KeyPath::of(&["bar", "color"]), Problem::InvalidColor(bar_color.clone()));
+    }
     range(
         &mut push,
         &["bar", "tray_shown"],

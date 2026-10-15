@@ -34,6 +34,9 @@ pub enum Role {
     Busy,
     /// The desktop colour (`desk`), under bars that sit on a wallpaper.
     Desk,
+    /// The bar strip's own colour (`bar.color`), the desk colour unless the user chose
+    /// one (DECISIONS D57).
+    BarFill,
     /// Always black (Etkinlik's bar in both modes).
     Black,
     /// Always white (Rıhtım's dock icons).

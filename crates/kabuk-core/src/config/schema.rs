@@ -528,6 +528,9 @@ pub struct Bar {
     /// Tray icons kept on the bar; the rest open from the overflow button (DECISIONS D26).
     pub tray_shown: u32,
     pub modules: Modules,
+    /// The bar strip's colour, `#RRGGBB`; empty keeps the look's own (DECISIONS D57).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub color: String,
 }
 
 pub const TRAY_SHOWN_RANGE: (u32, u32) = (0, 12);
@@ -543,6 +546,7 @@ impl Default for Bar {
             height: None,
             tray_shown: 3,
             modules: Modules::default(),
+            color: String::new(),
         }
     }
 }

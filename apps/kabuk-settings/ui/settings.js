@@ -298,6 +298,32 @@
       ${row(t("preview"), t("previewH"), `<button class="set-btn ghost" type="button" data-preview-saver ${kind === "none" ? "disabled" : ""}>${t("previewBtn")}</button>`)}</div>`;
   }
 
+  // The bar's colour (DECISIONS D57): dark tones that keep any look's text readable, one
+  // light one, and any colour from the picker.
+  const BAR_COLORS = ["#000000", "#16161A", "#1F2430", "#0E1A2B", "#1E1433", "#2B1220", "#122318", "#2E2414", "#E9E6E1"];
+  // WCAG's contrast between two #rrggbb colours.
+  const contrast = (a, b) => {
+    const lum = (hex) => {
+      const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+      return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    };
+    const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+    return (x + 0.05) / (y + 0.05);
+  };
+  const HEX = /^#[0-9a-fA-F]{6}$/;
+  function barColorRow(b) {
+    const chosen = (b.color || "").toLowerCase();
+    const own = !chosen;
+    const fg = S.tokens["fg-s"];
+    const low = !own && HEX.test(chosen) && HEX.test(fg || "") && contrast(chosen, fg) < 4.5;
+    const swatches = `<button class="swatch def${own ? " on" : ""}" type="button" data-set="bar.color" data-val='""' aria-label="${t("setBarColorOwn")}" title="${t("setBarColorOwn")}"></button>`
+      + BAR_COLORS.map((x) => `<button class="swatch${chosen === x.toLowerCase() ? " on" : ""}" type="button" data-set="bar.color" data-val='"${x}"' style="background:${x}" aria-label="${x}" title="${x}"></button>`).join("")
+      + `<input type="color" class="swatch-pick" id="bar-color" value="${HEX.test(chosen) ? chosen : "#000000"}" aria-label="${t("setBarColorCustom")}" title="${t("setBarColorCustom")}">`;
+    const label = `<span class="sw-label">${own ? t("setBarColorOwn") : escapeHtml(chosen)}</span>`;
+    const warn = low ? `<span class="sw-warn" role="note">${t("setBarColorLow")}</span>` : "";
+    return `<div class="set-grp"><span class="gl">${t("setBarColor")}. ${t("setBarColorH")}</span><div class="swatches">${swatches}${label}</div>${warn}</div>`;
+  }
+
   // The design's order, with the apps after the title (DECISIONS D25).
   const MODULES = ["app_grid", "title", "taskbar", "clock", "date", "media", "cpu", "ram", "gpu", "net", "vol", "tray", "notif", "power"];
   function barPage() {
@@ -318,6 +344,7 @@
       ${rowFor("bar.background", t("setBg"), t("setBgH"), segFor("bar.background", t("setBg"), [["solid", t("setBgSolid")], ["blur", t("setBgBlur")], ["off", t("setBgOff")]]))}
       ${row(t("setHeight"), heightHint, range("bar-height", "bar.height", RANGES.height, height, t("setHeight")))}
       ${row(t("setTrayShown"), t("setTrayShownH"), trayRange)}</div>
+      ${barColorRow(b)}
       <div class="set-grp"><span class="gl">${t("modules")}. ${t("modulesH")}</span>
         <div class="chips" role="group" aria-label="${t("modules")}">${chips}</div></div>`;
   }
@@ -612,6 +639,7 @@
     if (el.dataset.range) set(el.dataset.range, Number(el.value));
     if (el.id === "dim-value" || el.id === "dim-unit") { const sec = readDim(); if (sec != null) set("oled.dim_after_secs", sec); }
     if (el.id === "rule-what") ui.ruleForm.what = el.value;
+    if (el.id === "bar-color") set("bar.color", el.value.toUpperCase());
   });
 
   /* ---------- messages from Rust ---------- */

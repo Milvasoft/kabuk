@@ -187,6 +187,17 @@ async function main() {
   check(gridChip.includes("Tüm uygulamalar"), `app grid button chip named: ${gridChip}`);
   await page.click(`[data-tgl="bar.modules.app_grid"]`); await settled();
   check(/app_grid = false/.test(toml()), "app grid button off");
+  // DECISIONS D57: the bar's colour from a swatch; a light one warns about the text; the
+  // look's own takes it away again.
+  await page.click(`[data-set="bar.color"][data-val='"#1E1433"']`); await settled();
+  check(/color = "#1E1433"/.test(toml()) && (await page.locator(".sw-warn").count()) === 0, "bar colour: a dark swatch, no warning");
+  await page.click(`[data-set="bar.color"][data-val='"#E9E6E1"']`); await settled();
+  check(/color = "#E9E6E1"/.test(toml()) && (await page.locator(".sw-warn").count()) === 1, "bar colour: a light swatch warns about the text");
+  await page.$eval("#bar-color", (el) => { el.value = "#204060"; el.dispatchEvent(new Event("change", { bubbles: true })); });
+  await settled();
+  check(/color = "#204060"/.test(toml()), "bar colour: any colour from the picker");
+  await page.click(`[data-set="bar.color"][data-val='""']`); await settled();
+  check(!/color = "#/.test(toml()), "bar colour: the look's own again");
   await page.$eval("#bar-height", (el) => { el.value = "48"; el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true })); });
   await settled();
   check(/height = 48/.test(toml()), "bar height 48");

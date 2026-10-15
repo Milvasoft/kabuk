@@ -29,11 +29,16 @@ const ROLE_TOKENS: [(Role, &str); 17] = [
 /// (`color-mix(in srgb, var(--fg-s) 65%, var(--dim))`).
 pub const BUSY_FG_SHARE: f32 = 0.65;
 
-pub fn palette(tokens: &Tokens) -> Palette {
+/// The palette of `tokens`; `bar` is the bar strip's colour the user chose (the desk
+/// colour when `None`).
+pub fn palette(tokens: &Tokens, bar: Option<Color>) -> Palette {
     let mut colors: Vec<(Role, Color)> = ROLE_TOKENS
         .iter()
         .filter_map(|(role, name)| tokens.color(name).map(|c| (*role, c)))
         .collect();
+    if let Some(fill) = bar.or_else(|| tokens.color("desk")) {
+        colors.push((Role::BarFill, fill));
+    }
     if let (Some(fg), Some(dim)) = (tokens.color("fg-s"), tokens.color("dim")) {
         colors.push((Role::Busy, mix(fg, dim, BUSY_FG_SHARE)));
     }
@@ -78,7 +83,7 @@ mod tests {
         for code in ["a", "b", "c", "d", "e", "f", "g"] {
             let t = theme(code).unwrap();
             for mode in [Mode::Dark, Mode::Light] {
-                let p = palette(t.tokens(mode));
+                let p = palette(t.tokens(mode), None);
                 for (role, name) in ROLE_TOKENS {
                     // Only some looks define traces; the others never draw them.
                     if matches!(role, Role::Trace | Role::TraceStrong) {
@@ -91,16 +96,27 @@ mod tests {
         }
         // Rıhtım's dock tiles are gradients in both modes; other looks have none.
         for mode in [Mode::Dark, Mode::Light] {
-            let p = palette(theme("f").unwrap().tokens(mode));
+            let p = palette(theme("f").unwrap().tokens(mode), None);
             assert!(crate::bar::dock::tiles().all(|n| p.gradient(Role::Tile(n)).is_some()));
-            assert!(palette(theme("a").unwrap().tokens(mode))
+            assert!(palette(theme("a").unwrap().tokens(mode), None)
                 .gradient(Role::Tile(1))
                 .is_none());
         }
         assert_eq!(
-            palette(theme("a").unwrap().tokens(Mode::Dark)).get(Role::White),
+            palette(theme("a").unwrap().tokens(Mode::Dark), None).get(Role::White),
             Color::WHITE
         );
+        // The bar strip's own colour: the desk colour, or the one chosen (D57).
+        let ada = theme("a").unwrap();
+        let a = ada.tokens(Mode::Dark);
+        assert_eq!(palette(a, None).get(Role::BarFill), a.color("desk").unwrap());
+        let chosen = Color {
+            r: 30,
+            g: 20,
+            b: 51,
+            a: 1.0,
+        };
+        assert_eq!(palette(a, Some(chosen)).get(Role::BarFill), chosen);
         let f = families(theme("a").unwrap().tokens(Mode::Dark));
         assert_eq!((f.ui.as_str(), f.num.as_str()), ("Geist", "Geist Mono"));
     }

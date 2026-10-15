@@ -87,7 +87,7 @@ fn main() {
     };
     let i18n = I18n::new(Lang::Tr);
     let resolved = kabuk_theme::resolve::resolve(look.code(), mode, None).expect("theme");
-    let palette = theme::palette(&resolved.tokens);
+    let palette = theme::palette(&resolved.tokens, None);
     let gpu = Gpu::new().expect("gpu");
     gpu.text.set_families(theme::families(&resolved.tokens));
     let style = LauncherStyle::of(look);

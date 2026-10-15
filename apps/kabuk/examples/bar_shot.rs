@@ -70,9 +70,10 @@ fn main() {
             &kabuk_theme::resolve::resolve(look.code(), Mode::Dark, None)
                 .unwrap()
                 .tokens,
+            None,
         )
     } else {
-        theme::palette(&resolved.tokens)
+        theme::palette(&resolved.tokens, None)
     };
     let tokens = &resolved.tokens;
     let gpu = Gpu::new().expect("gpu");

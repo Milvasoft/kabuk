@@ -47,6 +47,7 @@ autohide = false
 background = "solid"      # behind the bar over the wallpaper: solid (desk colour), blur, off
 # height = 38              # bar thickness in px (24-72); unset: the look's own
 tray_shown = 3            # tray icons on the bar (0-12); the rest open from the overflow button
+# color = "#1E1433"       # the bar's colour (solid or blurred background); unset: the look's own
 
 [bar.modules]
 title = true

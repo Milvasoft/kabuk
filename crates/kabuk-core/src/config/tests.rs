@@ -267,6 +267,18 @@ fn accent_colour() {
     assert_eq!(parse_hex_color("#0a84ff"), Some([0x0a, 0x84, 0xff]));
 }
 
+/// DECISIONS D57: the bar's colour is a #rrggbb colour or unset.
+#[test]
+fn bar_colour() {
+    assert!(parse("[bar]\ncolor = \"#1e1433\"").is_ok());
+    assert!(parse("[bar]\ntray_shown = 3").is_ok());
+    for bad in ["1e1433", "#1e143", "theme", "navy"] {
+        let e = single_error(&format!("schema = 1\n[bar]\ncolor = \"{bad}\"\n"));
+        assert_eq!(e.problem, Problem::InvalidColor(bad.to_string()));
+        assert_eq!(e.path, path("bar.color"));
+    }
+}
+
 #[test]
 fn invalid_shortcut_is_located_by_index() {
     let e = single_error("schema = 1\n[shortcuts]\nfocus_left = [\"Alt+H\", \"Alt+Nope\"]\n");

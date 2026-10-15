@@ -178,6 +178,9 @@ pub struct Style {
     pub text_scale: f32,
     /// A wallpaper (not plain black) shows behind the bar (design `.screen.has-wall`).
     pub wallpaper: bool,
+    /// The colour the user chose for the bar strip (`bar.color`, D57): it fills the whole
+    /// strip in every look, its slab's corners kept.
+    pub bar_color: Option<[u8; 3]>,
 }
 
 /// How opaque the desk colour lies over the blurred wallpaper behind a bar
@@ -208,10 +211,22 @@ impl Style {
         self
     }
 
+    pub fn with_bar_color(mut self, color: Option<[u8; 3]>) -> Style {
+        self.bar_color = color;
+        self
+    }
+
     /// What fills the bar strip: the look's own background, or over a wallpaper the desk
     /// colour, so the text keeps the contrast it was checked against (all looks but Ada,
     /// whose capsules carry their own surface).
     pub fn bar_background(&self) -> Option<Paint> {
+        if self.bar_color.is_some() {
+            return Some(Paint {
+                fill: Role::BarFill,
+                border: self.bar_paint.and_then(|p| p.border),
+                radius: self.bar_paint.map_or(0.0, |p| p.radius),
+            });
+        }
         self.bar_paint.or_else(|| {
             (self.wallpaper && self.look != Look::Ada).then_some(Paint {
                 fill: Role::Desk,
@@ -317,6 +332,7 @@ fn ada() -> Style {
         strong_weight: 700,
         text_scale: 1.0,
         wallpaper: false,
+        bar_color: None,
     }
 }
 
@@ -584,5 +600,20 @@ mod tests {
             assert_eq!(s.with_wallpaper(true).bar_background(), s.bar_paint, "{look:?}");
             assert_eq!(s.with_wallpaper(false).bar_background(), s.bar_paint, "{look:?}");
         }
+    }
+
+    /// DECISIONS D57: a colour the user chose fills the whole strip in every look, with
+    /// or without a wallpaper; a look's slab keeps its corners and border.
+    #[test]
+    fn a_chosen_bar_colour_fills_the_strip_in_every_look() {
+        for look in Look::ALL {
+            let s = Style::of(look).with_bar_color(Some([30, 20, 51]));
+            for wall in [true, false] {
+                let p = s.with_wallpaper(wall).bar_background().expect("painted");
+                assert_eq!(p.fill, Role::BarFill, "{look:?}");
+                assert_eq!(p.radius, s.bar_paint.map_or(0.0, |o| o.radius), "{look:?}");
+            }
+        }
+        assert_eq!(Style::of(Look::Ada).with_bar_color(None).bar_background(), None);
     }
 }

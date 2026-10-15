@@ -570,6 +570,11 @@ fn text_size(t: config::TextSize) -> TextSize {
     }
 }
 
+/// `bar.color` as red, green and blue; `None` for the look's own.
+fn bar_color(cfg: &Config) -> Option<[u8; 3]> {
+    kabuk_core::config::parse_hex_color(&cfg.bar.color)
+}
+
 fn resolve_look(cfg: &Config, windows_light: bool, hour: u8) -> Look {
     let mode = mode_now(mode_choice(cfg.appearance.mode), windows_light, hour);
     let accent = (cfg.appearance.accent != config::THEME_ACCENT).then_some(cfg.appearance.accent.as_str());
@@ -579,10 +584,14 @@ fn resolve_look(cfg: &Config, windows_light: bool, hour: u8) -> Look {
             .or_else(|| resolve("a", m, accent))
             .expect("the Ada theme is embedded")
     };
+    // The colour the user chose for the bar strip (D57), painted when it is solid; over
+    // the blur the tinted backdrop takes it instead.
+    let bar_color = bar_color(cfg).filter(|_| cfg.bar.background == BarBackground::Solid);
     let style = Style::of(cfg.appearance.look)
         .with_text_scale(text_size(cfg.appearance.text_size).factor())
         // Over the blur the tinted backdrop stands in for the desk colour (D28).
-        .with_wallpaper(wallpaper_behind_bars(cfg) && cfg.bar.background != BarBackground::Blur);
+        .with_wallpaper(wallpaper_behind_bars(cfg) && cfg.bar.background != BarBackground::Blur)
+        .with_bar_color(bar_color);
     let r = resolved(mode);
     if let Some(shade) = &r.accent_adapted {
         tracing::info!(shade = %shade, "accent adapted for readability");
@@ -595,10 +604,11 @@ fn resolve_look(cfg: &Config, windows_light: bool, hour: u8) -> Look {
         "look resolved"
     );
     // Etkinlik's bar stays black, so its text keeps the dark tokens in light mode.
+    let fill = bar_color.map(|[r, g, b]| kabuk_theme::Color { r, g, b, a: 1.0 });
     let palette = if style.bar_dark {
-        theme::palette(&resolved(Mode::Dark).tokens)
+        theme::palette(&resolved(Mode::Dark).tokens, fill)
     } else {
-        theme::palette(&r.tokens)
+        theme::palette(&r.tokens, fill)
     };
     Look {
         style,
@@ -927,8 +937,10 @@ impl Shared {
         self.apply_cursors();
         self.apply_system_colors();
         self.apply_wallpaper();
-        if mode_changed {
-            tracing::info!(mode = ?self.look.mode, "mode changed");
+        if mode_changed || repainted {
+            if mode_changed {
+                tracing::info!(mode = ?self.look.mode, "mode changed");
+            }
             let bars: Vec<Hwnd> = self.bars.iter().map(|b| b.window.hwnd()).collect();
             for hwnd in bars {
                 self.set_backdrop(hwnd);
@@ -2437,8 +2449,12 @@ impl Shared {
     fn set_backdrop(&self, hwnd: Hwnd) {
         let tint = (self.config().bar.background == BarBackground::Blur).then(|| {
             let alpha = (BLUR_TINT_ALPHA * f32::from(u8::MAX)).round() as u8;
-            // Every look names its desk colour; black is the desk of the dark modes.
-            let (r, g, b) = self.look.tokens.color("desk").map_or((0, 0, 0), |d| (d.r, d.g, d.b));
+            // The colour the user chose (D57), else the look's desk colour; black is the
+            // desk of the dark modes.
+            let (r, g, b) = match bar_color(self.config()) {
+                Some([r, g, b]) => (r, g, b),
+                None => self.look.tokens.color("desk").map_or((0, 0, 0), |d| (d.r, d.g, d.b)),
+            };
             [r, g, b, alpha]
         });
         if !hwnd.set_blur_behind(tint) && tint.is_some() {
