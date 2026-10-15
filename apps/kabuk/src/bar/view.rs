@@ -1243,16 +1243,32 @@ pub fn compose(r: &Regions, size: Size, s: &Style, edge: Edge, measure: &dyn Tex
     let side_room = ((main - center_len) / 2.0 - pad - gap).max(0.0);
     let end = (!r.end.is_empty()).then(|| fitted(joined(&r.end, s, vertical, thickness), side_room, vertical, measure));
     let length = |n: &Option<Node>| n.as_ref().map(|n| len(layout(n, Point::default(), measure).size));
-    // The start's groups with `shown` of the apps among them.
+    // With no centre group (the clock at the end), the start may reach up to the end.
+    let start_room = match center {
+        Some(_) => side_room,
+        None => (main - 2.0 * pad - length(&end).map_or(0.0, |l| l + s.group_gap)).max(0.0),
+    };
+    // The start's groups with `shown` of the apps among them. Pano's tasks keep their
+    // names: the ones without room go behind the "+n", as on Windows' taskbar.
     let start_with = |shown: usize| {
         let mut groups = r.start.clone();
         if let Some(a) = &r.apps {
             groups.insert(a.at.min(groups.len()), a.node(shown, s, vertical, thickness));
         }
-        (!groups.is_empty()).then(|| fitted(joined(&groups, s, vertical, thickness), side_room, vertical, measure))
+        (!groups.is_empty()).then(|| {
+            let all = joined(&groups, s, vertical, thickness);
+            if s.tasks.is_some() {
+                all
+            } else {
+                fitted(all, start_room, vertical, measure)
+            }
+        })
     };
     // As many apps as leave room for the centre and the end, the rest behind a "+n".
-    let room_for_start = main - 2.0 * pad - length(&end).map_or(0.0, |l| l + gap) - center_len - gap;
+    let room_for_start = match center {
+        Some(_) => main - 2.0 * pad - length(&end).map_or(0.0, |l| l + gap) - center_len - gap,
+        None => start_room,
+    };
     let all = r.apps.as_ref().map_or(0, |a| a.icons.len());
     let mut start = start_with(all);
     let mut shown = all;
@@ -1741,6 +1757,39 @@ mod tests {
         let l = compose(&r, size, &Style::of(Look::Ada), Edge::Top, &Fake);
         let centre = panels(&l).into_iter().find(|(_, p)| p.fill == Role::Accent).unwrap().0;
         assert!((centre.x - (1892.0 - 100.0) / 2.0).abs() < 0.01);
+    }
+
+    /// Found trying Pano on the user's desktop: with more tasks than the bar holds, names
+    /// were cut to "M…" to make them fit. As on Windows' taskbar, the tasks that do not
+    /// fit go behind the "+n" instead, the others keep their names, and they may run past
+    /// the middle of a bar whose clock is at the end.
+    #[test]
+    fn pano_puts_the_tasks_that_do_not_fit_behind_more() {
+        let tr = I18n::new(Lang::Tr);
+        let apps: Vec<AppIcon> = (0..16)
+            .map(|i| AppIcon {
+                label: format!("Program number {i}"),
+                image: i,
+                running: true,
+                focused: i == 0,
+                grow: 0.0,
+                shift: (0.0, 0.0),
+            })
+            .collect();
+        let d = BarData { apps, ..data(&tr) };
+        let l = render_look(Look::Pano, &d, &tr);
+        let names: Vec<String> = texts(&l).into_iter().filter(|t| t.starts_with("Program")).collect();
+        assert!(names.len() > 5 && names.len() < 16, "{names:?}");
+        for n in &names {
+            let spec = spec_of(&l, n);
+            assert!(
+                spec.max_width
+                    .is_some_and(|w| w >= 210.0 - 2.0 * 12.0 - 16.0 - 9.0 - 0.01),
+                "{n} cut"
+            );
+        }
+        let more = l.hits.iter().find(|(_, h)| h.module == hit::APP_MORE).expect("a +n").0;
+        assert!(more.x > 1892.0 / 2.0, "past the middle: {more:?}");
     }
 
     /// `.screen[data-dir="h"]`: the apps as tasks with their names, the focused one on
