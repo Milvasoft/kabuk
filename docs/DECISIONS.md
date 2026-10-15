@@ -8,6 +8,9 @@ No open decisions (the user decided D39, D43, D44 and the still pictures' drift 
 
 ## Decided and proposed
 
+### D55 · The watchdog restarts a shell that stops answering — Decided by the user (2026-10-15)
+Found using Kabuk: the window manager waited for a lock it held itself (it could not put the accent frame on an elevated window, Hyper-V Manager, and took the lock again to clear the record), the bar waited for the same lock, and the whole shell stood still for a quarter of an hour. The watchdog only looked for a process that ended, so nothing noticed; the emergency hotkey (owned by the watchdog) still worked. The deadlock is fixed, and clippy's `significant_drop_in_scrutinee` is denied workspace-wide so a lock held through a `match` or `if let` cannot come back. Asked whether the watchdog should also end a shell that stops answering, the user chose yes: every 5 s it sends the bar's and the window manager's windows an empty message (waiting at most 2 s, and not at all for a thread Windows already counts as hung); after 15 s and at least 3 questions without an answer it ends the shell with exit code 17, restores the desktop and starts it again, as after a crash (the 3-in-60-s budget applies). Waking from sleep alone never counts, as it is one question, not three.
+
 ### D54 · The volume panel switches the output device — Decided by the user (2026-10-15)
 Asked whether the volume panel should list the output devices as Windows 11's sound flyout does, the user said yes. Core Audio lists the active outputs and the default one (documented); making another one the default has no documented call, so Kabuk uses `IPolicyConfig::SetDefaultEndpoint` on Windows' `CPolicyConfigClient`, the interface Windows' own sound settings use, unchanged since Windows 7, for every role (console, multimedia, communications). If a Windows update changes it, choosing a device fails and is logged; the panel and the volume keep working.
 

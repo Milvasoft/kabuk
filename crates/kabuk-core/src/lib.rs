@@ -8,6 +8,7 @@ pub mod fsutil;
 pub mod fullscreen;
 pub mod genie;
 pub mod grab;
+pub mod hang;
 pub mod install;
 pub mod instance;
 pub mod ipc;

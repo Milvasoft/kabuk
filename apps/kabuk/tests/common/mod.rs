@@ -293,6 +293,11 @@ impl Sandbox {
 
     /// The watchdog with a test-mode window manager in its shell (see [`Sandbox::shell_with_wm`]).
     pub fn watchdog_with_wm(&self) -> Proc {
+        self.watchdog_with_wm_and(&[])
+    }
+
+    /// As [`Sandbox::watchdog_with_wm`], with more arguments for the shell.
+    pub fn watchdog_with_wm_and(&self, shell_args: &[&str]) -> Proc {
         let mut cmd = Command::new(watchdog_exe());
         cmd.env("KABUK_LOG", "debug")
             .arg("--state-dir")
@@ -307,7 +312,8 @@ impl Sandbox {
                 "--leave-explorer",
                 "--manage-class",
                 TEST_WINDOW_CLASS,
-            ]);
+            ])
+            .args(shell_args);
         Proc(cmd.spawn().expect("start kabuk-watchdog"))
     }
 

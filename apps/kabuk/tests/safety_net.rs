@@ -2,7 +2,8 @@
 //! budget, `kabuk --restore` in every state, emergency hotkey, single instance,
 //! leftover restore on start.
 //!
-//! Edge cases: forced kill (TerminateProcess), repeated crashes, missing / corrupt /
+//! Edge cases: forced kill (TerminateProcess), a shell that stops answering, repeated
+//! crashes, missing / corrupt /
 //! stale state files, a handle recorded with the wrong owner, a running shell stopped
 //! by `--restore`, the hotkey delivered to the watchdog and to a lone shell, a second
 //! shell for the same state directory, taskbar and work-area entries that must be
@@ -58,6 +59,52 @@ fn watchdog_restores_hidden_window_within_two_seconds_after_a_kill() {
     assert!(window.hwnd.is_visible());
     assert!(!hidden_in_state(&sandbox, window.hwnd));
     assert_eq!(sandbox.log_lines("shell crashed; desktop restored"), 1);
+
+    let (code, _) = sandbox.restore();
+    assert_eq!(code, 0);
+    let status = watchdog
+        .wait_exit(Duration::from_secs(5))
+        .expect("watchdog stops after --restore");
+    assert_eq!(status.code(), Some(exit::OK));
+}
+
+/// DECISIONS D55: a shell whose window manager stops answering (found by the user: it
+/// froze for a quarter of an hour) is ended by the watchdog, the desktop restored and
+/// the shell started again.
+#[test]
+fn watchdog_restarts_a_shell_that_stopped_answering() {
+    use kabuk_core::hang::{ANSWER_WAIT, HUNG_AFTER, MISSED_PROBES, PROBE_EVERY};
+    let sandbox = Sandbox::new();
+    let t = title("hang");
+    let window = TestWindow::open(&["--title", &t]);
+    let mut watchdog = sandbox.watchdog_with_wm_and(&["--debug-hide-title", &t, "--debug-hang-after-ms", "500"]);
+    wait_hidden_by_shell(&sandbox, &window);
+    let pid = sandbox.state().kabuk_pid.expect("shell pid recorded");
+    assert!(
+        wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("simulated hang") == 1).is_some(),
+        "the shell never hung"
+    );
+
+    // The questions go unanswered for the limit, then one more round may pass.
+    let questions = (PROBE_EVERY + ANSWER_WAIT) * (MISSED_PROBES + 1);
+    let limit = HUNG_AFTER.max(questions) + PROBE_EVERY + ANSWER_WAIT + RESTORE_LIMIT;
+    assert!(
+        wait_until(limit, || window.hwnd.is_visible()).is_some(),
+        "the hung shell's window never came back"
+    );
+    assert_eq!(sandbox.log_lines("shell stopped answering; ending it"), 1);
+    assert_eq!(sandbox.log_lines("shell crashed; desktop restored"), 1);
+    assert!(Process::open(pid).map_or(true, |p| p.wait(Some(RESTORE_LIMIT))));
+
+    // A new shell runs, without hiding the window again, and answers.
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.state().kabuk_pid.is_some_and(|p| p != pid)).is_some());
+    let restarted = Process::open(sandbox.state().kabuk_pid.unwrap()).unwrap();
+    assert!(wait_until(STARTUP_TIMEOUT, || restarted
+        .answers(&kabuk_core::hang::PROBED_CLASSES, ANSWER_WAIT)
+        == kabuk_core::hang::Probe::Answered)
+    .is_some());
+    assert!(window.hwnd.is_visible());
+    assert!(!hidden_in_state(&sandbox, window.hwnd));
 
     let (code, _) = sandbox.restore();
     assert_eq!(code, 0);

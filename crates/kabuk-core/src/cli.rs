@@ -23,6 +23,9 @@ pub struct Debug {
     pub hide_title: Option<String>,
     /// Exit with a crash code after this many milliseconds.
     pub crash_after_ms: Option<u64>,
+    /// Stop the window manager answering after this many milliseconds, as a hung shell
+    /// (first start only, not after a restart).
+    pub hang_after_ms: Option<u64>,
     /// Read Windows' app mode from this file (`light` or `dark`) instead of the registry,
     /// so a test can switch it without touching the user's settings.
     pub app_mode_file: Option<PathBuf>,
@@ -33,7 +36,11 @@ pub struct Debug {
 
 impl Debug {
     pub fn is_set(&self) -> bool {
-        self.hide_title.is_some() || self.crash_after_ms.is_some() || self.app_mode_file.is_some() || self.shortcuts
+        self.hide_title.is_some()
+            || self.crash_after_ms.is_some()
+            || self.hang_after_ms.is_some()
+            || self.app_mode_file.is_some()
+            || self.shortcuts
     }
 }
 
@@ -145,6 +152,8 @@ pub fn debug_unavailable(debug: &Debug) -> Option<Message> {
         "--debug-hide-title"
     } else if debug.crash_after_ms.is_some() {
         "--debug-crash-after-ms"
+    } else if debug.hang_after_ms.is_some() {
+        "--debug-hang-after-ms"
     } else if debug.app_mode_file.is_some() {
         "--debug-app-mode-file"
     } else if debug.shortcuts {
@@ -286,6 +295,10 @@ pub fn parse_kabuk(args: impl IntoIterator<Item = OsString>) -> Result<KabukComm
             }
             "--debug-crash-after-ms" => {
                 run.debug.crash_after_ms = Some(number(&flag, &args.value(&flag, inline)?)?);
+                run_only.get_or_insert(flag);
+            }
+            "--debug-hang-after-ms" => {
+                run.debug.hang_after_ms = Some(number(&flag, &args.value(&flag, inline)?)?);
                 run_only.get_or_insert(flag);
             }
             "--debug-shortcuts" => {
@@ -430,6 +443,8 @@ mod tests {
             "--debug-hide-title",
             "t 1",
             "--debug-crash-after-ms=50",
+            "--debug-hang-after-ms",
+            "70",
             "--debug-app-mode-file",
             "D:\\mode",
             "--debug-shortcuts",
@@ -443,6 +458,7 @@ mod tests {
         assert_eq!(run.manage_class.as_deref(), Some("KabukTestWindow"));
         assert_eq!(run.debug.hide_title.as_deref(), Some("t 1"));
         assert_eq!(run.debug.crash_after_ms, Some(50));
+        assert_eq!(run.debug.hang_after_ms, Some(70));
         assert_eq!(run.debug.app_mode_file, Some(PathBuf::from("D:\\mode")));
         assert!(run.debug.shortcuts);
         assert!(run.debug.is_set());
@@ -527,6 +543,15 @@ mod tests {
         assert_eq!(
             debug_unavailable(&d).unwrap().args[0].1,
             kabuk_i18n::Arg::Str("--debug-crash-after-ms".into())
+        );
+        let hang = Debug {
+            hang_after_ms: Some(1),
+            ..Debug::default()
+        };
+        assert!(hang.is_set());
+        assert_eq!(
+            debug_unavailable(&hang).unwrap().args[0].1,
+            kabuk_i18n::Arg::Str("--debug-hang-after-ms".into())
         );
     }
 

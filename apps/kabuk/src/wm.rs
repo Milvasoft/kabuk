@@ -40,7 +40,7 @@ pub fn lock(state: &SharedState) -> MutexGuard<'_, StateFile> {
 
 /// Class of the window manager's hidden window; its title is the instance id, so tests
 /// can find it.
-pub const WM_CLASS: &str = "Kabuk.Wm";
+pub const WM_CLASS: &str = kabuk_core::hang::WM_CLASS;
 
 /// Commands queued for the window manager wake it with this message.
 const MSG_COMMAND: u32 = msg::APP + 10;
@@ -208,6 +208,9 @@ pub enum Command {
     GameMode(Vec<String>),
     /// `kabuk.toml` changed on disk.
     ConfigChanged,
+    /// `--debug-hang-after-ms`: the thread stops answering for good, as a hung shell.
+    #[cfg(feature = "integration")]
+    DebugHang,
     /// From the mouse hook: a window held with Alt, let go, or double-clicked.
     Grab(Order),
     /// A click on the bar minimises the app's front window.
@@ -840,6 +843,13 @@ impl Wm {
             // A save comes as several notifications (a temporary file, a rename); read
             // once they stop, as the bars do.
             Command::ConfigChanged => self.schedule(timer::CONFIG, crate::bar::manager::CONFIG_DEBOUNCE),
+            #[cfg(feature = "integration")]
+            Command::DebugHang => {
+                tracing::warn!("simulated hang");
+                loop {
+                    std::thread::park();
+                }
+            }
             Command::Grab(order) => self.grab(order),
             Command::Minimize(hwnd) => self.minimize(hwnd),
             Command::AppIcons(icons) => {

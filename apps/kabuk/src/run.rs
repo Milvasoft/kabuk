@@ -158,6 +158,15 @@ pub fn main(options: Run) -> i32 {
         .map(|ms| Instant::now() + Duration::from_millis(ms));
     #[cfg(not(feature = "integration"))]
     let deadline: Option<Instant> = None;
+    // A restarted shell answers again, as one after a real hang would.
+    #[cfg(feature = "integration")]
+    let mut hang_at = options
+        .debug
+        .hang_after_ms
+        .filter(|_| options.restart_count == 0)
+        .map(|ms| Instant::now() + Duration::from_millis(ms));
+    #[cfg(not(feature = "integration"))]
+    let hang_at: Option<Instant> = None;
 
     let watch = config_watch(&paths);
     // Only a change of the file itself reloads, not one of its neighbours (the state
@@ -221,7 +230,11 @@ pub fn main(options: Run) -> i32 {
         if let Some(w) = &watch {
             waits.push(w);
         }
-        let timeout = deadline.map(|d| d.saturating_duration_since(Instant::now()));
+        let next = match (deadline, hang_at) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+        let timeout = next.map(|d| d.saturating_duration_since(Instant::now()));
         match msgloop::run_until(&waits, timeout) {
             Wake::Signalled(0) => {
                 tracing::warn!("emergency stop");
@@ -248,6 +261,18 @@ pub fn main(options: Run) -> i32 {
                 break exit::OK;
             }
             Wake::Timeout => {
+                // The hang's moment, when it comes before the crash's. The wait may end
+                // a little early (whole milliseconds): then it goes on waiting.
+                #[cfg(feature = "integration")]
+                if let Some(at) = hang_at.filter(|at| deadline.is_none_or(|d| *at <= d)) {
+                    if at <= Instant::now() {
+                        hang_at = None;
+                        if let Some(w) = &manager {
+                            w.send(Command::DebugHang);
+                        }
+                    }
+                    continue;
+                }
                 // Leave without restoring, exactly like a real crash.
                 #[cfg(feature = "integration")]
                 {

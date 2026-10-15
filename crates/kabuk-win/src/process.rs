@@ -137,6 +137,33 @@ impl Process {
         (!id.is_empty()).then_some(id)
     }
 
+    /// Whether the process's top-level windows of `classes` each answer within `wait`
+    /// (DECISIONS D55). A hung window's thread is not waited for at all.
+    pub fn answers(&self, classes: &[&str], wait: Duration) -> kabuk_core::hang::Probe {
+        use kabuk_core::hang::Probe;
+        use windows::Win32::UI::WindowsAndMessaging::WM_NULL;
+        let asked: Vec<_> = crate::window::top_level_windows()
+            .into_iter()
+            .filter(|w| w.pid() == Some(self.pid) && classes.contains(&w.class_name().as_str()))
+            .collect();
+        if asked.is_empty() {
+            return Probe::NoWindows;
+        }
+        let nothing = crate::msgloop::Msg {
+            id: WM_NULL,
+            wparam: 0,
+            lparam: 0,
+        };
+        if asked
+            .iter()
+            .all(|w| crate::msgloop::send_message(*w, nothing, wait).is_ok())
+        {
+            Probe::Answered
+        } else {
+            Probe::Silent
+        }
+    }
+
     /// Waits up to `grace` for the process to exit, then terminates it with `code`.
     /// Returns true if it exited by itself.
     pub fn stop(&self, grace: Duration, code: u32) -> bool {

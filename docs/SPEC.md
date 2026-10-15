@@ -219,7 +219,7 @@ On the Turkish Q keyboard there must be no conflict with AltGr (`Ctrl+Alt`) or t
 
 Each is measurable; each is verified in every release with the tests in PLAN.
 
-1. **Crash safety.** If Kabuk crashes or is killed from Task Manager, the watchdog process restores all hidden windows and the taskbar and resets the work area within 2 seconds.
+1. **Crash safety.** If Kabuk crashes or is killed from Task Manager, the watchdog process restores all hidden windows and the taskbar and resets the work area within 2 seconds. If the bar or the window manager stops answering for 15 seconds, the watchdog ends Kabuk and does the same, then starts it again (DECISIONS D55).
 2. **If Explorer restarts**, the bar re-establishes its reserved space, the tray icons and the window layout by itself.
 3. **Two monitors.** When a monitor is unplugged and plugged back in, and on wake from sleep, windows stay on their own monitor. On monitors with different DPI the bar and text are sharp on every screen.
 4. **Smart floating windows** (§2.2) do not break the layout.

@@ -67,6 +67,7 @@ Each with `kabuk-testapp` windows:
 - A window is tiled when it opens; when it closes, the layout is recalculated.
 - Workspace switch: the old workspace's windows are hidden and in the state file; on switching back they are visible and in the same place.
 - **Crash:** `kabuk.exe` is force-terminated → the watchdog shows all test windows within 2 s.
+- **Hang:** the shell's window manager stops answering → the watchdog ends the shell, shows the test windows and starts a new shell (DECISIONS D55).
 - `kabuk --restore` shows the windows in every state and returns exit code 0.
 - A window that enforces a minimum size becomes floating, the others are tiled properly.
 - With a hung window present (message loop blocked), moving other windows and shortcuts work within 100 ms.

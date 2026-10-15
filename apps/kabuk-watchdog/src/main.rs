@@ -1,6 +1,7 @@
 //! `kabuk-watchdog.exe`: starts `kabuk.exe`, waits for it, restores the desktop when it
-//! stops abnormally and restarts it (at most 3 times in 60 s). It also owns the
-//! emergency hotkey, so the hotkey works even when the shell hangs.
+//! stops abnormally or stops answering (DECISIONS D55) and restarts it (at most 3 times
+//! in 60 s). It also owns the emergency hotkey, so the hotkey works even when the shell
+//! hangs.
 
 #![windows_subsystem = "windows"]
 
@@ -10,6 +11,7 @@ use std::process::Command;
 use kabuk_core::cli;
 use kabuk_core::clock::{Clock, SystemClock};
 use kabuk_core::config::{self, shortcut::EMERGENCY_CHORD};
+use kabuk_core::hang;
 use kabuk_core::instance::{exit, Instance, EMERGENCY_GRACE};
 use kabuk_core::paths::Paths;
 use kabuk_core::restart::{Decision, RestartLimiter, MAX_RESTARTS, RESTART_WINDOW};
@@ -123,7 +125,7 @@ fn run() -> i32 {
         };
         tracing::info!(pid, restarts, "shell started");
 
-        match msgloop::run_until(&[&process, &emergency], None) {
+        match watch(&process, &emergency, &clock) {
             Wake::Signalled(0) => {}
             // Emergency (hotkey or `kabuk --restore`), or WM_QUIT: stop everything.
             _ => {
@@ -162,6 +164,35 @@ fn run() -> i32 {
                 }
                 return exit::GAVE_UP;
             }
+        }
+    }
+}
+
+/// Waits until the shell exits (`Signalled(0)`), the emergency stop is asked for
+/// (`Signalled(1)`) or `WM_QUIT` comes, asking the shell every [`hang::PROBE_EVERY`]
+/// whether it still answers. A shell that stopped answering is ended with
+/// [`exit::HUNG`] and counts as exited: it is restored and restarted as after a crash
+/// (DECISIONS D55).
+fn watch(process: &Process, emergency: &NamedEvent, clock: &SystemClock) -> Wake {
+    let mut silence = hang::HangWatch::default();
+    loop {
+        match msgloop::run_until(&[process, emergency], Some(hang::PROBE_EVERY)) {
+            Wake::Timeout => {
+                let probe = process.answers(&hang::PROBED_CLASSES, hang::ANSWER_WAIT);
+                if probe == hang::Probe::Silent {
+                    tracing::warn!(pid = process.pid(), "the shell did not answer");
+                }
+                if silence.probe(clock.now(), probe) {
+                    tracing::error!(pid = process.pid(), "shell stopped answering; ending it");
+                    let code = u32::try_from(exit::HUNG).unwrap_or_default();
+                    if let Err(e) = process.terminate(code) {
+                        tracing::error!(error = %e, "the hung shell could not be ended");
+                    }
+                    process.wait(Some(EMERGENCY_GRACE));
+                    return Wake::Signalled(0);
+                }
+            }
+            other => return other,
         }
     }
 }

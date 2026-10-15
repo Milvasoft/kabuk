@@ -102,7 +102,7 @@ pub use idle_host::{MSG_INPUT, MSG_TEST_DIM};
 mod tray_panel_host;
 pub use tray_panel_host::{MSG_TEST_TRAY_PANEL, MSG_TEST_TRAY_PANEL_CLICK};
 
-const BAR_CLASS: &str = "Kabuk.Bar";
+const BAR_CLASS: &str = kabuk_core::hang::BAR_CLASS;
 const DOCK_CLASS: &str = "Kabuk.Dock";
 const TOOLTIP_CLASS: &str = "Kabuk.Tooltip";
 /// Class of the bars' message-only control window (tests find it by class).

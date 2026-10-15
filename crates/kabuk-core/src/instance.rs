@@ -29,6 +29,9 @@ pub mod exit {
     pub const NOT_RUNNING: i32 = 15;
     /// `kabuk msg`: the shell refused the command or its answer was unreadable.
     pub const COMMAND_FAILED: i32 = 16;
+    /// The watchdog ended a shell that stopped answering (DECISIONS D55). Treated as a
+    /// crash: the desktop is restored and the shell started again.
+    pub const HUNG: i32 = 17;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
