@@ -104,10 +104,108 @@ fn token_list() -> String {
 }
 
 /// Names a value may not take: Kabuk's inputs and the tokens.
+/// HLSL's keywords, types and intrinsic functions: a value is a `#define`, so one named
+/// `dot` broke every `dot()` (found making the gallery).
+const HLSL_NAMES: [&str; 92] = [
+    "abs",
+    "acos",
+    "all",
+    "any",
+    "asin",
+    "atan",
+    "atan2",
+    "bool",
+    "break",
+    "ceil",
+    "clamp",
+    "const",
+    "continue",
+    "cos",
+    "cosh",
+    "cross",
+    "ddx",
+    "ddy",
+    "degrees",
+    "determinant",
+    "distance",
+    "do",
+    "dot",
+    "double",
+    "else",
+    "exp",
+    "exp2",
+    "false",
+    "float",
+    "float2",
+    "float3",
+    "float4",
+    "float2x2",
+    "float3x3",
+    "float4x4",
+    "floor",
+    "fmod",
+    "for",
+    "frac",
+    "frexp",
+    "fwidth",
+    "half",
+    "if",
+    "in",
+    "inout",
+    "int",
+    "int2",
+    "int3",
+    "int4",
+    "isinf",
+    "isnan",
+    "ldexp",
+    "length",
+    "lerp",
+    "line",
+    "lit",
+    "log",
+    "log10",
+    "log2",
+    "mad",
+    "matrix",
+    "max",
+    "min",
+    "modf",
+    "mul",
+    "noise",
+    "normalize",
+    "out",
+    "point",
+    "pow",
+    "radians",
+    "rcp",
+    "reflect",
+    "refract",
+    "return",
+    "round",
+    "rsqrt",
+    "saturate",
+    "sign",
+    "sin",
+    "sincos",
+    "sinh",
+    "smoothstep",
+    "sqrt",
+    "static",
+    "step",
+    "struct",
+    "tan",
+    "tanh",
+    "true",
+    "uint",
+    "while",
+];
+
 fn reserved(name: &str) -> bool {
     matches!(name, "time" | "resolution" | "brightness" | "values" | "wall" | "main")
         || name.starts_with("tok_")
         || TOKENS.iter().any(|(n, _)| *n == name)
+        || HLSL_NAMES.contains(&name)
 }
 
 fn identifier(name: &str) -> bool {
@@ -271,7 +369,11 @@ default = 0.5
             .map(|i| format!("[[values]]\nname = \"v{i}\"\nmin = 0\nmax = 1\ndefault = 0\n"))
             .collect();
         assert_eq!(with(&many), Err(FormatError::TooManyValues));
-        for bad in ["9x", "time", "tok_desk", "accent", "a-b"] {
+        // HLSL's own names too: a value is a `#define`, so `dot` broke `dot()` (found making
+        // the gallery).
+        for bad in [
+            "9x", "time", "tok_desk", "accent", "a-b", "dot", "line", "sin", "float3", "return", "lerp",
+        ] {
             let v = format!("[[values]]\nname = \"{bad}\"\nmin = 0\nmax = 1\ndefault = 0\n");
             assert_eq!(with(&v), Err(FormatError::ValueName(bad.into())), "{bad}");
         }

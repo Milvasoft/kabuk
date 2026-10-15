@@ -53,7 +53,7 @@ wall.toml:
 - author: who made it (you may write your model's name)
 - version: 1
 - tokens: the look colours the shader uses, from: {token_names}
-- [[values]]: at most {MAX_VALUES} adjustable values, each with name (an HLSL identifier), min, max and default
+- [[values]]: at most {MAX_VALUES} adjustable values, each with name (an HLSL identifier that is not one of HLSL's own words or functions, such as dot, line or sin), min, max and default
 
 wall.hlsl: HLSL (shader model 5.0) defining exactly this function and any helpers it needs:
     float3 wall(float2 px)
