@@ -2,8 +2,7 @@
 //! its entries and what choosing one does. A child of the bar manager, so it shares the
 //! GPU, the look, the language and the configuration with the bars.
 
-use std::collections::{HashMap, HashSet};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use kabuk_core::config::{shortcut::Chord, Config};
@@ -16,6 +15,7 @@ use kabuk_win::msgloop::{self, msg, vk, Msg, PxRect, Window};
 use kabuk_win::window::Hwnd;
 
 use super::Shared;
+use crate::bar::pictures::Pictures;
 use crate::launcher::item::{Item, SystemCommand, Target};
 use crate::launcher::model::{Key, Model, Options, Outcome};
 use crate::launcher::place::{self, BarSpace};
@@ -65,59 +65,6 @@ pub(super) struct LauncherState {
     pictures: Pictures,
     /// The entries run lately, newest first (an empty launcher lists them first).
     ran: Vec<String>,
-}
-
-/// What the picture worker gives back: (source, side in pixels, pixels); `None` when it
-/// could not be loaded.
-type Loaded = Arc<Mutex<Vec<(String, u32, Option<Vec<u8>>)>>>;
-
-/// The entries' pictures: loaded ones by source, the ones asked for, and the worker.
-#[derive(Default)]
-struct Pictures {
-    loaded: HashMap<String, u64>,
-    asked: HashSet<String>,
-    /// To the worker: (source, side in pixels).
-    worker: Option<mpsc::Sender<(String, u32)>>,
-    /// From the worker.
-    done: Loaded,
-}
-
-/// The renderer's key of an entry's picture at `side` pixels.
-fn picture_key(source: &str, side: u32) -> u64 {
-    crate::bar::apps::image_key(&format!("launcher|{source}|{side}"))
-}
-
-/// Starts the picture worker: it loads what it is asked for, one at a time, and tells
-/// the control window when some are done.
-fn picture_worker(control: Hwnd, done: Loaded) -> Option<mpsc::Sender<(String, u32)>> {
-    let (tx, rx) = mpsc::channel::<(String, u32)>();
-    let spawned = std::thread::Builder::new()
-        .name("launcher-pictures".into())
-        .spawn(move || {
-            kabuk_win::system::com_init();
-            while let Ok((source, side)) = rx.recv() {
-                let px = kabuk_win::icon::shell_item_icon_pixels(&source, side)
-                    .or_else(|| kabuk_win::icon::file_icon_pixels(std::path::Path::new(&source), side));
-                if let Ok(mut d) = done.lock() {
-                    d.push((source, side, px));
-                }
-                let _ = msgloop::post_message(
-                    control,
-                    Msg {
-                        id: MSG_LAUNCHER_PICTURES,
-                        wparam: 0,
-                        lparam: 0,
-                    },
-                );
-            }
-        });
-    match spawned {
-        Ok(_) => Some(tx),
-        Err(e) => {
-            tracing::warn!(error = %e, "launcher pictures not loaded");
-            None
-        }
-    }
 }
 
 fn options(cfg: &Config, i18n: &I18n, bottom_up: bool) -> Options {
@@ -172,13 +119,13 @@ impl Shared {
                 .unwrap_or_default(),
         });
         if let (Some(control), Some(l)) = (self.control.as_ref().map(Window::hwnd), self.launcher.as_mut()) {
-            l.pictures.worker = picture_worker(control, l.pictures.done.clone());
+            l.pictures = Pictures::start("launcher", control, MSG_LAUNCHER_PICTURES);
         }
         self.bind_launcher_keys();
     }
 
     /// The instance id is the launcher window's title, so tests find their own.
-    fn instance_title(&self) -> String {
+    pub(super) fn instance_title(&self) -> String {
         self.instance.clone()
     }
 
@@ -410,30 +357,14 @@ impl Shared {
     /// them.
     pub(super) fn launcher_pictures_arrived(&mut self) {
         let Some(l) = self.launcher.as_mut() else { return };
-        let done: Vec<_> = l
-            .pictures
-            .done
-            .lock()
-            .map(|mut d| std::mem::take(&mut *d))
-            .unwrap_or_default();
-        for (source, side, px) in done {
-            match px {
-                Some(px) => {
-                    let key = picture_key(&source, side);
-                    self.gpu.images.set(key, side, px);
-                    l.pictures.loaded.insert(source, key);
-                }
-                // Not loadable: it keeps its kind's icon and is not asked again.
-                None => tracing::debug!(source = %source, "launcher picture unavailable"),
-            }
-        }
+        l.pictures.arrived(&self.gpu.images);
         if l.open {
             self.render_launcher();
         }
     }
 
     /// The monitor the user works on: the foreground window's, else the primary one.
-    fn launcher_monitor() -> Option<kabuk_win::shell::Monitor> {
+    pub(super) fn launcher_monitor() -> Option<kabuk_win::shell::Monitor> {
         let monitors = kabuk_win::shell::monitors();
         let fg = kabuk_win::events::foreground().and_then(Hwnd::frame_rect);
         let on = |m: &&kabuk_win::shell::Monitor| {
@@ -478,15 +409,7 @@ impl Shared {
             l.model.key(Key::Text(query));
         }
         let side = (style.icon * scale.0).ceil() as u32;
-        // Pictures the store let go of (a tray refresh keeps only its own) are asked again.
-        let (store, asked) = (&self.gpu.images, &mut l.pictures.asked);
-        l.pictures.loaded.retain(|source, key| {
-            let kept = store.contains(*key);
-            if !kept {
-                asked.remove(source);
-            }
-            kept
-        });
+        l.pictures.forget_dropped(&self.gpu.images);
         let wanted: Vec<String> = l
             .model
             .rows()
@@ -495,15 +418,8 @@ impl Shared {
                 crate::launcher::model::Row::Item { index, .. } => l.model.item(*index)?.picture.clone(),
                 _ => None,
             })
-            .filter(|p| !l.pictures.loaded.contains_key(p) && !l.pictures.asked.contains(p))
             .collect();
-        for source in wanted {
-            if let Some(w) = &l.pictures.worker {
-                if w.send((source.clone(), side)).is_ok() {
-                    l.pictures.asked.insert(source);
-                }
-            }
-        }
+        l.pictures.ask(wanted, side);
         let frame = Frame {
             style: &style,
             i18n: &self.i18n,
@@ -623,7 +539,7 @@ impl Shared {
         }
     }
 
-    fn run_launcher_target(&mut self, target: Target) {
+    pub(super) fn run_launcher_target(&mut self, target: Target) {
         tracing::info!(target = ?target, "launcher ran");
         self.remember_run(&target);
         match target {

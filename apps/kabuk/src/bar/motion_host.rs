@@ -67,6 +67,10 @@ impl Shown {
         self.surface.as_mut()
     }
 
+    pub(super) fn surface(&self) -> Option<&WindowSurface> {
+        self.surface.as_ref()
+    }
+
     /// Plays the exit from where the entrance is; `None` when there is nothing to play
     /// and the window can go now. The caller commits.
     fn leave(mut self, gpu: &Gpu, level: Level) -> Option<Leaving> {

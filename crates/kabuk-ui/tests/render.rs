@@ -170,6 +170,23 @@ fn stored_images_are_drawn_scaled_and_unknown_ones_skipped() {
     assert!(!g.images.contains(7));
 }
 
+/// A picture of any shape is stretched over the size it is given (the app grid's blurred
+/// wallpaper is a small picture drawn over the whole monitor).
+#[test]
+fn a_wide_picture_is_stretched_to_its_size() {
+    let g = gpu();
+    // 2 × 1: red on the left, blue on the right (premultiplied BGRA).
+    g.images.set_sized(9, 2, 1, vec![0, 0, 255, 255, 255, 0, 0, 255]);
+    let l = layout(&Node::picture(9, 64.0, 16.0), Point::default(), &g.text);
+    assert_eq!((l.size.w, l.size.h), (64.0, 16.0));
+    let px = g
+        .render_pixels(&l, &palette(), Scale(1.0), 64, 16, Color::BLACK)
+        .unwrap();
+    let (left, right) = (px.at(4, 8), px.at(60, 8));
+    assert!(left[0] > 200 && left[2] < 60, "{left:?}");
+    assert!(right[2] > 200 && right[0] < 60, "{right:?}");
+}
+
 #[test]
 fn space_after_a_span_widens_the_text_by_that_much() {
     let g = gpu();

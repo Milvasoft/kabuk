@@ -182,6 +182,11 @@ async function main() {
   check(/autohide = true/.test(toml()), "bar auto-hide on");
   await page.click(`[data-tgl="bar.modules.taskbar"]`); await settled();
   check(/taskbar = false/.test(toml()), "apps module off");
+  // DECISIONS D56: the app grid's button, named in the page's language.
+  const gridChip = await page.$eval(`[data-tgl="bar.modules.app_grid"]`, (el) => el.textContent);
+  check(gridChip.includes("Tüm uygulamalar"), `app grid button chip named: ${gridChip}`);
+  await page.click(`[data-tgl="bar.modules.app_grid"]`); await settled();
+  check(/app_grid = false/.test(toml()), "app grid button off");
   await page.$eval("#bar-height", (el) => { el.value = "48"; el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true })); });
   await settled();
   check(/height = 48/.test(toml()), "bar height 48");
@@ -295,6 +300,14 @@ async function main() {
   check(/launcher = \["Win\+Shift\+R"\]/.test(toml()) && (await page.locator(".keys > kbd").count()) === 0, "Esc from Rust cancels the recorder");
   await fromRust({ op: "chord", chord: "Win+Q" });
   check(!/Win\+Q/.test(toml()), "a chord with no recorder waiting changes nothing");
+  // DECISIONS D56: the app grid's shortcut is on the page, with its default, and records.
+  check((await page.locator(".set-main").innerText()).includes("Tüm uygulamalar ızgarası"), "app grid shortcut listed");
+  await page.click(`[data-chord="shortcuts.app_grid"][data-index="0"]`); await settled();
+  await fromRust({ op: "chord", chord: "Win+Shift+G" });
+  check(/app_grid = \["Win\+Shift\+G"\]/.test(toml()), "app grid shortcut recorded as Win+Shift+G");
+  await go("keys");
+  await page.click(`[data-reset="shortcuts.app_grid"]`); await settled();
+  check(!/app_grid = \[/.test(toml()), "app grid shortcut back to its default");
 
   // Back to the default (asked for by the user): a changed shortcut has its way back, and
   // the keys page resets them all; an unchanged setting shows none.

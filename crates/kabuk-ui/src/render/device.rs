@@ -28,14 +28,22 @@ pub struct Gpu {
     pub images: Images,
 }
 
-/// Premultiplied BGRA pictures by key, square, shared by every surface of a [`Gpu`].
+/// A stored picture: its width and height in pixels, and its pixels.
+type Picture = ((u32, u32), Vec<u8>);
+
+/// Premultiplied BGRA pictures by key, shared by every surface of a [`Gpu`].
 #[derive(Debug, Default)]
-pub struct Images(std::cell::RefCell<std::collections::HashMap<u64, (u32, Vec<u8>)>>);
+pub struct Images(std::cell::RefCell<std::collections::HashMap<u64, Picture>>);
 
 impl Images {
     /// Stores a `side`×`side` picture; `pixels` holds `side * side * 4` bytes.
     pub fn set(&self, key: u64, side: u32, pixels: Vec<u8>) {
-        self.0.borrow_mut().insert(key, (side, pixels));
+        self.set_sized(key, side, side, pixels);
+    }
+
+    /// Stores a `w`×`h` picture; `pixels` holds `w * h * 4` bytes, top row first.
+    pub fn set_sized(&self, key: u64, w: u32, h: u32, pixels: Vec<u8>) {
+        self.0.borrow_mut().insert(key, ((w, h), pixels));
     }
 
     pub fn contains(&self, key: u64) -> bool {
@@ -47,8 +55,8 @@ impl Images {
         self.0.borrow_mut().retain(|k, _| keep(*k));
     }
 
-    pub(crate) fn with<R>(&self, key: u64, f: impl FnOnce(u32, &[u8]) -> R) -> Option<R> {
-        self.0.borrow().get(&key).map(|(side, px)| f(*side, px))
+    pub(crate) fn with<R>(&self, key: u64, f: impl FnOnce((u32, u32), &[u8]) -> R) -> Option<R> {
+        self.0.borrow().get(&key).map(|(size, px)| f(*size, px))
     }
 }
 

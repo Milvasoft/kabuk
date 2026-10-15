@@ -565,6 +565,8 @@ pub struct Modules {
     pub tray: bool,
     pub notif: bool,
     pub power: bool,
+    /// The button that opens the grid of every app (DECISIONS D56).
+    pub app_grid: bool,
 }
 
 impl Default for Modules {
@@ -583,6 +585,7 @@ impl Default for Modules {
             tray: true,
             notif: true,
             power: true,
+            app_grid: true,
         }
     }
 }
@@ -841,6 +844,8 @@ pub struct Shortcuts {
     pub overview: Vec<String>,
     /// Starts the screen saver now (the display turns off when none is chosen).
     pub start_saver: Vec<String>,
+    /// Opens the grid of every app, as macOS's Launchpad (DECISIONS D56).
+    pub app_grid: Vec<String>,
     /// Held while dragging: left button moves, right button resizes.
     pub drag: String,
 }
@@ -874,6 +879,7 @@ impl Default for Shortcuts {
             next_tab: chords(&["Win+Shift+T"]),
             overview: chords(&["Win+Tab"]),
             start_saver: chords(&["Win+Shift+L"]),
+            app_grid: chords(&["Win+Shift+A"]),
             drag: "Alt".into(),
         }
     }

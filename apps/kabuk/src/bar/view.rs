@@ -33,6 +33,10 @@ pub mod hit {
     /// The notification bell (opens Windows' notification centre) and the power button.
     pub const NOTIF: &str = "notif";
     pub const POWER: &str = "power";
+    /// The button that opens the grid of every app (DECISIONS D56).
+    pub const APP_GRID: &str = "app-grid";
+    /// The "+n" after the apps a bar has no room for; it opens the app grid too.
+    pub const APP_MORE: &str = "app-more";
     /// The clock and date (a click opens the notification centre and its calendar).
     pub const CLOCK: &str = "clock";
     /// A system figure; the value is one of the constants below.
@@ -703,7 +707,8 @@ const APP_MARK_GAP: f32 = 2.0;
 /// slot that large, so the others do not move.
 pub const APP_HOVER: f32 = 1.18;
 
-fn apps(d: &BarData, s: &Style) -> Option<Node> {
+/// The apps' icons, one node each.
+fn app_icons(d: &BarData, s: &Style) -> Option<Vec<Node>> {
     // In Rıhtım the apps live in the dock (DECISIONS D17).
     if !d.modules.taskbar || d.apps.is_empty() || crate::bar::dock::shown(s.look) {
         return None;
@@ -735,13 +740,31 @@ fn apps(d: &BarData, s: &Style) -> Option<Node> {
                 .hit(hit::APP, u32::try_from(i).unwrap_or(u32::MAX))
         })
         .collect();
-    // Down the rail on a vertical bar, as the tray does.
-    let list = if d.vertical() {
-        Node::column(icons)
-    } else {
-        Node::row(icons)
-    };
-    Some(list.gap(s.tray_gap).align(Align::Center))
+    Some(icons)
+}
+
+/// The apps' group, which a bar too short for all of them cuts (found by the user: on a
+/// bar at the side the apps ran under the clock): its place among the start's groups, the
+/// icons, and the "+n" shown for `n` icons left out (index `n - 1`).
+pub struct AppsGroup {
+    pub at: usize,
+    pub icons: Vec<Node>,
+    pub more: Vec<Node>,
+}
+
+impl AppsGroup {
+    /// The group with its first `shown` icons, and a "+n" for the rest.
+    fn node(&self, shown: usize, s: &Style, vertical: bool, thickness: f32) -> Node {
+        let shown = shown.min(self.icons.len());
+        let mut list: Vec<Node> = self.icons[..shown].to_vec();
+        let left_out = self.icons.len() - shown;
+        if let Some(more) = left_out.checked_sub(1).and_then(|i| self.more.get(i)) {
+            list.push(more.clone());
+        }
+        // Down the rail on a vertical bar, as the tray does.
+        let list = if vertical { Node::column(list) } else { Node::row(list) };
+        group(vec![list.gap(s.tray_gap).align(Align::Center)], s, vertical, thickness)
+    }
 }
 
 /// The three regions of a bar.
@@ -749,6 +772,8 @@ pub struct Regions {
     pub start: Vec<Node>,
     pub center: Vec<Node>,
     pub end: Vec<Node>,
+    /// The apps, put among `start` by [`compose`] with as many icons as fit.
+    pub apps: Option<AppsGroup>,
 }
 
 pub fn regions(d: &BarData, s: &Style, i18n: &I18n, thickness: f32) -> Regions {
@@ -770,13 +795,33 @@ pub fn regions(d: &BarData, s: &Style, i18n: &I18n, thickness: f32) -> Regions {
             s.size(14.0),
         ));
     }
+    // Before the workspaces, as Launchpad leads macOS's dock.
+    if d.modules.app_grid {
+        first.push(Node::icon("app", s.tray_icon, s.mod_icon_color).hit(hit::APP_GRID, 0));
+    }
     first.push(workspaces(d, s, i18n, thickness));
     let mut start = vec![g(first)];
     // The apps before the title, which changes with every window (found by the user: it
     // pushed the apps about).
-    if let Some(a) = apps(d, s) {
-        start.push(g(vec![a]));
-    }
+    let apps = app_icons(d, s).map(|icons| {
+        let more = (1..=icons.len())
+            .map(|n| {
+                let label = i18n.tr_args("bar-tray-more", &[("value", n.into())]);
+                text(
+                    vec![span(label, s.mod_icon_color, 400)],
+                    FontRole::Num,
+                    s.size(s.mod_size),
+                )
+                .size(Some(s.tray_icon.max(0.0)), None)
+                .hit(hit::APP_MORE, 0)
+            })
+            .collect();
+        AppsGroup {
+            at: start.len(),
+            icons,
+            more,
+        }
+    });
     if s.second_start_group {
         let mut second: Vec<Node> = layout_indicator(d, s, i18n)
             .map(|n| n.hit(hit::LAYOUT, 0))
@@ -815,9 +860,15 @@ pub fn regions(d: &BarData, s: &Style, i18n: &I18n, thickness: f32) -> Regions {
             start,
             center: Vec::new(),
             end,
+            apps,
         };
     }
-    Regions { start, center, end }
+    Regions {
+        start,
+        center,
+        end,
+        apps,
+    }
 }
 
 /// Puts the look's separators or connectors between groups.
@@ -955,16 +1006,39 @@ pub fn compose(r: &Regions, size: Size, s: &Style, edge: Edge, measure: &dyn Tex
     // group, up to the middle.
     let gap = if center.is_some() { s.group_gap } else { 0.0 };
     let side_room = ((main - center_len) / 2.0 - pad - gap).max(0.0);
-    if !r.start.is_empty() {
-        let node = fitted(joined(&r.start, s, vertical, thickness), side_room, vertical, measure);
-        add(node, &|sz| pos(pad, sz));
+    let end = (!r.end.is_empty()).then(|| fitted(joined(&r.end, s, vertical, thickness), side_room, vertical, measure));
+    let length = |n: &Option<Node>| n.as_ref().map(|n| len(layout(n, Point::default(), measure).size));
+    // The start's groups with `shown` of the apps among them.
+    let start_with = |shown: usize| {
+        let mut groups = r.start.clone();
+        if let Some(a) = &r.apps {
+            groups.insert(a.at.min(groups.len()), a.node(shown, s, vertical, thickness));
+        }
+        (!groups.is_empty()).then(|| fitted(joined(&groups, s, vertical, thickness), side_room, vertical, measure))
+    };
+    // As many apps as leave room for the centre and the end, the rest behind a "+n".
+    let room_for_start = main - 2.0 * pad - length(&end).map_or(0.0, |l| l + gap) - center_len - gap;
+    let all = r.apps.as_ref().map_or(0, |a| a.icons.len());
+    let mut start = start_with(all);
+    let mut shown = all;
+    while shown > 0 && length(&start).is_some_and(|l| l > room_for_start) {
+        shown -= 1;
+        start = start_with(shown);
+    }
+    // The centre group sits in the middle unless an end's group reaches it (a side bar's
+    // apps, which have no text to shorten; found by the user: the clock over the apps):
+    // then it moves aside, a group gap from that end's group.
+    let lowest = length(&start).map_or(pad, |l| pad + l + gap);
+    let highest = length(&end).map_or(main - pad, |l| main - pad - l - gap);
+    let center_at = ((main - center_len) / 2.0).min(highest - center_len).max(lowest);
+    if let Some(n) = start {
+        add(n, &|sz| pos(pad, sz));
     }
     if let Some(c) = center {
-        add(c, &|sz| pos((main - len(sz)) / 2.0, sz));
+        add(c, &|sz| pos(center_at, sz));
     }
-    if !r.end.is_empty() {
-        let node = fitted(joined(&r.end, s, vertical, thickness), side_room, vertical, measure);
-        add(node, &|sz| pos(main - pad - len(sz), sz));
+    if let Some(n) = end {
+        add(n, &|sz| pos(main - pad - len(sz), sz));
     }
     out
 }
@@ -1177,10 +1251,34 @@ mod tests {
                 "40%"
             ]
         );
+        // The app grid's button leads (DECISIONS D56; the design page predates it).
         assert_eq!(
             icons(&l),
-            vec!["tile", "music", "cpu", "mem", "temp", "down", "vol", "bell", "power"]
+            vec!["app", "tile", "music", "cpu", "mem", "temp", "down", "vol", "bell", "power"]
         );
+    }
+
+    /// DECISIONS D56: the button that opens the grid of every app comes first on every
+    /// monitor's bar and takes clicks; turned off, it goes.
+    #[test]
+    fn the_app_grid_button_leads_every_bar() {
+        let tr = I18n::new(Lang::Tr);
+        let d = data(&tr);
+        for bar in [
+            d.clone(),
+            BarData {
+                primary: false,
+                ..d.clone()
+            },
+        ] {
+            let l = render(&bar, &tr);
+            let button = l.hits.iter().find(|(_, h)| h.module == hit::APP_GRID).map(|(r, _)| *r);
+            let first = l.hits.iter().map(|(r, _)| r.x).fold(f32::MAX, f32::min);
+            assert_eq!(button.map(|r| r.x), Some(first), "first on the bar");
+        }
+        let mut off = d.clone();
+        off.modules.app_grid = false;
+        assert!(!render(&off, &tr).hits.iter().any(|(_, h)| h.module == hit::APP_GRID));
     }
 
     /// DECISIONS D32: the bell carries the notification count when there is one; both it
@@ -1385,6 +1483,74 @@ mod tests {
         assert!(!render(&off, &tr).hits.iter().any(|(_, h)| h.module == hit::APP));
     }
 
+    /// Found by the user: on a bar at the left edge with many apps, the clock, centred on
+    /// the bar, sat over the apps in nearly every look. The centre group moves aside for
+    /// the groups at the ends.
+    #[test]
+    fn the_clock_never_covers_the_apps_on_a_side_bar() {
+        let tr = I18n::new(Lang::Tr);
+        let icon = AppIcon {
+            image: 31,
+            running: false,
+            focused: false,
+            grow: 0.0,
+            shift: (0.0, 0.0),
+        };
+        let d = BarData {
+            edge: Edge::Left,
+            apps: vec![icon; 16],
+            ..data(&tr)
+        };
+        let overlaps = |a: &Rect, b: &Rect| a.x < b.right() && b.x < a.right() && a.y < b.bottom() && b.y < a.bottom();
+        let mut cut = false;
+        for look in Look::ALL {
+            let l = render_look(look, &d, &tr);
+            let clock: Vec<Rect> = l
+                .hits
+                .iter()
+                .filter(|(_, h)| h.module == hit::CLOCK)
+                .map(|(r, _)| *r)
+                .collect();
+            let others: Vec<Rect> = l
+                .hits
+                .iter()
+                .filter(|(_, h)| h.module != hit::CLOCK)
+                .map(|(r, _)| *r)
+                .collect();
+            for c in &clock {
+                assert!(
+                    !others.iter().any(|o| overlaps(c, o)),
+                    "{look:?}: the clock {c:?} covers another part"
+                );
+            }
+            // Nothing covers anything else, and the apps left out are behind a "+n".
+            for (i, a) in others.iter().enumerate() {
+                assert!(
+                    !others[i + 1..].iter().any(|b| overlaps(a, b)),
+                    "{look:?}: {a:?} is covered"
+                );
+            }
+            if look != Look::Rihtim {
+                let shown = l.hits.iter().filter(|(_, h)| h.module == hit::APP).count();
+                let more = l.hits.iter().filter(|(_, h)| h.module == hit::APP_MORE).count();
+                assert!(
+                    (shown == 16 && more == 0) || (shown < 16 && more == 1),
+                    "{look:?}: {shown} apps, {more} more"
+                );
+                cut |= shown < 16;
+            }
+        }
+        assert!(cut, "sixteen apps fit no look's side bar of this length");
+        // With room for all, all are shown and no "+n".
+        let few = BarData {
+            apps: vec![icon; 2],
+            ..d.clone()
+        };
+        let l = render(&few, &tr);
+        assert_eq!(l.hits.iter().filter(|(_, h)| h.module == hit::APP).count(), 2);
+        assert!(!l.hits.iter().any(|(_, h)| h.module == hit::APP_MORE));
+    }
+
     /// A click on the layout indicator switches the workspace's layout; it shows which one.
     #[test]
     fn the_layout_indicator_shows_a_floating_workspace_and_takes_clicks() {
@@ -1434,8 +1600,10 @@ mod tests {
         d.modules.ram = false;
         d.modules.vol = false;
         d.modules.notif = false;
-        assert_eq!(icons(&render(&d, &tr)), vec!["tile", "power"]);
+        assert_eq!(icons(&render(&d, &tr)), vec!["app", "tile", "power"]);
         d.modules.power = false;
+        assert_eq!(icons(&render(&d, &tr)), vec!["app", "tile"]);
+        d.modules.app_grid = false;
         assert_eq!(icons(&render(&d, &tr)), vec!["tile"]);
     }
 
@@ -1624,7 +1792,7 @@ mod tests {
                 && !t.contains(&"12%".to_string()),
             "{t:?}"
         );
-        assert_eq!(icons(&l), vec!["vol", "bell", "power"]);
+        assert_eq!(icons(&l), vec!["app", "vol", "bell", "power"]);
     }
 
     #[test]

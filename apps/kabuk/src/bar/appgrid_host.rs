@@ -1,0 +1,876 @@
+//! The app grid on the bar thread (DECISIONS D56): every app on pages over the blurred
+//! wallpaper of the monitor the user works on, as macOS's Launchpad. Two windows: under,
+//! the chrome (the wallpaper, the search field, the page dots), which fades in; over it,
+//! a strip of three pages that zooms in as it fades in and slides from page to page on
+//! the compositor (a drag follows the mouse, the wheel, the arrows and the dots turn the
+//! pages). Typing searches; Enter or a click opens an app; Escape, a click between the
+//! apps or another window closes it. The apps' icons load off the thread, as the
+//! launcher's do; the wallpaper is blurred off the thread once per picture and monitor.
+
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use kabuk_core::config::shortcut::Chord;
+use kabuk_i18n::Lang;
+use kabuk_search::Casing;
+use kabuk_ui::geom::{Point, Scale, Size};
+use kabuk_ui::motion::{Level, APP_GRID, APP_GRID_BACKDROP, PAGE_SLIDE};
+use kabuk_ui::node::Layout;
+use kabuk_ui::render::WindowSurface;
+use kabuk_win::msgloop::{self, msg, vk, Msg, PxRect, Window};
+use kabuk_win::shell::Monitor;
+use kabuk_win::window::Hwnd;
+
+use super::motion_host::Shown;
+use super::{timer, Shared};
+use crate::appgrid::model::{self, Dir, Found, Grid, Shape, Wheel};
+use crate::appgrid::{backdrop, style, view};
+use crate::bar::pictures::Pictures;
+use crate::launcher::item::Target;
+
+/// Classes of the pages' window and the chrome's (tests find them by class).
+pub const GRID_CLASS: &str = "Kabuk.AppGrid";
+pub const CHROME_CLASS: &str = "Kabuk.AppGridChrome";
+/// `kabuk msg apps` and the bar's button: open or close the grid (posted to the control
+/// window).
+pub const MSG_OPEN_APP_GRID: u32 = msg::APP + 44;
+/// Integration tests open (`wparam` 1) the grid on the primary monitor without taking
+/// the keyboard, or close it (0).
+pub const MSG_TEST_APP_GRID: u32 = msg::APP + 45;
+/// The picture worker loaded some apps' icons.
+pub(super) const MSG_APP_GRID_PICTURES: u32 = msg::APP + 46;
+/// A wallpaper was blurred.
+pub(super) const MSG_APP_GRID_BACKDROP: u32 = msg::APP + 47;
+/// The grid's global shortcuts take these hotkey ids (the screen saver's start at 300).
+const HOTKEY_FIRST: i32 = 400;
+/// How far a drag past the first or last page goes, as a share of the mouse's way.
+const EDGE_GIVE: f32 = 0.3;
+
+/// A blurred wallpaper: its file, when it was last written, and the monitor's size.
+type BackdropKey = (String, u64, u32, u32);
+/// Blurred wallpapers the worker finished: whose, its size in pixels and its pixels.
+type Blurred = Arc<Mutex<Vec<(BackdropKey, u32, u32, Vec<u8>)>>>;
+
+/// A blurred wallpaper kept: its key in the renderer's store, its size and pixels.
+struct Backdrop {
+    image: u64,
+    size: (u32, u32),
+    pixels: Vec<u8>,
+}
+
+#[derive(Default)]
+pub(super) struct AppGridState {
+    hotkeys: Vec<kabuk_win::keyhook::Bound>,
+    open: Option<Open>,
+    pictures: Pictures,
+    /// Blurred wallpapers: their picture's key in the renderer's store, and the picture
+    /// itself (the store drops pictures not its tray's when the tray changes; found
+    /// trying the grid: every opening blurred the wallpaper again and faded it in late).
+    backdrops: HashMap<BackdropKey, Backdrop>,
+    blurring: HashSet<BackdropKey>,
+    blurred: Blurred,
+    /// Takes the screen's picture as the grid opens (made once, at start).
+    capture: Option<kabuk_win::screen_picture::ScreenCapture>,
+}
+
+/// A press of the left button on the pages: where (pixels), how far it went across
+/// (DIPs), and whether it is a drag yet.
+struct Press {
+    at: (i32, i32),
+    dx: f32,
+    dragging: bool,
+}
+
+/// The grid on screen.
+struct Open {
+    /// The pages over the chrome: their window goes first.
+    sheet: Shown,
+    chrome: Shown,
+    rect: PxRect,
+    scale: Scale,
+    /// The monitor in DIPs.
+    size: Size,
+    grid: Grid,
+    /// The pages the strip holds, left to right; the middle one is on screen.
+    slots: [Option<usize>; 3],
+    /// For clicks: the page on screen and the chrome, laid out at the window's origin.
+    page_layout: Layout,
+    chrome_layout: Layout,
+    backdrop: Option<u64>,
+    /// A page sliding in, and when it is there.
+    sliding: Option<Instant>,
+    press: Option<Press>,
+    wheel: Wheel,
+    /// The first half of a character outside the BMP, waiting for the second.
+    surrogate: Option<u16>,
+}
+
+impl Open {
+    fn width(&self) -> f32 {
+        self.rect.w as f32
+    }
+}
+
+/// The key a blurred wallpaper is kept under: the file, when it was written (a picture
+/// written again under the same name, as Kabuk's drift does, is blurred again) and the
+/// monitor's size.
+fn backdrop_key(file: &str, rect: PxRect) -> BackdropKey {
+    let written = std::fs::metadata(file)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_secs());
+    (file.to_string(), written, rect.w.max(1) as u32, rect.h.max(1) as u32)
+}
+
+fn monitor_rect(m: &Monitor) -> PxRect {
+    PxRect {
+        x: m.rect.left,
+        y: m.rect.top,
+        w: m.rect.right - m.rect.left,
+        h: m.rect.bottom - m.rect.top,
+    }
+}
+
+impl Shared {
+    /// Starts the icon worker and blurs the monitors' wallpapers ahead, so the first
+    /// opening shows them at once.
+    pub(super) fn create_app_grid(&mut self) {
+        if let Some(control) = self.control.as_ref().map(Window::hwnd) {
+            self.app_grid.pictures = Pictures::start("appgrid", control, MSG_APP_GRID_PICTURES);
+        }
+        for m in kabuk_win::shell::monitors() {
+            self.app_grid_backdrop(&m);
+        }
+        self.app_grid.capture = kabuk_win::screen_picture::ScreenCapture::new();
+        if self.app_grid.capture.is_none() {
+            tracing::warn!("the screen cannot be taken; the app grid shows the wallpaper under it");
+        }
+        // The first pages' icons, loaded ahead off the thread (found trying the grid:
+        // opened soon after Kabuk started, it showed tiles until they came); a while after
+        // the start, once the apps' list has been read.
+        if let Some(c) = &self.control {
+            c.set_timer(timer::APP_GRID_AHEAD, Duration::from_secs(style::AHEAD_AFTER_SECONDS));
+        }
+        self.bind_app_grid_keys();
+    }
+
+    /// Asks for the first pages' icons (the timer after the start).
+    pub(super) fn app_grid_ahead(&mut self) {
+        if let Some(c) = &self.control {
+            c.kill_timer(timer::APP_GRID_AHEAD);
+        }
+        if let Some(primary) = kabuk_win::shell::monitors().into_iter().find(|m| m.primary) {
+            let scale = primary.dpi as f32 / kabuk_layout::desk::BASE_DPI as f32;
+            let size = Size {
+                w: (primary.rect.right - primary.rect.left) as f32 / scale,
+                h: (primary.rect.bottom - primary.rect.top) as f32 / scale,
+            };
+            let ahead = Shape::fit(size).per_page() * style::PAGES_AHEAD;
+            let side = (style::ICON * scale).ceil() as u32;
+            let sources: Vec<String> = self
+                .app_grid_entries()
+                .into_iter()
+                .take(ahead)
+                .map(|e| e.open)
+                .collect();
+            self.app_grid.pictures.ask(sources, side);
+        }
+    }
+
+    pub(super) fn bind_app_grid_keys(&mut self) {
+        if !self.shortcuts {
+            return;
+        }
+        let chords = self.config().shortcuts.app_grid.clone();
+        let Some(control) = self.control.as_ref() else { return };
+        self.app_grid.hotkeys.clear();
+        for (i, text) in chords.iter().enumerate() {
+            let Ok(chord) = Chord::parse(text) else {
+                tracing::warn!(chord = %text, "app grid shortcut not understood");
+                continue;
+            };
+            match kabuk_win::keyhook::bind(control, HOTKEY_FIRST + i as i32, chord) {
+                Ok(h) => self.app_grid.hotkeys.push(h),
+                Err(e) => tracing::warn!(chord = %text, error = %e, "app grid shortcut taken by another program"),
+            }
+        }
+    }
+
+    /// `WM_HOTKEY` on the control window; true when it was the grid's.
+    pub(super) fn app_grid_hotkey(&mut self, id: usize) -> bool {
+        let first = HOTKEY_FIRST as usize;
+        let ours = (first..first + self.app_grid.hotkeys.len()).contains(&id);
+        if ours {
+            self.toggle_app_grid(None, true);
+        }
+        ours
+    }
+
+    /// Opens the grid on `monitor` (the one the user works on when `None`), or closes it.
+    pub(super) fn toggle_app_grid(&mut self, monitor: Option<Monitor>, activate: bool) {
+        if self.app_grid.open.is_some() {
+            self.close_app_grid();
+        } else {
+            self.open_app_grid(monitor, activate);
+        }
+    }
+
+    /// The monitor's blurred wallpaper: its key when it is ready; otherwise the worker is
+    /// asked for it (once) and `None` is the answer for now.
+    fn app_grid_backdrop(&mut self, m: &Monitor) -> Option<u64> {
+        let rect = monitor_rect(m);
+        let file = kabuk_win::wallpaper::files()
+            .into_iter()
+            .find(|(r, _)| (r.left, r.top, r.right, r.bottom) == (m.rect.left, m.rect.top, m.rect.right, m.rect.bottom))
+            .and_then(|(_, f)| f)?;
+        let key = backdrop_key(&file, rect);
+        if let Some(b) = self.app_grid.backdrops.get(&key) {
+            if !self.gpu.images.contains(b.image) {
+                self.gpu.images.set_sized(b.image, b.size.0, b.size.1, b.pixels.clone());
+            }
+            return Some(b.image);
+        }
+        let control = self.control.as_ref().map(Window::hwnd)?;
+        if !self.app_grid.blurring.insert(key.clone()) {
+            return None;
+        }
+        let out = self.app_grid.blurred.clone();
+        let spawned = std::thread::Builder::new()
+            .name("appgrid-backdrop".into())
+            .spawn(move || blur_worker(key, control, out));
+        if let Err(e) = spawned {
+            tracing::warn!(error = %e, "app grid wallpaper not blurred");
+        }
+        None
+    }
+
+    /// The monitor's screen as it is now, small, blurred and darkened: the grid's
+    /// background (found by the user: over a black wallpaper the grid's was black).
+    fn app_grid_screen(&mut self, m: &Monitor) -> Option<u64> {
+        let rect = monitor_rect(m);
+        let (w, h) = (
+            (rect.w.max(1) as u32 / style::BLUR_SHRINK).max(1),
+            (rect.h.max(1) as u32 / style::BLUR_SHRINK).max(1),
+        );
+        let wait = Duration::from_millis(style::SCREEN_WAIT_MS);
+        let started = Instant::now();
+        let bgr = self.app_grid.capture.as_ref()?.picture(m.handle, w, h, wait);
+        tracing::debug!(
+            ms = started.elapsed().as_millis() as u64,
+            taken = bgr.is_some(),
+            "app grid screen taken"
+        );
+        let bgr = bgr?;
+        let px = backdrop::blurred(
+            &bgr,
+            w as usize,
+            h as usize,
+            style::BLUR_RADIUS,
+            style::BLUR_PASSES,
+            style::SCREEN_DIM,
+        );
+        let key = crate::bar::apps::image_key(&format!("appgrid-screen|{}", m.device));
+        self.gpu.images.set_sized(key, w, h, px);
+        Some(key)
+    }
+
+    /// Blurred wallpapers arrived: into the store, and an open grid fades its in.
+    pub(super) fn app_grid_backdrops_arrived(&mut self) {
+        let done: Vec<_> = self
+            .app_grid
+            .blurred
+            .lock()
+            .map(|mut d| std::mem::take(&mut *d))
+            .unwrap_or_default();
+        for (key, w, h, px) in done {
+            self.app_grid.blurring.remove(&key);
+            let image =
+                crate::bar::apps::image_key(&format!("appgrid-backdrop|{}|{}|{}x{}", key.0, key.1, key.2, key.3));
+            self.gpu.images.set_sized(image, w, h, px.clone());
+            let size = (key.2, key.3);
+            self.app_grid.backdrops.insert(
+                key,
+                Backdrop {
+                    image,
+                    size: (w, h),
+                    pixels: px,
+                },
+            );
+            let Some(o) = self.app_grid.open.as_mut() else { continue };
+            if o.backdrop.is_none() && (o.rect.w as u32, o.rect.h as u32) == size {
+                o.backdrop = Some(image);
+                if let Some(s) = o.chrome.surface_mut() {
+                    if let Err(e) = s.crossfade(&self.gpu, kabuk_ui::motion::BLEND) {
+                        tracing::debug!(error = %e, "app grid wallpaper not blended in");
+                    }
+                }
+                self.render_app_grid(true, false);
+            }
+        }
+    }
+
+    fn app_grid_casing(&self) -> Casing {
+        if self.i18n.lang() == Lang::Tr {
+            Casing::Turkish
+        } else {
+            Casing::Default
+        }
+    }
+
+    /// Windows' apps the grid lists, in its order.
+    fn app_grid_entries(&self) -> Vec<model::Entry> {
+        let found = kabuk_win::shellitems::installed_apps_cached()
+            .iter()
+            .map(|a| Found {
+                name: a.name.clone(),
+                id: a.id.clone(),
+                path: a.target.clone(),
+                open: a.target(),
+            })
+            .collect();
+        model::entries(found, self.app_grid_casing())
+    }
+
+    fn open_app_grid(&mut self, monitor: Option<Monitor>, activate: bool) {
+        let asked = Instant::now();
+        let Some(mon) = monitor.or_else(Self::launcher_monitor) else {
+            return;
+        };
+        self.close_launcher();
+        let rect = monitor_rect(&mon);
+        let scale = Scale(mon.dpi as f32 / kabuk_layout::desk::BASE_DPI as f32);
+        let size = Size {
+            w: rect.w as f32 / scale.0,
+            h: rect.h as f32 / scale.0,
+        };
+        let grid = Grid::new(self.app_grid_entries(), self.app_grid_casing(), Shape::fit(size));
+        let backdrop = self.app_grid_screen(&mon).or_else(|| self.app_grid_backdrop(&mon));
+        let title = self.instance_title();
+        let chrome = Window::shell_surface(CHROME_CLASS, &title, rect, |_| None);
+        let weak = self.me.clone();
+        let sheet = Window::input_surface(GRID_CLASS, &title, rect, move |m| {
+            let rc = weak.upgrade()?;
+            let mut s = rc.try_borrow_mut().ok()?;
+            s.on_app_grid(m)
+        });
+        let (chrome, sheet) = match (chrome, sheet) {
+            (Ok(c), Ok(s)) => (c, s),
+            (Err(e), _) | (_, Err(e)) => {
+                tracing::error!(error = %e, "app grid window unavailable");
+                return;
+            }
+        };
+        // The chrome first, so the pages' window, made topmost after it, is above it.
+        chrome.set_rect(rect);
+        sheet.set_rect(rect);
+        let (w, h) = (rect.w.max(1) as u32, rect.h.max(1) as u32);
+        let surfaces = (
+            WindowSurface::new(&self.gpu, chrome.hwnd().0 as isize, w, h),
+            WindowSurface::new(&self.gpu, sheet.hwnd().0 as isize, w * 3, h),
+        );
+        let (chrome_surface, sheet_surface) = match surfaces {
+            (Ok(c), Ok(s)) => (c, s),
+            (Err(e), _) | (_, Err(e)) => {
+                tracing::warn!(error = %e, "app grid surface unavailable");
+                return;
+            }
+        };
+        let level = self.motion_level();
+        let pages = grid.pages();
+        let page = grid.page();
+        self.app_grid.open = Some(Open {
+            sheet: Shown::enter(&self.gpu, Some(sheet_surface), sheet, (APP_GRID, scale), level),
+            chrome: Shown::enter(
+                &self.gpu,
+                Some(chrome_surface),
+                chrome,
+                (APP_GRID_BACKDROP, scale),
+                level,
+            ),
+            rect,
+            scale,
+            size,
+            grid,
+            slots: model::slots(page, pages),
+            page_layout: Layout::default(),
+            chrome_layout: Layout::default(),
+            backdrop,
+            sliding: None,
+            press: None,
+            wheel: Wheel::default(),
+            surrogate: None,
+        });
+        self.render_app_grid(true, true);
+        if let Some(o) = self.app_grid.open.as_ref() {
+            if let Some(s) = o.sheet_surface() {
+                let _ = s.set_offset_x(-o.width());
+            }
+            let _ = self.gpu.commit();
+            o.chrome.window().show();
+            let focused = activate && o.sheet.window().activate();
+            if !focused {
+                o.sheet.window().show();
+            }
+            tracing::info!(
+                monitor = %mon.device,
+                apps = o.grid.count(),
+                pages,
+                columns = o.grid.shape().columns,
+                rows = o.grid.shape().rows,
+                wallpaper = o.backdrop.is_some(),
+                focused,
+                ms = asked.elapsed().as_millis() as u64,
+                "app grid shown"
+            );
+        }
+    }
+
+    /// Closes the grid: both windows fade out (the pages zooming away) and go once they
+    /// have.
+    pub(super) fn close_app_grid(&mut self) {
+        let Some(o) = self.app_grid.open.take() else { return };
+        if o.press.is_some() {
+            o.sheet.window().capture_mouse(false);
+        }
+        if let Some(c) = &self.control {
+            c.kill_timer(timer::APP_GRID_SLIDE);
+        }
+        tracing::info!("app grid closed");
+        self.retire(Some(o.sheet));
+        self.retire(Some(o.chrome));
+    }
+
+    /// Draws the chrome and/or the strip again (in full) and commits.
+    fn render_app_grid(&mut self, chrome: bool, strip: bool) {
+        let side = {
+            let Some(o) = self.app_grid.open.as_ref() else { return };
+            (style::ICON * o.scale.0).ceil() as u32
+        };
+        // The icons of the pages the strip holds are asked for first.
+        let wanted: Vec<String> = self
+            .app_grid
+            .open
+            .as_ref()
+            .map(|o| {
+                o.slots
+                    .iter()
+                    .flatten()
+                    .flat_map(|p| o.grid.on_page(*p))
+                    .filter_map(|(_, i)| o.grid.entry(i).map(|e| e.open.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.app_grid.pictures.forget_dropped(&self.gpu.images);
+        self.app_grid.pictures.ask(wanted, side);
+        let Shared {
+            app_grid,
+            gpu,
+            i18n,
+            look,
+            ..
+        } = self;
+        let AppGridState { open, pictures, .. } = app_grid;
+        let Some(o) = open.as_mut() else { return };
+        let frame = view::Frame {
+            size: o.size,
+            i18n,
+            text_scale: look.style.text_scale,
+            pictures: &pictures.loaded,
+            backdrop: o.backdrop,
+        };
+        if chrome {
+            let layout = kabuk_ui::node::layout(&view::chrome(&o.grid, &frame), Point::default(), &gpu.text);
+            if let Some(s) = o.chrome.surface_mut() {
+                if let Err(e) = s.render(gpu, &layout, &look.palette, o.scale, (0.0, 0.0), None) {
+                    tracing::warn!(error = %e, "app grid chrome not drawn");
+                }
+            }
+            o.chrome_layout = layout;
+        }
+        if strip {
+            let layout = kabuk_ui::node::layout(&view::strip(&o.grid, o.slots, &frame), Point::default(), &gpu.text);
+            if let Some(s) = o.sheet.surface_mut() {
+                if let Err(e) = s.render(gpu, &layout, &look.palette, o.scale, (0.0, 0.0), None) {
+                    tracing::warn!(error = %e, "app grid pages not drawn");
+                }
+            }
+            o.page_layout =
+                kabuk_ui::node::layout(&view::page(&o.grid, o.slots[1], &frame), Point::default(), &gpu.text);
+            let names: Vec<&str> = o
+                .slots
+                .get(1)
+                .copied()
+                .flatten()
+                .map(|p| o.grid.on_page(p))
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|(_, i)| o.grid.entry(i).map(|e| e.name.as_str()))
+                .collect();
+            tracing::debug!(page = o.grid.page(), query = %o.grid.query(), apps = %names.join(" | "), "app grid page");
+        }
+        let _ = gpu.commit();
+    }
+
+    /// Icons the worker loaded: an open grid shows them.
+    pub(super) fn app_grid_pictures_arrived(&mut self) {
+        let came = self.app_grid.pictures.arrived(&self.gpu.images);
+        if came > 0
+            && self
+                .app_grid
+                .open
+                .as_ref()
+                .is_some_and(|o| o.sliding.is_none() && o.press.is_none())
+        {
+            self.render_app_grid(false, true);
+        }
+    }
+
+    /// Turns to page `to` (kept within the pages), sliding from `from_x` (the strip's
+    /// offset now, in pixels).
+    fn app_grid_go(&mut self, to: isize, from_x: Option<f32>) {
+        let Some(o) = self.app_grid.open.as_mut() else { return };
+        if o.sliding.is_some() {
+            return;
+        }
+        let from = o.grid.page();
+        let to = to.clamp(0, o.grid.pages() as isize - 1) as usize;
+        if to == from || !o.grid.go(to) {
+            // Nothing to turn to: a drag that fell short slides back.
+            if let Some(x) = from_x {
+                let level = self.motion_level();
+                self.app_grid_slide(x, 1, level);
+            }
+            return;
+        }
+        self.app_grid_turned(from, from_x);
+    }
+
+    /// The grid shows another page than `from` now (the arrows moved it, or a turn):
+    /// the strip puts it beside `from` and slides there.
+    fn app_grid_turned(&mut self, from: usize, from_x: Option<f32>) {
+        let level = self.motion_level();
+        let Some(o) = self.app_grid.open.as_mut() else { return };
+        let to = o.grid.page();
+        let (slots, slot) = model::slots_towards(from, to, o.grid.pages());
+        let x = from_x.unwrap_or(-o.width());
+        let redraw = slots != o.slots;
+        o.slots = slots;
+        tracing::info!(page = to, pages = o.grid.pages(), "app grid page turned");
+        if redraw {
+            self.render_app_grid(false, true);
+        }
+        self.render_app_grid(true, false);
+        self.app_grid_slide(x, slot, level);
+        if let Some(o) = self.app_grid.open.as_mut() {
+            let seconds = if level == Level::Full { PAGE_SLIDE } else { 0.0 };
+            o.sliding = Some(Instant::now() + Duration::from_secs_f32(seconds));
+            if let Some(c) = &self.control {
+                c.set_timer(timer::APP_GRID_SLIDE, Duration::from_secs_f32(seconds));
+            }
+        }
+    }
+
+    /// Slides the strip from `from_x` (pixels) until its slot `slot` (0 the left page, 1
+    /// the middle one, 2 the right one) is on screen.
+    fn app_grid_slide(&mut self, from_x: f32, slot: usize, level: Level) {
+        let Some(o) = self.app_grid.open.as_ref() else { return };
+        let to = -(slot as f32) * o.width();
+        let seconds = if level == Level::Full { PAGE_SLIDE } else { 0.0 };
+        if let Some(s) = o.sheet_surface() {
+            if let Err(e) = s.slide_x(&self.gpu, from_x, to, seconds) {
+                tracing::debug!(error = %e, "app grid page not slid");
+            }
+        }
+        let _ = self.gpu.commit();
+    }
+
+    /// The slide is over: the strip holds the new page's neighbours, with it in the
+    /// middle, as before.
+    pub(super) fn app_grid_slide_over(&mut self) {
+        if let Some(c) = &self.control {
+            c.kill_timer(timer::APP_GRID_SLIDE);
+        }
+        let Some(o) = self.app_grid.open.as_mut() else { return };
+        o.sliding = None;
+        o.slots = model::slots(o.grid.page(), o.grid.pages());
+        self.render_app_grid(false, true);
+        if let Some(o) = self.app_grid.open.as_ref() {
+            if let Some(s) = o.sheet_surface() {
+                let _ = s.set_offset_x(-o.width());
+            }
+            let _ = self.gpu.commit();
+        }
+    }
+
+    /// Opens the app at `at` among those shown, and closes the grid.
+    fn app_grid_open_app(&mut self, at: Option<usize>) {
+        let Some(o) = self.app_grid.open.as_ref() else { return };
+        let entry = match at {
+            Some(at) => o.grid.shown_at(at),
+            None => o.grid.chosen(),
+        }
+        .cloned();
+        let Some(e) = entry else { return };
+        tracing::info!(app = %e.name, "app grid opened an app");
+        self.close_app_grid();
+        self.run_launcher_target(Target::Shell(e.open));
+    }
+
+    /// The search changed: the first page, without a slide.
+    fn app_grid_searched(&mut self) {
+        if let Some(o) = self.app_grid.open.as_mut() {
+            o.slots = model::slots(o.grid.page(), o.grid.pages());
+        }
+        self.render_app_grid(true, true);
+    }
+
+    /// The pages' window's messages.
+    pub(super) fn on_app_grid(&mut self, m: Msg) -> Option<isize> {
+        match m.id {
+            msg::KEYDOWN => {
+                self.app_grid_key(m.wparam);
+                Some(0)
+            }
+            msg::CHAR => {
+                let text = self.app_grid_char(m.wparam as u16)?;
+                if let Some(o) = self.app_grid.open.as_mut() {
+                    o.grid.type_text(&text);
+                }
+                self.app_grid_searched();
+                Some(0)
+            }
+            msg::MOUSEWHEEL | msg::MOUSEHWHEEL => {
+                let o = self.app_grid.open.as_mut()?;
+                let delta = msg::wheel(m.wparam);
+                // Tilted right goes on, as turned towards the user does.
+                let delta = if m.id == msg::MOUSEHWHEEL { -delta } else { delta };
+                let turn = o.wheel.turn(delta, msg::WHEEL_DELTA);
+                if turn != 0 {
+                    let to = o.grid.page() as isize + turn;
+                    self.app_grid_go(to, None);
+                }
+                Some(0)
+            }
+            msg::LBUTTONDOWN => {
+                let o = self.app_grid.open.as_mut()?;
+                if o.sliding.is_none() {
+                    o.press = Some(Press {
+                        at: msg::point(m.lparam),
+                        dx: 0.0,
+                        dragging: false,
+                    });
+                    o.sheet.window().capture_mouse(true);
+                }
+                Some(0)
+            }
+            msg::MOUSEMOVE => {
+                let (x, _) = msg::point(m.lparam);
+                let held = m.wparam & msg::MK_LBUTTON != 0;
+                let o = self.app_grid.open.as_mut()?;
+                let p = o.press.as_mut()?;
+                if !held {
+                    // The button went up where the window did not see it.
+                    o.press = None;
+                    o.sheet.window().capture_mouse(false);
+                    return Some(0);
+                }
+                let moved = x - p.at.0;
+                let dx = o.scale.dips(moved);
+                if !p.dragging && dx.abs() >= style::DRAG_START {
+                    p.dragging = true;
+                }
+                if !p.dragging {
+                    return Some(0);
+                }
+                p.dx = dx;
+                // Past the first or last page it gives only a little.
+                let page = o.grid.page();
+                let beyond = (dx > 0.0 && page == 0) || (dx < 0.0 && page + 1 >= o.grid.pages());
+                let give = if beyond { EDGE_GIVE } else { 1.0 };
+                let x = -o.width() + moved as f32 * give;
+                if let Some(s) = o.sheet_surface() {
+                    let _ = s.set_offset_x(x);
+                }
+                let _ = self.gpu.commit();
+                Some(0)
+            }
+            msg::LBUTTONUP => {
+                let o = self.app_grid.open.as_mut()?;
+                let press = o.press.take();
+                o.sheet.window().capture_mouse(false);
+                let (x, y) = msg::point(m.lparam);
+                match press {
+                    Some(p) if p.dragging => {
+                        let page = o.grid.page() as isize;
+                        let beyond = (p.dx > 0.0 && page == 0) || (p.dx < 0.0 && page + 1 >= o.grid.pages() as isize);
+                        let give = if beyond { EDGE_GIVE } else { 1.0 };
+                        let from_x = -o.width() + o.scale.0 * p.dx * give;
+                        let turn = model::swipe(p.dx, o.size.w);
+                        self.app_grid_go(page + turn, Some(from_x));
+                    }
+                    _ => {
+                        let at = Point {
+                            x: o.scale.dips(x),
+                            y: o.scale.dips(y),
+                        };
+                        self.app_grid_click(at);
+                    }
+                }
+                Some(0)
+            }
+            msg::ACTIVATE => {
+                if (m.wparam & 0xFFFF) == msg::WA_INACTIVE {
+                    // Another window took the keyboard.
+                    self.close_app_grid();
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// A click (not a drag) at `p` (DIPs on the monitor): a dot turns to its page, an app
+    /// opens, the search field does nothing, anywhere else closes the grid.
+    fn app_grid_click(&mut self, p: Point) {
+        let Some(o) = self.app_grid.open.as_ref() else { return };
+        let chrome = o.chrome_layout.hit_test(p).map(|h| (h.module, h.value));
+        let app = o
+            .page_layout
+            .hit_test(p)
+            .filter(|h| h.module == view::hit::APP)
+            .map(|h| h.value as usize);
+        match (chrome, app) {
+            (Some((view::hit::DOT, page)), _) => self.app_grid_go(page as isize, None),
+            (Some((view::hit::SEARCH, _)), _) => {}
+            (_, Some(at)) => self.app_grid_open_app(Some(at)),
+            _ => self.close_app_grid(),
+        }
+    }
+
+    fn app_grid_key(&mut self, key: usize) {
+        let Some(o) = self.app_grid.open.as_mut() else { return };
+        let page = o.grid.page();
+        let dir = match key {
+            vk::LEFT => Some(Dir::Left),
+            vk::RIGHT => Some(Dir::Right),
+            vk::UP => Some(Dir::Up),
+            vk::DOWN => Some(Dir::Down),
+            _ => None,
+        };
+        if let Some(d) = dir {
+            if o.sliding.is_some() || !o.grid.step(d) {
+                return;
+            }
+            if o.grid.page() != page {
+                self.app_grid_turned(page, None);
+            } else {
+                self.render_app_grid(false, true);
+            }
+            return;
+        }
+        let pages = o.grid.pages() as isize;
+        match key {
+            vk::PRIOR => self.app_grid_go(page as isize - 1, None),
+            vk::NEXT => self.app_grid_go(page as isize + 1, None),
+            vk::HOME => self.app_grid_go(0, None),
+            vk::END => self.app_grid_go(pages - 1, None),
+            vk::RETURN => self.app_grid_open_app(None),
+            vk::ESCAPE => {
+                if o.grid.clear() {
+                    self.app_grid_searched();
+                } else {
+                    self.close_app_grid();
+                }
+            }
+            vk::BACK => {
+                if msgloop::ctrl_held() {
+                    o.grid.delete_word();
+                } else {
+                    o.grid.backspace();
+                }
+                self.app_grid_searched();
+            }
+            vk::V if msgloop::ctrl_held() => {
+                if let Some(text) = kabuk_win::clipboard::text() {
+                    o.grid.type_text(&text);
+                    self.app_grid_searched();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// A `WM_CHAR`: text, or nothing for control characters (Enter, Backspace, Ctrl+…).
+    fn app_grid_char(&mut self, unit: u16) -> Option<String> {
+        let o = self.app_grid.open.as_mut()?;
+        if (0xD800..0xDC00).contains(&unit) {
+            o.surrogate = Some(unit);
+            return None;
+        }
+        let units: Vec<u16> = match o.surrogate.take() {
+            Some(high) if (0xDC00..0xE000).contains(&unit) => vec![high, unit],
+            _ => vec![unit],
+        };
+        let s = String::from_utf16(&units).ok()?;
+        (!s.chars().any(char::is_control)).then_some(s)
+    }
+
+    /// Integration tests: open on the primary monitor without the keyboard, or close.
+    #[cfg(feature = "integration")]
+    pub(super) fn test_app_grid(&mut self, open: bool) {
+        if open {
+            if self.app_grid.open.is_none() {
+                let primary = kabuk_win::shell::monitors().into_iter().find(|m| m.primary);
+                self.open_app_grid(primary, false);
+            }
+        } else {
+            self.close_app_grid();
+        }
+    }
+}
+
+impl Open {
+    fn sheet_surface(&self) -> Option<&WindowSurface> {
+        self.sheet.surface()
+    }
+}
+
+/// Reads the wallpaper `key` names small, blurs and darkens it, and posts it to `control`.
+fn blur_worker(key: BackdropKey, control: Hwnd, out: Blurred) {
+    kabuk_win::system::com_init();
+    let started = Instant::now();
+    let (w, h) = ((key.2 / style::BLUR_SHRINK).max(1), (key.3 / style::BLUR_SHRINK).max(1));
+    let px = match kabuk_win::picture::cover(std::path::Path::new(&key.0), w, h) {
+        Ok(bgr) => backdrop::blurred(
+            &bgr,
+            w as usize,
+            h as usize,
+            style::BLUR_RADIUS,
+            style::BLUR_PASSES,
+            style::BLUR_DIM,
+        ),
+        Err(e) => {
+            tracing::warn!(file = %key.0, error = %e, "app grid wallpaper not read");
+            return;
+        }
+    };
+    tracing::info!(
+        w,
+        h,
+        ms = started.elapsed().as_millis() as u64,
+        "app grid wallpaper blurred"
+    );
+    if let Ok(mut o) = out.lock() {
+        o.push((key, w, h, px));
+    }
+    let _ = msgloop::post_message(
+        control,
+        Msg {
+            id: MSG_APP_GRID_BACKDROP,
+            wparam: 0,
+            lparam: 0,
+        },
+    );
+}

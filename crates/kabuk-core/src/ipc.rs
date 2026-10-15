@@ -37,6 +37,8 @@ pub enum Request {
     Overview,
     /// `saver`: start the screen saver now.
     Saver,
+    /// `apps`: open the grid of every app (DECISIONS D56).
+    AppGrid,
     /// `restore`: emergency stop and restore, as `kabuk --restore`.
     Restore,
 }
@@ -159,6 +161,10 @@ pub fn parse(words: &[String]) -> Result<Request, IpcError> {
             takes(0, "no arguments")?;
             Request::Saver
         }
+        "apps" => {
+            takes(0, "no arguments")?;
+            Request::AppGrid
+        }
         "restore" => {
             takes(0, "no arguments")?;
             Request::Restore
@@ -274,6 +280,7 @@ mod tests {
         assert_eq!(p("launcher"), Ok(Request::Launcher));
         assert_eq!(p("overview"), Ok(Request::Overview));
         assert_eq!(p("saver"), Ok(Request::Saver));
+        assert_eq!(p("apps"), Ok(Request::AppGrid));
         assert_eq!(p("restore"), Ok(Request::Restore));
     }
 
@@ -301,6 +308,7 @@ mod tests {
             "reload now",
             "launcher x",
             "overview now",
+            "apps all",
             "restore 1",
         ] {
             assert!(matches!(p(bad), Err(IpcError::BadArgs { .. })), "{bad}");

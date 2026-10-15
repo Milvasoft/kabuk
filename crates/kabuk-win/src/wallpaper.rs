@@ -59,6 +59,28 @@ pub fn backup() -> Option<WallpaperBackup> {
     Some(b)
 }
 
+/// Each monitor's rectangle (physical pixels) with the picture file Windows shows on it
+/// now; `None` for a plain colour. COM must be initialised.
+pub fn files() -> Vec<(Rect, Option<String>)> {
+    let Some(dw) = wallpapers() else {
+        return Vec::new();
+    };
+    monitor_ids(&dw)
+        .into_iter()
+        .map(|(id, rect)| {
+            // SAFETY: COM call on a live object; the string is freed after copying.
+            let path = unsafe {
+                dw.GetWallpaper(&HSTRING::from(id.as_str())).ok().map(|p| {
+                    let s = p.to_string().unwrap_or_default();
+                    CoTaskMemFree(Some(p.0 as *const _));
+                    s
+                })
+            };
+            (rect, path.filter(|p| !p.is_empty()))
+        })
+        .collect()
+}
+
 /// What Windows shows now, Kabuk's pictures included. COM must be initialised.
 pub fn current() -> Option<WallpaperBackup> {
     let dw = wallpapers()?;
@@ -149,5 +171,22 @@ mod tests {
         let b = backup().expect("IDesktopWallpaper answers");
         assert_eq!(b.monitors.len(), crate::shell::monitors().len());
         assert!(b.monitors.iter().all(|(id, _)| !id.is_empty()));
+    }
+
+    /// The app grid finds each monitor's picture by its rectangle, as the shell gives it.
+    #[test]
+    fn every_monitors_picture_is_found_by_its_rectangle() {
+        crate::system::com_init_mta();
+        let files = files();
+        let monitors = crate::shell::monitors();
+        assert_eq!(files.len(), monitors.len());
+        for m in &monitors {
+            assert!(
+                files.iter().any(|(r, _)| (r.left, r.top, r.right, r.bottom)
+                    == (m.rect.left, m.rect.top, m.rect.right, m.rect.bottom)),
+                "{:?}",
+                m.rect
+            );
+        }
     }
 }

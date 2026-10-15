@@ -299,7 +299,7 @@
   }
 
   // The design's order, with the apps after the title (DECISIONS D25).
-  const MODULES = ["title", "taskbar", "clock", "date", "media", "cpu", "ram", "gpu", "net", "vol", "tray", "notif", "power"];
+  const MODULES = ["app_grid", "title", "taskbar", "clock", "date", "media", "cpu", "ram", "gpu", "net", "vol", "tray", "notif", "power"];
   function barPage() {
     const b = cfg().bar;
     const own = A.lookPos[code()];
@@ -388,7 +388,7 @@
         <div><button class="set-btn ghost" type="button" data-pick="folder">${t("setFolderAdd")}</button></div></div>`;
   }
 
-  const KEYS = ["launcher", "workspace", "move_to_workspace", "focus_left", "focus_down", "focus_up", "focus_right", "move_left", "move_down", "move_up", "move_right", "toggle_float", "close_window", "cycle_layout", "toggle_scratchpad", "to_scratchpad", "toggle_group", "next_tab", "overview", "start_saver", "drag"];
+  const KEYS = ["launcher", "workspace", "move_to_workspace", "focus_left", "focus_down", "focus_up", "focus_right", "move_left", "move_down", "move_up", "move_right", "toggle_float", "close_window", "cycle_layout", "toggle_scratchpad", "to_scratchpad", "toggle_group", "next_tab", "overview", "start_saver", "app_grid", "drag"];
   function keysPage() {
     const any = KEYS.some((k) => changed("shortcuts." + k));
     return head(t("navKeys"), t("keysDesc")) + (any ? `<div><button class="set-btn ghost" type="button" data-reset-keys>${t("setResetKeys")}</button></div>` : "") + `

@@ -109,11 +109,12 @@ pub struct IconSpec {
 }
 
 /// A picture from [`crate::render::Images`] (e.g. another program's tray icon), drawn
-/// `size` DIPs square.
+/// `size` DIPs wide and `height` high (square but for [`Node::picture`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ImageSpec {
     pub key: u64,
     pub size: f32,
+    pub height: f32,
 }
 
 /// Fill, optional border and corner radius of a box.
@@ -225,7 +226,20 @@ impl Node {
     }
 
     pub fn image(key: u64, size: f32) -> Node {
-        Node::with_kind(Kind::Image(ImageSpec { key, size }))
+        Node::with_kind(Kind::Image(ImageSpec {
+            key,
+            size,
+            height: size,
+        }))
+    }
+
+    /// A stored picture stretched to `w` × `h` DIPs (e.g. a blurred wallpaper).
+    pub fn picture(key: u64, w: f32, h: f32) -> Node {
+        Node::with_kind(Kind::Image(ImageSpec {
+            key,
+            size: w,
+            height: h,
+        }))
     }
 
     /// An icon's stroke width in view-box units (no effect on other nodes).
@@ -391,7 +405,8 @@ fn measure(node: &Node, m: &dyn TextMeasure) -> Measured {
             let width = spec.max_width.map_or(t.width, |max| t.width.min(max));
             (Size { w: width, h: t.height }, Some(t.baseline))
         }
-        Kind::Icon(IconSpec { size, .. }) | Kind::Image(ImageSpec { size, .. }) => (Size { w: *size, h: *size }, None),
+        Kind::Icon(IconSpec { size, .. }) => (Size { w: *size, h: *size }, None),
+        Kind::Image(ImageSpec { size, height, .. }) => (Size { w: *size, h: *height }, None),
         Kind::Spacer => (Size::default(), None),
         Kind::Layer { children } => {
             kids = children.iter().map(|c| measure(c, m)).collect();
@@ -514,9 +529,9 @@ fn place(node: &Node, me: &Measured, rect: Rect, out: &mut Layout) {
         }
         Kind::Image(spec) => {
             let x = inner.x + (inner.w - spec.size) / 2.0;
-            let y = inner.y + (inner.h - spec.size) / 2.0;
+            let y = inner.y + (inner.h - spec.height) / 2.0;
             out.draws.push(Draw::Image {
-                rect: Rect::new(x, y, spec.size, spec.size),
+                rect: Rect::new(x, y, spec.size, spec.height),
                 spec: *spec,
             });
         }

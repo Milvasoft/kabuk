@@ -45,8 +45,10 @@ Target platform: Windows 11 22H2 and later. Windows 10 22H2 is supported on a be
   | `tray` | System tray | Left/right-click menus next to the icon. At most `tray_shown` icons (default 3) stay on the bar; the rest open in a panel from an overflow button, as on Windows (requested by the user on 2026-10-13; DECISIONS D26) |
   | `notif` | Notifications | Unread count badge |
   | `power` | Power menu | Lock, sleep, restart, shut down, sign out |
+  | `app_grid` | All apps button | Opens the app grid (§2.5b); first on every bar (requested by the user on 2026-10-15; DECISIONS D56) |
 
 - The workspace indicator is always present (not in the module list); clicking switches to that workspace, occupied workspaces are marked.
+- Nothing on the bar covers anything else: the clock moves aside for the groups at the ends, and apps the bar has no room for (a bar at a side, a small monitor) go behind a "+n" that opens the app grid (found by the user: on a left bar the clock sat over the apps).
 - The bar on the second and later monitors is minimal: workspaces, layout indicator, apps, clock, CPU and RAM. These modules also follow the global module setting. Every monitor's bar lists every app, as Windows' "show apps on all taskbars" (chosen by the user on 2026-10-15; DECISIONS D53).
 - Auto-hide: when enabled the bar reserves no space and waits off its edge with 2 px left on screen; it slides in when the mouse reaches that edge and slides off 0.6 s after the mouse left it (at once without full animations).
 - Background: solid (default, the desk colour over the bar's whole edge, as on the design's black desk), blur (the wallpaper blurred and tinted, as Windows' taskbar) or off (requested by the user on 2026-10-13; DECISIONS D28).
@@ -90,6 +92,13 @@ Target platform: Windows 11 22H2 and later. Windows 10 22H2 is supported on a be
 - Fuzzy search; matched letters are highlighted. Turkish case handling works correctly: searching "EKRANI" finds "Ekranı kilitle" (Lock screen), and the "ı/I" and "i/İ" distinction is preserved.
 - Keyboard: up/down selects, Enter opens, Esc closes. Clicking outside closes it.
 - If there are no results, help text is shown.
+
+### 2.5b App grid (requested by the user on 2026-10-15; DECISIONS D56)
+
+- Every app of Windows' "All apps" list on pages, as macOS's Launchpad: large icons with their names, alphabetical (Turkish order in Turkish), uninstallers and help or web links left out. Opened by `Win+Shift+A`, the bar's "All apps" button, a bar's "+n", or `kabuk msg apps`; on the monitor the user works on (the button's own monitor).
+- It covers the monitor, over a blurred, darkened picture of the screen as it was (the wallpaper when the screen cannot be taken). The icons come in from slightly larger as they fade in and go back out the same way; pages slide.
+- Pages: dots at the bottom (a click goes there), the wheel (either way), a drag with the mouse that follows it and turns the page past 15 % of its width (it gives only a little past the first and last page), Page Up/Down, Home/End. Arrow keys select an app and cross onto the next or previous page.
+- Typing searches at once (the launcher's fuzzy matching, Turkish case rules); the best match is selected, Enter opens it, Esc clears the search, then closes. A click on an app opens it; a click anywhere else, or another window, closes the grid.
 
 ### 2.6 Notifications and OSD
 
@@ -203,6 +212,7 @@ Defaults are on the Win key (the user's decision on 2026-10-14, DECISIONS D40: A
 | Next tab of the group | `Win+Shift+T` |
 | Overview of every workspace | `Win+Tab` |
 | Start the screen saver now (the displays turn off when no saver is chosen) | `Win+Shift+L` (requested by the user on 2026-10-14) |
+| Every app on a grid (§2.5b) | `Win+Shift+A` (requested by the user on 2026-10-15) |
 | Emergency exit and restore | `Ctrl+Alt+Shift+End` (cannot be changed) |
 
 On the Turkish Q keyboard there must be no conflict with AltGr (`Ctrl+Alt`) or the input-language switch shortcuts (`Alt+Shift`, `Win+Space`). Pressing and releasing `Alt+Shift` on its own must not break input-language switching.

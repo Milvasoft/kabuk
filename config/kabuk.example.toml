@@ -62,6 +62,7 @@ vol = true
 tray = true
 notif = true
 power = true
+app_grid = true           # the button that opens the grid of every app
 
 [windows]
 workspaces = 9            # per monitor, 1-9
@@ -140,6 +141,7 @@ toggle_group = ["Alt+G"]            # make the focused window a tabbed group, or
 next_tab = ["Alt+Shift+G"]          # show the group's next tab
 overview = ["Alt+O"]                # every workspace at a glance
 start_saver = ["Win+Shift+L"]       # the screen saver now (the display off when none is chosen)
+app_grid = ["Win+Shift+A"]          # every app on a full-screen grid, as macOS's Launchpad
 drag = "Alt"                      # held while dragging: left button moves, right button resizes
 
 [language]

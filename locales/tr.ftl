@@ -13,7 +13,7 @@ cli-usage =
                                 workspace <1-9>, move-to <1-9>, focus <left|down|up|right>,
                                 float toggle, scratchpad <toggle|send>,
                                 layout <dwindle|master|floating|tiling>, reload,
-                                query <state|windows|monitors>, launcher, overview, saver,
+                                query <state|windows|monitors>, launcher, overview, saver, apps,
                                 restore
     Seçenekler:
       --state-dir <klasör>    Durum dosyası ve log klasörü
@@ -103,6 +103,11 @@ app-pinned = Sabitlenmiş
 app-frequent = Sık kullanılanlar
 app-tasks = Görevler
 
+## Uygulama ızgarası (macOS'un Launchpad'i gibi sayfa sayfa her uygulama)
+
+grid-search = Ara
+grid-empty = Eşleşen uygulama yok
+
 ## Bildirimler
 
 notify-missed = Açıkken { $value } bildirim geldi
@@ -118,6 +123,7 @@ set-remove = Kaldır
 set-add = Ekle
 set-cancel = Vazgeç
 mod-taskbar = Uygulamalar
+mod-app-grid = Tüm uygulamalar düğmesi
 set-bg = Arka plan
 set-bg-h = Duvar kağıdının önünde barın arkasında ne dursun
 set-bg-solid = Düz
@@ -168,6 +174,7 @@ set-key-toggle-group = Sekmeli grup yap / grubu dağıt
 set-key-next-tab = Gruptaki sonraki sekme
 set-key-overview = Tüm workspace'lere genel bakış
 set-key-start-saver = Ekran koruyucuyu hemen başlat
+set-key-app-grid = Tüm uygulamalar ızgarası
 set-key-drag = Fareyle taşı (sağ tuş boyutlandırır)
 set-key-press = Yeni kısayola bas…
 set-reset-keys = Tüm kısayolları varsayılana döndür

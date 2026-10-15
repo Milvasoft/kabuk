@@ -1,6 +1,7 @@
 //! The Kabuk shell as a library, so examples and tests can reach its parts; the
 //! `kabuk.exe` entry point is `main.rs`.
 
+pub mod appgrid;
 pub mod bar;
 pub mod grab;
 pub mod install_cmd;

@@ -214,10 +214,11 @@ fn shortcuts(push: &mut impl FnMut(KeyPath, Problem), s: &Shortcuts, workspaces:
         }
     };
 
-    let lists: [(&str, &Vec<String>); 18] = [
+    let lists: [(&str, &Vec<String>); 19] = [
         ("launcher", &s.launcher),
         ("overview", &s.overview),
         ("start_saver", &s.start_saver),
+        ("app_grid", &s.app_grid),
         ("focus_left", &s.focus_left),
         ("focus_down", &s.focus_down),
         ("focus_up", &s.focus_up),

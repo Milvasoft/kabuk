@@ -52,6 +52,8 @@ use crate::wm::{self, SharedState, WmLink};
 #[path = "launcher_host.rs"]
 mod launcher_host;
 pub use launcher_host::{LAUNCHER_CLASS, MSG_TEST_LAUNCHER};
+#[path = "appgrid_host.rs"]
+mod appgrid_host;
 #[path = "apps_host.rs"]
 mod apps_host;
 #[path = "cursors_host.rs"]
@@ -64,6 +66,9 @@ mod motion_host;
 mod notify_host;
 #[path = "overview_host.rs"]
 mod overview_host;
+pub use appgrid_host::{
+    CHROME_CLASS as APP_GRID_CHROME_CLASS, GRID_CLASS as APP_GRID_CLASS, MSG_OPEN_APP_GRID, MSG_TEST_APP_GRID,
+};
 #[path = "system_colors_host.rs"]
 mod system_colors_host;
 pub use overview_host::{MSG_OPEN_OVERVIEW, MSG_TEST_OVERVIEW};
@@ -153,6 +158,10 @@ mod timer {
     pub const BAR_SLIDE: usize = 25;
     /// Waits for the screen saver shortcut's keys to be let go.
     pub const SAVER_KEYS: usize = 26;
+    /// The app grid's page has slid into place.
+    pub const APP_GRID_SLIDE: usize = 27;
+    /// The app grid's first icons are loaded ahead.
+    pub const APP_GRID_AHEAD: usize = 28;
 }
 
 /// An auto-hiding bar (SPEC §2.1): how much of it stays on screen for the mouse to reach
@@ -491,6 +500,8 @@ struct Shared {
     tabs: tabs_host::TabsState,
     /// The overview while it is open, and its shortcuts.
     overview: overview_host::OverviewState,
+    /// The grid of every app while it is open, its shortcuts, icons and wallpapers.
+    app_grid: appgrid_host::AppGridState,
     /// The wallpaper Kabuk set.
     wallpaper: wallpaper_host::WallpaperState,
     /// Windows' notification count and its counter (DECISIONS D32).
@@ -721,6 +732,7 @@ impl BarManager {
                 leaving: Vec::new(),
                 tabs: tabs_host::TabsState::default(),
                 overview: overview_host::OverviewState::default(),
+                app_grid: appgrid_host::AppGridState::default(),
                 wallpaper: wallpaper_host::WallpaperState::default(),
                 notif_count: None,
                 notif_counter: None,
@@ -782,6 +794,7 @@ impl BarManager {
             kabuk_win::shellitems::refresh_installed_apps();
             s.bind_overview_keys();
             s.bind_saver_keys();
+            s.create_app_grid();
             s.load_pins();
             s.apply_cursors();
             s.apply_system_colors();
@@ -1027,6 +1040,11 @@ impl Shared {
                 Some(0)
             }
             #[cfg(feature = "integration")]
+            MSG_TEST_APP_GRID => {
+                self.test_app_grid(m.wparam == 1);
+                Some(0)
+            }
+            #[cfg(feature = "integration")]
             wallpaper_host::MSG_TEST_DRIFT => {
                 self.drift_step(true);
                 Some(0)
@@ -1135,6 +1153,8 @@ impl Shared {
                     timer::AUTOHIDE => self.autohide_due(),
                     timer::BAR_SLIDE => self.step_bar_slides(),
                     timer::SAVER_KEYS => self.saver_keys_due(),
+                    timer::APP_GRID_SLIDE => self.app_grid_slide_over(),
+                    timer::APP_GRID_AHEAD => self.app_grid_ahead(),
                     timer::TRAY_AGAIN => {
                         self.kill(timer::TRAY_AGAIN);
                         let now = std::time::Instant::now();
@@ -1180,10 +1200,11 @@ impl Shared {
                 self.test_app_click(m.wparam as u64, m.lparam == 1);
                 Some(0)
             }
-            msgloop::MSG_HOTKEY => {
-                (self.launcher_hotkey(m.wparam) || self.overview_hotkey(m.wparam) || self.saver_hotkey(m.wparam))
-                    .then_some(0)
-            }
+            msgloop::MSG_HOTKEY => (self.launcher_hotkey(m.wparam)
+                || self.overview_hotkey(m.wparam)
+                || self.saver_hotkey(m.wparam)
+                || self.app_grid_hotkey(m.wparam))
+            .then_some(0),
             MSG_VOLUME_KEY => {
                 self.volume_key(m.wparam);
                 Some(0)
@@ -1194,6 +1215,19 @@ impl Shared {
             }
             launcher_host::MSG_LAUNCHER_PICTURES => {
                 self.launcher_pictures_arrived();
+                Some(0)
+            }
+            appgrid_host::MSG_APP_GRID_PICTURES => {
+                self.app_grid_pictures_arrived();
+                Some(0)
+            }
+            appgrid_host::MSG_APP_GRID_BACKDROP => {
+                self.app_grid_backdrops_arrived();
+                Some(0)
+            }
+            MSG_OPEN_APP_GRID => {
+                let activate = self.shortcuts;
+                self.toggle_app_grid(None, activate);
                 Some(0)
             }
             launcher_host::MSG_LAUNCHER_ITEMS => {
@@ -1432,6 +1466,9 @@ impl Shared {
         }
         if before.shortcuts.start_saver != after.shortcuts.start_saver {
             self.bind_saver_keys();
+        }
+        if before.shortcuts.app_grid != after.shortcuts.app_grid {
+            self.bind_app_grid_keys();
         }
         if before.bar.modules.taskbar != after.bar.modules.taskbar {
             self.refresh_apps();
@@ -2741,6 +2778,11 @@ impl Shared {
             },
             Some((view::hit::TRAY_MORE, _)) => self.toggle_tray_panel(index),
             Some((view::hit::POWER, _)) => self.toggle_power_menu(index),
+            Some((view::hit::APP_GRID | view::hit::APP_MORE, _)) => {
+                let monitor = self.bars.get(index).map(|b| b.monitor.clone());
+                let activate = self.shortcuts;
+                self.toggle_app_grid(monitor, activate);
+            }
             Some((view::hit::STATS, n)) => {
                 // Task Manager for the figures, the network's settings for its rate.
                 let target = if n == view::hit::STAT_NET {

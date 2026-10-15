@@ -28,6 +28,7 @@ pub mod process;
 pub mod registry;
 pub mod restore;
 pub mod screen;
+pub mod screen_picture;
 pub mod screensaver;
 pub mod shell;
 pub mod shellitems;

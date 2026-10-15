@@ -6,6 +6,7 @@ pub mod apps;
 pub mod dock;
 pub mod geometry;
 pub mod manager;
+pub mod pictures;
 pub mod power_menu;
 pub mod style;
 pub mod theme;

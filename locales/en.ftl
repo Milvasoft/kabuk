@@ -13,7 +13,7 @@ cli-usage =
                                 workspace <1-9>, move-to <1-9>, focus <left|down|up|right>,
                                 float toggle, scratchpad <toggle|send>,
                                 layout <dwindle|master|floating|tiling>, reload,
-                                query <state|windows|monitors>, launcher, overview, saver,
+                                query <state|windows|monitors>, launcher, overview, saver, apps,
                                 restore
     Options:
       --state-dir <folder>    Folder for the state file and logs
@@ -104,6 +104,11 @@ app-pinned = Pinned
 app-frequent = Frequent
 app-tasks = Tasks
 
+## App grid (every app on pages, as macOS's Launchpad)
+
+grid-search = Search
+grid-empty = No app matches
+
 ## Notices
 
 notify-missed = { $value } notices came while it was on
@@ -119,6 +124,7 @@ set-remove = Remove
 set-add = Add
 set-cancel = Cancel
 mod-taskbar = Apps
+mod-app-grid = All apps button
 set-bg = Background
 set-bg-h = What lies behind the bar over the wallpaper
 set-bg-solid = Solid
@@ -169,6 +175,7 @@ set-key-toggle-group = Make a tabbed group / break it up
 set-key-next-tab = Next tab of the group
 set-key-overview = Overview of every workspace
 set-key-start-saver = Start the screen saver now
+set-key-app-grid = Every app on a grid
 set-key-drag = Move with the mouse (right button resizes)
 set-key-press = Press the new shortcut…
 set-reset-keys = Reset all shortcuts to their defaults

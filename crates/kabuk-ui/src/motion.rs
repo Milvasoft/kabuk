@@ -208,6 +208,31 @@ pub const MENU: Entrance = Entrance {
     seconds: 0.18,
 };
 
+/// The grid of every app (DECISIONS D56): its icons come in from a little larger as they
+/// fade in, as macOS's Launchpad, and go back out the same way.
+pub const APP_GRID: Entrance = Entrance {
+    hidden: Pose {
+        opacity: 0.0,
+        scale: 1.06,
+        y: 0.0,
+    },
+    seconds: 0.22,
+};
+
+/// The app grid's blurred wallpaper under it: it only fades.
+pub const APP_GRID_BACKDROP: Entrance = Entrance {
+    hidden: Pose {
+        opacity: 0.0,
+        scale: 1.0,
+        y: 0.0,
+    },
+    ..APP_GRID
+};
+
+/// A page of the app grid sliding in from the side, or back when a swipe falls short
+/// (seconds).
+pub const PAGE_SLIDE: f32 = 0.22;
+
 /// The transitions started on one surface, so the next starts from where the last is.
 #[derive(Clone, Copy, Debug)]
 pub struct Motion {
@@ -361,6 +386,19 @@ mod tests {
         assert_eq!(NOTICE.room(), (NOTICE_SLIDE, 0.0));
         assert_eq!(OSD.room(), (0.0, NOTICE_SLIDE));
         assert_eq!(MENU.room(), (0.0, 0.0));
+    }
+
+    /// The app grid follows the rule too: its icons shrink into place as they fade in
+    /// (macOS's Launchpad), its wallpaper only fades, and its pages slide as quickly.
+    #[test]
+    fn the_app_grid_follows_the_design_rule() {
+        for e in [APP_GRID, APP_GRID_BACKDROP] {
+            assert!((0.12..=0.22).contains(&e.seconds), "{e:?}");
+            assert_eq!(e.hidden.opacity, 0.0);
+            assert_eq!(e.room(), (0.0, 0.0));
+        }
+        assert!((0.12..=0.22).contains(&PAGE_SLIDE));
+        const { assert!(APP_GRID.hidden.scale > 1.0 && APP_GRID_BACKDROP.hidden.scale == 1.0) };
     }
 
     #[test]

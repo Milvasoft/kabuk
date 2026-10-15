@@ -392,7 +392,7 @@ fn panel(
 /// A stored picture, scaled into `rect`; nothing when the key is unknown.
 fn image(gpu: &Gpu, ctx: &ID2D1DeviceContext, rect: Rect, key: u64) -> Result<()> {
     use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
-    let made = gpu.images.with(key, |side, px| {
+    let made = gpu.images.with(key, |(w, h), px| {
         let props = D2D1_BITMAP_PROPERTIES1 {
             pixelFormat: D2D1_PIXEL_FORMAT {
                 format: DXGI_FORMAT_B8G8R8A8_UNORM,
@@ -402,12 +402,9 @@ fn image(gpu: &Gpu, ctx: &ID2D1DeviceContext, rect: Rect, key: u64) -> Result<()
             dpiY: crate::geom::Scale::BASE_DPI,
             ..Default::default()
         };
-        let size = D2D_SIZE_U {
-            width: side,
-            height: side,
-        };
-        // SAFETY: `px` holds side × side × 4 bytes, read during the call only.
-        unsafe { ctx.CreateBitmap(size, Some(px.as_ptr().cast()), side * 4, &props) }
+        let size = D2D_SIZE_U { width: w, height: h };
+        // SAFETY: `px` holds w × h × 4 bytes, read during the call only.
+        unsafe { ctx.CreateBitmap(size, Some(px.as_ptr().cast()), w * 4, &props) }
     });
     let Some(bitmap) = made else { return Ok(()) };
     let bitmap = bitmap.ctx("image bitmap")?;

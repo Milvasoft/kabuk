@@ -11,7 +11,7 @@ use kabuk_win::pipe::{PipeServer, Reply};
 use kabuk_win::window::Hwnd;
 use serde_json::{json, Value};
 
-use crate::bar::manager::{MSG_OPEN_LAUNCHER, MSG_OPEN_OVERVIEW, MSG_RELOAD, MSG_START_SAVER};
+use crate::bar::manager::{MSG_OPEN_APP_GRID, MSG_OPEN_LAUNCHER, MSG_OPEN_OVERVIEW, MSG_RELOAD, MSG_START_SAVER};
 use crate::wm::{self, Command, SharedState, WmLink};
 
 /// Error keys the server answers with; the client shows their translation.
@@ -98,6 +98,7 @@ fn handle(line: &str, t: &Targets) -> Reply {
         Request::Launcher => to_bar(MSG_OPEN_LAUNCHER),
         Request::Overview => to_bar(MSG_OPEN_OVERVIEW),
         Request::Saver => to_bar(MSG_START_SAVER),
+        Request::AppGrid => to_bar(MSG_OPEN_APP_GRID),
         Request::Query(kind) => Response::with(query(kind, t)),
         Request::Restore => {
             let event = t.instance.emergency_event();

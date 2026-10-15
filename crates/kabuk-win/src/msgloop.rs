@@ -459,12 +459,19 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
     unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
 }
 
-/// Virtual-key codes the launcher reads from `WM_KEYDOWN`.
+/// Virtual-key codes the launcher and the app grid read from `WM_KEYDOWN`.
 pub mod vk {
     use windows::Win32::UI::Input::KeyboardAndMouse as k;
 
     pub const UP: usize = k::VK_UP.0 as usize;
     pub const DOWN: usize = k::VK_DOWN.0 as usize;
+    pub const LEFT: usize = k::VK_LEFT.0 as usize;
+    pub const RIGHT: usize = k::VK_RIGHT.0 as usize;
+    /// Page Up and Page Down.
+    pub const PRIOR: usize = k::VK_PRIOR.0 as usize;
+    pub const NEXT: usize = k::VK_NEXT.0 as usize;
+    pub const HOME: usize = k::VK_HOME.0 as usize;
+    pub const END: usize = k::VK_END.0 as usize;
     pub const RETURN: usize = k::VK_RETURN.0 as usize;
     pub const ESCAPE: usize = k::VK_ESCAPE.0 as usize;
     pub const BACK: usize = k::VK_BACK.0 as usize;
@@ -924,6 +931,10 @@ pub mod msg {
     pub const LBUTTONUP: u32 = w::WM_LBUTTONUP;
     pub const RBUTTONUP: u32 = w::WM_RBUTTONUP;
     pub const MOUSEWHEEL: u32 = w::WM_MOUSEWHEEL;
+    /// The wheel tilted sideways (or a touchpad's sideways swipe).
+    pub const MOUSEHWHEEL: u32 = w::WM_MOUSEHWHEEL;
+    /// In a mouse message's `wparam`: the left button is down.
+    pub const MK_LBUTTON: usize = 0x0001;
     pub const MOUSEMOVE: u32 = w::WM_MOUSEMOVE;
     /// `WM_MOUSELEAVE` (defined in the `Win32_UI_Controls` feature, not enabled here).
     pub const MOUSELEAVE: u32 = 0x02A3;

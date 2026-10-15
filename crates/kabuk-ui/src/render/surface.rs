@@ -195,6 +195,24 @@ impl WindowSurface {
         Ok(())
     }
 
+    /// Moves the content `x` physical pixels across at once (the app grid's pages, a
+    /// strip wider than the window). Nothing changes until [`Gpu::commit`].
+    pub fn set_offset_x(&self, x: f32) -> Result<()> {
+        // SAFETY: a plain property call on our own visual.
+        unsafe { self.visual.SetOffsetX2(x) }.ctx("offset")
+    }
+
+    /// Slides the content from `from` to `to` physical pixels across over `seconds`,
+    /// easing out, on the compositor from the next [`Gpu::commit`]; it stays at `to`.
+    pub fn slide_x(&self, gpu: &Gpu, from: f32, to: f32, seconds: f32) -> Result<()> {
+        if seconds <= 0.0 {
+            return self.set_offset_x(to);
+        }
+        let along = animation(gpu, crate::motion::ease_out(from, to, seconds), seconds, to)?;
+        // SAFETY: a plain property call on our own visual.
+        unsafe { self.visual.SetOffsetX(&along) }.ctx("offset")
+    }
+
     /// Keeps the content as it is above the next drawing and fades it out over
     /// `seconds` from the next [`Gpu::commit`], so a change of look or mode blends in.
     /// The next render must be full; [`WindowSurface::settle_crossfade`] drops the old
