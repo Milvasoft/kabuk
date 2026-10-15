@@ -273,6 +273,7 @@ async function main() {
   const chip = page.locator(`[data-tgl="launcher.sources.recent"]`);
   await chip.click(); await settled(); await chip.click(); await settled();
   check((await page.locator(".set-main").innerText()).includes("Hidden app"), "app grid: a hidden app listed");
+  check((await page.locator(".set-part h4").innerText()).length > 0, "app grid: a part of its own, titled");
   await page.locator(`[data-grid-show]`).first().click(); await settled();
   check(JSON.parse(fs.readFileSync(gridFile, "utf8")).hidden.length === 0, "app grid: the hidden app shown again");
   check(!(await page.locator(".set-main").innerText()).includes("Hidden app"), "app grid: no longer listed");

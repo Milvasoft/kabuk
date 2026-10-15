@@ -113,6 +113,7 @@ grid-search = Ara
 grid-empty = Eşleşen uygulama yok
 grid-done = Bitti
 lp-grid = Tüm uygulamalar ızgarası
+lp-grid-title = Tüm uygulamalar (Launchpad)
 media-nothing = Çalan bir şey yok
 k-profile = Düzen profili
 k-profile-open = { $value } düzenini aç

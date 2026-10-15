@@ -505,7 +505,10 @@
     const g = S.app_grid || { hidden: [], ordered: false };
     const hidden = g.hidden.map((h) => `<div class="set-row"><span><b>${escapeHtml(h.name)}</b></span><button type="button" class="linkish" data-grid-show="${escapeHtml(h.open)}">${t("lpGridShow")}</button></div>`).join("")
       || `<div class="set-row"><span>${t("lpGridNone")}</span></div>`;
-    return `<div class="set-grp"><span class="gl">${t("lpGrid")}. ${t("lpGridH")}</span>${hidden}
+    // A part of its own under a line and its title (asked for by the user: it read as
+    // more of the launcher's folders).
+    return `<div class="set-part"><h4>${t("lpGridTitle")}</h4></div>
+      <div class="set-grp"><span class="gl">${t("lpGridH")}</span>${hidden}
         <div><button class="set-btn ghost" type="button" data-grid-reset ${g.ordered ? "" : "disabled"}>${t("lpGridReset")}</button></div></div>`;
   }
 
