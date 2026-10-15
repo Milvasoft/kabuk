@@ -394,6 +394,10 @@ impl Shared {
         let Some(app) = self.apps.list.get(i).cloned() else {
             return;
         };
+        // No preview over what the click does, until the mouse leaves the app.
+        self.preview_held = Some(i);
+        self.kill(super::timer::APP_PREVIEW);
+        self.hide_app_preview();
         match apps::click_action(&app, front, new_window) {
             apps::ClickAction::Minimize(hwnd) => {
                 tracing::info!(hwnd, source = %app.source, "app minimized from the bar");

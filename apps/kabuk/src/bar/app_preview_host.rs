@@ -38,6 +38,9 @@ impl Shared {
     /// their delay, follow at once when they are already up, or go after their grace.
     pub(super) fn preview_hover(&mut self, bar: usize, app: Option<usize>) {
         self.kill(timer::APP_PREVIEW);
+        if app != self.preview_held {
+            self.preview_held = None;
+        }
         let has_windows = |i: usize| self.apps.list.get(i).is_some_and(|a| !a.windows.is_empty());
         match app.filter(|i| has_windows(*i)) {
             Some(i) if self.app_preview.is_some() => {
@@ -64,7 +67,7 @@ impl Shared {
     /// The delay passed: the previews of the app under the mouse.
     pub(super) fn preview_due(&mut self) {
         self.kill(timer::APP_PREVIEW);
-        if let Some(i) = self.app_hover_index() {
+        if let Some(i) = self.app_hover_index().filter(|i| Some(*i) != self.preview_held) {
             self.show_app_preview(self.preview_bar, i);
         }
     }

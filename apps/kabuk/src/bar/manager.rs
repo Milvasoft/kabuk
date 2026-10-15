@@ -483,6 +483,10 @@ struct Shared {
     app_preview: Option<app_preview_host::AppPreview>,
     /// The bar whose app the previews wait for.
     preview_bar: usize,
+    /// The app clicked last: its previews wait until the mouse leaves it (as Windows'
+    /// taskbar; found in the user's video: a preview popped up over the window just
+    /// brought back).
+    preview_held: Option<usize>,
     /// Closed popups playing their exit.
     leaving: Vec<motion_host::Leaving>,
     /// The tabbed groups' strips on screen.
@@ -710,6 +714,7 @@ impl BarManager {
                 icons_sent: Vec::new(),
                 app_preview: None,
                 preview_bar: 0,
+                preview_held: None,
                 app_hover: AppHover {
                     app: None,
                     leaving: None,
