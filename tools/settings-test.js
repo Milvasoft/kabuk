@@ -456,24 +456,31 @@ async function main() {
   check(await page.locator("[data-genrun]").isDisabled(), "create: waits for a connection");
   await page.click("[data-genconnect]"); await settled();
   check((await page.locator(".conn .st").innerText()).includes("test-coder:7b"), "create: Ollama's coding model found");
-  await page.fill("#gen-prompt", "yavaş kurdeleler");
-  await page.click("[data-genrun]");
-  await page.waitForSelector("[data-genapply]", { timeout: CREATE_TIMEOUT });
-  await settled();
-  const chats = ollama.seen.filter((r) => r.url === "/api/chat").map((r) => JSON.parse(r.body));
-  check(chats.length === 2 && chats[0].model === "test-coder:7b", `create: the model asked twice (${chats.length})`);
-  const fix = chats[1] ? chats[1].messages[chats[1].messages.length - 1].content : "";
-  check(/average brightness/.test(fix), "create: the refusal's reason went back to the model");
-  check((await page.locator(".gen-steps li.ok").count()) === 4, "create: every step passed");
-  check((await page.locator("[data-gentries]").innerText()).includes("2/3"), "create: the second try shown");
-  check((await page.locator(".gen-res img").getAttribute("src") || "").startsWith("data:image/bmp;base64,"), "create: previewed");
-  if (shots) await page.screenshot({ path: path.join(shots, "wall-create.png") });
-  await page.click("[data-genapply]");
-  check(await until(() => /kind = "generated"/.test(toml()) && /generated = "gen-\d+"/.test(toml())), `create: applied as the wallpaper${errors.length ? " " + errors.join(" | ") : ""}`);
-  const kept = fs.readdirSync(path.join(dir, "walls"));
-  check(kept.length === 1 && fs.readFileSync(path.join(dir, "walls", kept[0], "wall.hlsl"), "utf8") === SAMPLE_HLSL, "create: kept in the state folder");
-  const card = page.locator(`[data-gen="${kept[0]}"]`);
-  check((await card.count()) === 1 && (await card.getAttribute("aria-pressed")) === "true", "create: chosen in the list");
+  // A CI runner has no graphics card: every wallpaper takes too long a frame there and
+  // is refused, as it would be on such a machine. The creation runs on the host and in
+  // the test VM (docs/TESTING.md).
+  if (process.env.CI) {
+    console.log("skip  create: no graphics card on a CI runner");
+  } else {
+    await page.fill("#gen-prompt", "yavaş kurdeleler");
+    await page.click("[data-genrun]");
+    await page.waitForSelector("[data-genapply]", { timeout: CREATE_TIMEOUT });
+    await settled();
+    const chats = ollama.seen.filter((r) => r.url === "/api/chat").map((r) => JSON.parse(r.body));
+    check(chats.length === 2 && chats[0].model === "test-coder:7b", `create: the model asked twice (${chats.length})`);
+    const fix = chats[1] ? chats[1].messages[chats[1].messages.length - 1].content : "";
+    check(/average brightness/.test(fix), "create: the refusal's reason went back to the model");
+    check((await page.locator(".gen-steps li.ok").count()) === 4, "create: every step passed");
+    check((await page.locator("[data-gentries]").innerText()).includes("2/3"), "create: the second try shown");
+    check((await page.locator(".gen-res img").getAttribute("src") || "").startsWith("data:image/bmp;base64,"), "create: previewed");
+    if (shots) await page.screenshot({ path: path.join(shots, "wall-create.png") });
+    await page.click("[data-genapply]");
+    check(await until(() => /kind = "generated"/.test(toml()) && /generated = "gen-\d+"/.test(toml())), `create: applied as the wallpaper${errors.length ? " " + errors.join(" | ") : ""}`);
+    const kept = fs.readdirSync(path.join(dir, "walls"));
+    check(kept.length === 1 && fs.readFileSync(path.join(dir, "walls", kept[0], "wall.hlsl"), "utf8") === SAMPLE_HLSL, "create: kept in the state folder");
+    const card = page.locator(`[data-gen="${kept[0]}"]`);
+    check((await card.count()) === 1 && (await card.getAttribute("aria-pressed")) === "true", "create: chosen in the list");
+  }
   ollama.server.close();
 
   // A key typed in for Claude lands in Credential Manager only, and goes on Disconnect.
