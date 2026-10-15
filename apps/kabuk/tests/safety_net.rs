@@ -92,8 +92,15 @@ fn watchdog_restarts_a_shell_that_stopped_answering() {
         wait_until(limit, || window.hwnd.is_visible()).is_some(),
         "the hung shell's window never came back"
     );
-    assert_eq!(sandbox.log_lines("shell stopped answering; ending it"), 1);
-    assert_eq!(sandbox.log_lines("shell crashed; desktop restored"), 1);
+    // The watchdog's log reaches the file a moment after the window is back (found in
+    // the VM).
+    for line in ["shell stopped answering; ending it", "shell crashed; desktop restored"] {
+        assert!(
+            wait_until(RESTORE_LIMIT, || sandbox.log_lines(line) >= 1).is_some(),
+            "{line}"
+        );
+        assert_eq!(sandbox.log_lines(line), 1, "{line}");
+    }
     assert!(Process::open(pid).map_or(true, |p| p.wait(Some(RESTORE_LIMIT))));
 
     // A new shell runs, without hiding the window again, and answers.

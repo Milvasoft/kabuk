@@ -14,6 +14,9 @@ use kabuk_win::window::Hwnd;
 
 /// The window class of `kabuk-testapp`, the only class the test-mode window manager manages.
 pub const TEST_WINDOW_CLASS: &str = "KabukTestWindow";
+/// The test app's title when it is started without `--title` (as a layout profile or
+/// the drop-down starts it).
+pub const TESTAPP_DEFAULT_TITLE: &str = "Kabuk test window";
 
 /// Passed to [`Sandbox::kabuk_with`]: the shell hides the taskbar and takes the tray icons
 /// as it does for the user (only tests about those do this).

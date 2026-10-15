@@ -244,6 +244,23 @@ fn a_layout_profile_moves_open_windows_and_starts_the_rest() {
         exe.display()
     );
     let _shell = Shell::start_with(&sandbox, &profile);
+    // Kabuk starts the second window (the test app's own title), so the test ends it,
+    // failed or not (found in the VM: a failed run left it, and the next tests managed it).
+    struct EndsStarted;
+    impl Drop for EndsStarted {
+        fn drop(&mut self) {
+            for w in kabuk_win::window::windows_of_class(TEST_WINDOW_CLASS) {
+                if w.title() != TESTAPP_DEFAULT_TITLE {
+                    continue;
+                }
+                if let Some(p) = w.pid().and_then(|pid| kabuk_win::process::Process::open(pid).ok()) {
+                    let _ = p.terminate(1);
+                    p.wait(Some(SETTLE));
+                }
+            }
+        }
+    }
+    let _ends = EndsStarted;
     let a = TestWindow::open(&["--title", &title("profile-a")]);
     managed(&sandbox, &a);
     let entry = window_entry(&sandbox, &a);
@@ -263,14 +280,22 @@ fn a_layout_profile_moves_open_windows_and_starts_the_rest() {
         .log_lines("window placed by a layout profile")
         == 1)
     .is_some());
-    let windows = ok(&sandbox, &["query", "windows"]).json();
-    let started = windows
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|e| e["hwnd"] != a.hwnd.0 && e["exe"] == "kabuk-testapp.exe")
-        .cloned()
-        .expect("the started window");
+    // The query answers from the window manager's last published view, a moment behind
+    // its log (found in the VM).
+    let started = || {
+        ok(&sandbox, &["query", "windows"])
+            .json()
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["hwnd"] != a.hwnd.0 && e["exe"] == "kabuk-testapp.exe")
+            .cloned()
+    };
+    assert!(
+        wait_until(SETTLE, || started().is_some()).is_some(),
+        "the started window"
+    );
+    let started = started().expect("the started window");
     assert_eq!(started["workspace"], 4, "{started}");
     if let Some(h) = started["hwnd"].as_u64() {
         kabuk_win::window::Hwnd(h).close_async();

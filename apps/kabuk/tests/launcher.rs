@@ -253,6 +253,20 @@ fn kabuk_ayarlari_opens_one_settings_window() {
     let shell = Shell::start(&sandbox, &config(""));
     let windows = || kabuk_win::window::windows_of_class(&settings_class);
     assert!(windows().is_empty(), "a settings window is already open");
+    // Kabuk starts the settings app, so the test ends it, failed or not (found in the VM:
+    // a failed run left it open, and its output held the test runner up).
+    struct EndsIt<F: Fn() -> Vec<kabuk_win::window::Hwnd>>(F);
+    impl<F: Fn() -> Vec<kabuk_win::window::Hwnd>> Drop for EndsIt<F> {
+        fn drop(&mut self) {
+            for w in (self.0)() {
+                if let Some(p) = w.pid().and_then(|pid| kabuk_win::process::Process::open(pid).ok()) {
+                    let _ = p.terminate(1);
+                    p.wait(Some(SETTLE));
+                }
+            }
+        }
+    }
+    let _ends = EndsIt(windows);
     for round in 0..2 {
         shell.open(&sandbox);
         shell.type_text("kabuk ayar");
@@ -272,7 +286,9 @@ fn kabuk_ayarlari_opens_one_settings_window() {
         );
     }
     // Its page ran, on this instance's files (its log is in the sandbox's state folder).
-    assert!(wait_until(SETTLE, || sandbox.log_lines("settings page loaded") >= 1).is_some());
+    // WebView2's first start on a machine takes longer than a page's settling (found in
+    // the VM just after it started).
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("settings page loaded") >= 1).is_some());
     std::thread::sleep(Duration::from_millis(500));
     assert_eq!(windows().len(), 1, "a second window opened");
     // PLAN M8: closed, it leaves nothing running, its WebView2 helpers included (they
