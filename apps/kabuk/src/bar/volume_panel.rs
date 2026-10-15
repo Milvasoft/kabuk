@@ -1,7 +1,8 @@
 //! The volume panel and the system icons' menus (reported by the user: a click on the
 //! volume icon showed nothing, and every icon should do what Windows' taskbar does): a
 //! left click on the bar's volume opens the output's level as the look's OSD track,
-//! which a click or a drag sets, the speaker that mutes, and Windows' volume mixer and
+//! which a click or a drag sets, the speaker that mutes, the output devices to choose
+//! from (as Windows 11's sound flyout; DECISIONS D54), and Windows' volume mixer and
 //! sound settings; a right click on the volume, the clock, the bell or a system figure
 //! opens that icon's entries, as Windows' taskbar does. In the tray panel's surface
 //! (D21, D26). Pure.
@@ -19,6 +20,8 @@ pub const MUTE: u32 = 0;
 pub const TRACK: u32 = 1;
 /// The entries' values start here, in [`ENTRIES`]' order.
 pub const FIRST_ENTRY: u32 = 2;
+/// The output devices' values start here, in the order given to [`view`].
+pub const FIRST_OUTPUT: u32 = 100;
 
 /// An entry: icon, words and what it opens (a Windows settings page or a program).
 pub type Entry = (&'static str, &'static str, &'static str);
@@ -82,14 +85,51 @@ pub fn percent_at(x: f32, track: Rect) -> u32 {
     (((x - track.x) / track.w).clamp(0.0, 1.0) * 100.0).round() as u32
 }
 
+/// A row of an icon and words, clickable as `value`.
+fn entry_row(
+    icon: &'static str,
+    icon_role: Role,
+    words: String,
+    color: Role,
+    size: f32,
+    s: &TipStyle,
+    value: u32,
+) -> Node {
+    Node::row(vec![
+        Node::icon(icon, ICON, icon_role),
+        Node::text(TextSpec {
+            spans: vec![Span {
+                text: words,
+                color,
+                weight: 400,
+                after: 0.0,
+                underline: false,
+            }],
+            font: FontRole::Ui,
+            size,
+            max_width: Some(MAX_TEXT),
+        }),
+    ])
+    .gap(ICON_GAP)
+    .align(Align::Center)
+    .padding(Insets::symmetric(s.pad_h, 0.0))
+    .size(None, Some(ROW))
+    .hit(HIT, value)
+}
+
+/// The widest an output's name may be before it is cut (DIPs).
+const MAX_TEXT: f32 = 300.0;
+
 /// The panel's tree; `level` is `(percent, muted)` for the track (`None`: no track, the
-/// right click's menu).
+/// right click's menu); `outputs` the output devices' names, the one in use `true`,
+/// listed under the track.
 pub fn view(
     i18n: &I18n,
     text_scale: f32,
     s: &TipStyle,
     notify: &NotifyStyle,
     level: Option<(u32, bool)>,
+    outputs: &[(String, bool)],
     entries: &[Entry],
 ) -> Node {
     let mut rows = Vec::new();
@@ -119,29 +159,36 @@ pub fn view(
             .padding(Insets::symmetric(s.pad_h, s.pad_v)),
         );
     }
+    if level.is_some() && outputs.len() > 1 {
+        for (i, (name, current)) in outputs.iter().enumerate() {
+            let (icon, role, color) = if *current {
+                ("check", Role::Accent, Role::Fg)
+            } else {
+                ("vol", Role::Dim, Role::Dim)
+            };
+            let value = FIRST_OUTPUT + u32::try_from(i).unwrap_or(0);
+            rows.push(entry_row(
+                icon,
+                role,
+                name.clone(),
+                color,
+                s.text * text_scale,
+                s,
+                value,
+            ));
+        }
+    }
     for (i, (icon, key, _)) in entries.iter().enumerate() {
-        rows.push(
-            Node::row(vec![
-                Node::icon(icon, ICON, Role::Dim),
-                Node::text(TextSpec {
-                    spans: vec![Span {
-                        text: i18n.tr(key),
-                        color: Role::Fg,
-                        weight: 400,
-                        after: 0.0,
-                        underline: false,
-                    }],
-                    font: FontRole::Ui,
-                    size: s.text * text_scale,
-                    max_width: None,
-                }),
-            ])
-            .gap(ICON_GAP)
-            .align(Align::Center)
-            .padding(Insets::symmetric(s.pad_h, 0.0))
-            .size(None, Some(ROW))
-            .hit(HIT, FIRST_ENTRY + u32::try_from(i).unwrap_or(0)),
-        );
+        let value = FIRST_ENTRY + u32::try_from(i).unwrap_or(0);
+        rows.push(entry_row(
+            icon,
+            Role::Dim,
+            i18n.tr(key),
+            Role::Fg,
+            s.text * text_scale,
+            s,
+            value,
+        ));
     }
     Node::column(rows)
         .align(Align::Start)
@@ -231,16 +278,57 @@ mod tests {
                     let w = i18n.tr(key);
                     assert!(!w.is_empty() && w != *key, "{key} {lang:?}");
                 }
-                let m = view(&i18n, 1.0, &TIP, &notify, None, menu.entries());
+                let m = view(&i18n, 1.0, &TIP, &notify, None, &[], menu.entries());
                 let n = u32::try_from(menu.entries().len()).unwrap();
                 assert_eq!(hits(&m), (FIRST_ENTRY..FIRST_ENTRY + n).collect::<Vec<_>>(), "{menu:?}");
             }
-            let panel = view(&i18n, 1.0, &TIP, &notify, Some((40, false)), &ENTRIES);
+            let panel = view(&i18n, 1.0, &TIP, &notify, Some((40, false)), &[], &ENTRIES);
             assert_eq!(hits(&panel), vec![MUTE, TRACK, 2, 3, 4]);
             assert!(texts(&panel).contains(&"40".to_string()));
         }
-        let muted = view(&I18n::new(Lang::En), 1.0, &TIP, &notify, Some((40, true)), &ENTRIES);
+        let muted = view(
+            &I18n::new(Lang::En),
+            1.0,
+            &TIP,
+            &notify,
+            Some((40, true)),
+            &[],
+            &ENTRIES,
+        );
         assert!(texts(&muted).contains(&"0".to_string()));
         assert_eq!(I18n::new(Lang::En).tr("vol-mixer"), "Open volume mixer");
+    }
+
+    /// The output devices come under the track, the one in use marked, each clickable;
+    /// one device alone is not offered (nothing to choose), nor in a right click's menu.
+    #[test]
+    fn the_outputs_are_listed_under_the_track() {
+        let notify = NotifyStyle::of(Look::Ada);
+        let i18n = I18n::new(Lang::En);
+        let outputs = vec![
+            ("Speakers".to_string(), false),
+            ("Headphones (Bluetooth)".to_string(), true),
+        ];
+        let panel = view(&i18n, 1.0, &TIP, &notify, Some((40, false)), &outputs, &ENTRIES);
+        assert_eq!(hits(&panel), vec![MUTE, TRACK, FIRST_OUTPUT, FIRST_OUTPUT + 1, 2, 3, 4]);
+        let t = texts(&panel);
+        let (speakers, headphones) = (
+            t.iter().position(|x| x == "Speakers").unwrap(),
+            t.iter().position(|x| x == "Headphones (Bluetooth)").unwrap(),
+        );
+        assert!(speakers < headphones && headphones < t.iter().position(|x| x == "Open volume mixer").unwrap());
+        let icons: Vec<&str> = layout(&panel, Point::default(), &Fake)
+            .draws
+            .iter()
+            .filter_map(|d| match d {
+                Draw::Icon { spec, .. } => Some(spec.name),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(icons.iter().filter(|n| **n == "check").count(), 1, "{icons:?}");
+        let one = view(&i18n, 1.0, &TIP, &notify, Some((40, false)), &outputs[..1], &ENTRIES);
+        assert_eq!(hits(&one), vec![MUTE, TRACK, 2, 3, 4]);
+        let menu = view(&i18n, 1.0, &TIP, &notify, None, &outputs, &ENTRIES);
+        assert_eq!(hits(&menu), vec![2, 3, 4]);
     }
 }

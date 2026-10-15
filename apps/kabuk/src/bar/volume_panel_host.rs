@@ -12,7 +12,7 @@ use super::motion_host::Shown;
 use super::tooltip::{self, TIP};
 use super::view::hit;
 use super::Shared;
-use crate::bar::volume_panel::{self, Menu, FIRST_ENTRY, MUTE, TRACK};
+use crate::bar::volume_panel::{self, Menu, FIRST_ENTRY, FIRST_OUTPUT, MUTE, TRACK};
 use crate::notify::style::NotifyStyle;
 
 const PANEL_CLASS: &str = "Kabuk.VolumePanel";
@@ -58,14 +58,28 @@ impl Shared {
 
     fn volume_view(&self, menu: Menu, with_track: bool) -> kabuk_ui::node::Node {
         let level = with_track.then(|| self.live.volume.map_or((0, false), |v| (v.percent, v.muted)));
+        let outputs: Vec<(String, bool)> = self
+            .outputs(menu, with_track)
+            .into_iter()
+            .map(|o| (o.name, o.default))
+            .collect();
         volume_panel::view(
             &self.i18n,
             self.look.style.text_scale,
             &TIP,
             &NotifyStyle::of(self.config().appearance.look),
             level,
+            &outputs,
             menu.entries(),
         )
+    }
+
+    /// The output devices the panel lists (the volume's left click only).
+    fn outputs(&self, menu: Menu, with_track: bool) -> Vec<kabuk_win::audio::Output> {
+        match (&self.audio, menu, with_track) {
+            (Some(a), Menu::Volume, true) => a.outputs(),
+            _ => Vec::new(),
+        }
     }
 
     pub(super) fn open_system_menu(
@@ -222,6 +236,20 @@ impl Shared {
                         self.render_all(false);
                     }
                     TRACK => {}
+                    output if output >= FIRST_OUTPUT => {
+                        let (menu, with_track) = (p.menu, p.with_track);
+                        let chosen = self
+                            .outputs(menu, with_track)
+                            .into_iter()
+                            .nth(usize::try_from(output - FIRST_OUTPUT).ok()?)?;
+                        tracing::info!(name = %chosen.name, "audio output chosen");
+                        if let Err(e) = kabuk_win::audio::set_default_output(&chosen.id) {
+                            tracing::warn!(error = %e, "audio output not changed");
+                        }
+                        // The level is the new device's: Core Audio says so, and the
+                        // panel is drawn again then; this redraw shows the choice now.
+                        self.redraw_volume_panel();
+                    }
                     entry => {
                         let (_, _, page) = *p.menu.entries().get(usize::try_from(entry - FIRST_ENTRY).ok()?)?;
                         self.close_volume_panel();

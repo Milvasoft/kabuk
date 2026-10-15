@@ -8,6 +8,9 @@ No open decisions (the user decided D39, D43, D44 and the still pictures' drift 
 
 ## Decided and proposed
 
+### D54 · The volume panel switches the output device — Decided by the user (2026-10-15)
+Asked whether the volume panel should list the output devices as Windows 11's sound flyout does, the user said yes. Core Audio lists the active outputs and the default one (documented); making another one the default has no documented call, so Kabuk uses `IPolicyConfig::SetDefaultEndpoint` on Windows' `CPolicyConfigClient`, the interface Windows' own sound settings use, unchanged since Windows 7, for every role (console, multimedia, communications). If a Windows update changes it, choosing a device fails and is logged; the panel and the volume keep working.
+
 ### D53 · Every bar lists every app — Decided by the user (2026-10-15)
 Found using Kabuk: Monitor 2's bar showed no apps, so the windows there were reached only from Monitor 1's bar. Asked between "each bar its own monitor's apps", "every bar every app" and "minimal as before", the user chose every bar every app (Windows' "Show my taskbar apps on: all taskbars"). A window minimised to its icon goes to the icon on the bar of its own monitor.
 

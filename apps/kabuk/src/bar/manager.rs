@@ -159,8 +159,6 @@ mod timer {
 /// (DIPs), how long the mouse may be away before it slides off, and how often its slide
 /// is stepped.
 const AUTOHIDE_PEEK: f32 = 2.0;
-/// A volume key's step in percent points, as Windows' own.
-const VOLUME_KEY_STEP: i32 = 2;
 /// A volume key the keyboard hook took (`wparam`: its [`kabuk_win::keyhook::VolumeKey`]).
 const MSG_VOLUME_KEY: u32 = msgloop::msg::APP + 42;
 const AUTOHIDE_DELAY: Duration = Duration::from_millis(600);
@@ -1386,8 +1384,8 @@ impl Shared {
             return;
         };
         match key {
-            VolumeKey::Up => audio.step(VOLUME_KEY_STEP),
-            VolumeKey::Down => audio.step(-VOLUME_KEY_STEP),
+            VolumeKey::Up => audio.step(VOLUME_STEP),
+            VolumeKey::Down => audio.step(-VOLUME_STEP),
             VolumeKey::Mute => audio.toggle_mute(),
         }
     }

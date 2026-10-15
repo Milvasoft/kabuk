@@ -1,5 +1,6 @@
 //! The default output device's volume through Core Audio, with change notifications
-//! posted to a window (no polling). Call [`crate::system::com_init`] first.
+//! posted to a window (no polling), the active output devices and which one is the
+//! default. Call [`crate::system::com_init`] first.
 
 use windows::core::{implement, PCWSTR};
 use windows::Win32::Foundation::PROPERTYKEY;
@@ -37,6 +38,58 @@ impl Notify {
             },
         );
     }
+}
+
+/// An active output device.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Output {
+    /// Core Audio's endpoint id, which [`set_default_output`] takes.
+    pub id: String,
+    /// The name Windows shows ("Headphones (Bluetooth)").
+    pub name: String,
+    pub default: bool,
+}
+
+/// `PKEY_Device_FriendlyName` (Win32_Devices_FunctionDiscovery, not enabled here).
+const FRIENDLY_NAME: PROPERTYKEY = PROPERTYKEY {
+    fmtid: windows::core::GUID::from_u128(0xa45c254e_df1c_4efd_8020_67d146a850e0),
+    pid: 14,
+};
+
+/// Windows' own client for the default device (`CPolicyConfigClient`), and the interface
+/// its sound settings use to change it (`IPolicyConfig`): undocumented, unchanged since
+/// Windows 7 (DECISIONS D54).
+const POLICY_CONFIG_CLIENT: windows::core::GUID =
+    windows::core::GUID::from_u128(0x870af99c_171d_4f9e_af0d_e63df40c2bc9);
+const IPOLICY_CONFIG: windows::core::GUID = windows::core::GUID::from_u128(0xf8679f50_850a_41cf_9c72_430f290290c8);
+/// `IPolicyConfig::SetDefaultEndpoint`'s place in its vtable (after IUnknown's three and
+/// ten methods of its own).
+const SET_DEFAULT_ENDPOINT: usize = 13;
+
+/// Makes the output `id` Windows' default for every role (console, multimedia,
+/// communications), as Windows' sound settings do.
+pub fn set_default_output(id: &str) -> std::io::Result<()> {
+    use windows::core::{IUnknown, Interface, HRESULT};
+    use windows::Win32::Media::Audio::{eCommunications, eMultimedia};
+    type SetDefault = unsafe extern "system" fn(*mut core::ffi::c_void, PCWSTR, ERole) -> HRESULT;
+    let wide = windows::core::HSTRING::from(id);
+    // SAFETY: (whole block) Windows' policy client, created here; the interface pointer
+    // QueryInterface gives is called through the slot of SetDefaultEndpoint, which has
+    // this signature, and released (taken back as an IUnknown) before returning.
+    unsafe {
+        let client: IUnknown = CoCreateInstance(&POLICY_CONFIG_CLIENT, None, CLSCTX_ALL).map_err(io_error)?;
+        let mut raw = std::ptr::null_mut();
+        client.query(&IPOLICY_CONFIG, &mut raw).ok().map_err(io_error)?;
+        let policy = IUnknown::from_raw(raw);
+        let vtable = *(raw as *const *const usize);
+        let set: SetDefault = std::mem::transmute(*vtable.add(SET_DEFAULT_ENDPOINT));
+        for role in [eConsole, eMultimedia, eCommunications] {
+            set(raw, PCWSTR(wide.as_ptr()), role).ok().map_err(io_error)?;
+        }
+        drop(policy);
+    }
+    tracing::info!("default audio output changed");
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -137,6 +190,50 @@ impl Audio {
         }
     }
 
+    /// The active output devices, the default one marked, in Windows' order.
+    pub fn outputs(&self) -> Vec<Output> {
+        use windows::Win32::Media::Audio::DEVICE_STATE_ACTIVE;
+        use windows::Win32::System::Com::StructuredStorage::PropVariantToStringAlloc;
+        use windows::Win32::System::Com::{CoTaskMemFree, STGM_READ};
+        let take = |p: windows::core::PWSTR| {
+            // SAFETY: a string Core Audio allocated, copied and then freed once.
+            unsafe {
+                let s = p.to_string().unwrap_or_default();
+                CoTaskMemFree(Some(p.0 as *const _));
+                s
+            }
+        };
+        // SAFETY: plain COM calls on the enumerator and the devices it gives.
+        unsafe {
+            let default = self
+                .enumerator
+                .GetDefaultAudioEndpoint(eRender, eConsole)
+                .and_then(|d| d.GetId())
+                .map(take)
+                .ok();
+            let Ok(all) = self.enumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE) else {
+                return Vec::new();
+            };
+            (0..all.GetCount().unwrap_or(0))
+                .filter_map(|i| {
+                    let device = all.Item(i).ok()?;
+                    let id = take(device.GetId().ok()?);
+                    let name = device
+                        .OpenPropertyStore(STGM_READ)
+                        .and_then(|s| s.GetValue(&FRIENDLY_NAME))
+                        .and_then(|v| PropVariantToStringAlloc(&v))
+                        .map(take)
+                        .unwrap_or_else(|_| id.clone());
+                    Some(Output {
+                        default: default.as_deref() == Some(id.as_str()),
+                        id,
+                        name,
+                    })
+                })
+                .collect()
+        }
+    }
+
     pub fn volume(&self) -> Option<Volume> {
         let (endpoint, _) = self.endpoint.as_ref()?;
         // SAFETY: plain COM getters.
@@ -196,6 +293,33 @@ mod tests {
     //! Reads the volume when a device exists; changing it would disturb the user, so
     //! `step` is exercised with a zero delta only.
     use super::*;
+
+    /// Reads the outputs (nothing is changed: setting the default would switch the user's
+    /// sound): one at most is the default, and it is the one the volume belongs to.
+    #[test]
+    fn outputs_are_listed_with_the_default_marked() {
+        crate::system::com_init();
+        let notify = Notify {
+            window: Hwnd(0),
+            message: 0,
+        };
+        let audio = Audio::new(notify).expect("device enumerator");
+        let outputs = audio.outputs();
+        assert!(outputs.iter().filter(|o| o.default).count() <= 1);
+        assert!(outputs.iter().all(|o| !o.id.is_empty() && !o.name.is_empty()));
+        if audio.volume().is_some() {
+            assert_eq!(outputs.iter().filter(|o| o.default).count(), 1, "{outputs:?}");
+        }
+        // The undocumented call works: the default made the default again (nothing
+        // changes for the user), and it still is.
+        if let Some(current) = outputs.iter().find(|o| o.default) {
+            set_default_output(&current.id).expect("IPolicyConfig answers");
+            assert_eq!(
+                audio.outputs().into_iter().find(|o| o.default).map(|o| o.id),
+                Some(current.id.clone())
+            );
+        }
+    }
 
     #[test]
     fn reads_volume_if_a_device_exists() {

@@ -41,7 +41,7 @@ Target platform: Windows 11 22H2 and later. Windows 10 22H2 is supported on a be
   | `ram` | RAM usage | GB, decimal separator depends on language |
   | `gpu` | GPU temperature | |
   | `net` | Network speed | |
-  | `vol` | Volume | Changes with the scroll wheel, shows an OSD |
+  | `vol` | Volume | Changes with the scroll wheel, shows an OSD; a click opens the level, the output devices to choose from (D54) and Windows' sound settings |
   | `tray` | System tray | Left/right-click menus next to the icon. At most `tray_shown` icons (default 3) stay on the bar; the rest open in a panel from an overflow button, as on Windows (requested by the user on 2026-10-13; DECISIONS D26) |
   | `notif` | Notifications | Unread count badge |
   | `power` | Power menu | Lock, sleep, restart, shut down, sign out |

@@ -100,6 +100,10 @@ fn main() {
             &kabuk::bar::tooltip::TIP,
             &s,
             level,
+            &[
+                ("Speakers".to_string(), false),
+                ("Headphones (Bluetooth)".to_string(), true),
+            ],
             &kabuk::bar::volume_panel::ENTRIES,
         )
     });
