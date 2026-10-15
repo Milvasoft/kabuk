@@ -1,7 +1,7 @@
 <title>Kabuk Tasarım Yönleri</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=Geist+Mono:wght@400..600&family=IBM+Plex+Sans+Condensed:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Chakra+Petch:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Manrope:wght@400;500;600;700;800&family=Martian+Mono:wght@400;500;600&family=Figtree:wght@400;500;600;700&family=Cantarell:wght@400;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=Geist+Mono:wght@400..600&family=IBM+Plex+Sans+Condensed:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Chakra+Petch:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Manrope:wght@400;500;600;700;800&family=Martian+Mono:wght@400;500;600&family=Figtree:wght@400;500;600;700&family=Cantarell:wght@400;700&family=Inter:wght@400;500;600;700&family=Archivo:wght@400;500;600;700;800;900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..600&family=Pixelify+Sans:wght@400..700&family=VT323&display=swap">
 <style>
 /* Layout: one column — intro, direction switcher, a live 1920×1080 desktop scaled to the column, dual-monitor strip, components, OLED rules, build plan. */
 :root {
@@ -159,6 +159,7 @@ p { margin: 0; max-width: 66ch; }
 .grp { display: flex; align-items: center; gap: 14px; position: relative; white-space: nowrap; }
 .ws-list { display: flex; align-items: center; gap: 6px; }
 .ws { font: inherit; color: var(--dim); background: none; border: 0; cursor: pointer; padding: 0; display: grid; place-items: center; position: relative; }
+.ws .wr { display: none; }
 .ws.on { color: var(--fg-s); }
 .layout-ind { color: var(--dim); display: flex; align-items: center; gap: 6px; font-size: 13px; }
 .title { color: var(--dim); font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; max-width: 460px; }
@@ -521,7 +522,7 @@ p { margin: 0; max-width: 66ch; }
 .screen[data-dir="e"] .osd .track i { background: repeating-linear-gradient(90deg, var(--accent-s) 0 6px, transparent 6px 9px); }
 
 /* ---------------- shared bits only some looks show ---------------- */
-.logo, .act, .dock { display: none; }
+.logo, .act, .dock, .tasks { display: none; }
 .linkish { font: inherit; color: var(--accent-s); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 
 /* ---------------- F · Rıhtım: macOS-like menu bar + dock ---------------- */
@@ -658,7 +659,7 @@ p { margin: 0; max-width: 66ch; }
 .set-nav:hover { color: var(--fg-s); }
 .set-nav.on { color: var(--fg-s); background: var(--surf-sel); }
 .set-nav:focus-visible { outline: 2px solid var(--accent-s); outline-offset: -2px; }
-.set-main { padding: 30px 38px; overflow: hidden; display: grid; align-content: start; gap: 26px; }
+.set-main { padding: 30px 38px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--faint) transparent; display: grid; align-content: start; gap: 26px; }
 .set-main h3 { font-size: 24px; font-weight: 600; }
 .set-main h3 + p { color: var(--dim); margin-top: 6px; font-size: 14px; max-width: 70ch; }
 .set-grp { display: grid; gap: 12px; }
@@ -667,7 +668,9 @@ p { margin: 0; max-width: 66ch; }
 .set-row:last-child { border-bottom: 0; }
 .set-row b { font-weight: 500; display: block; }
 .set-row span.h { color: var(--dim); font-size: 13px; }
-.themes { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; }
+.themes { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+.themes .theme-card { padding: 7px; gap: 6px; }
+.themes .theme-card .tp { height: 58px; }
 .theme-card { font: inherit; color: var(--fg-s); background: var(--surf); border: 1px solid var(--line-s); border-radius: 12px; padding: 10px; cursor: pointer; display: grid; gap: 10px; text-align: left; }
 .theme-card:hover { border-color: var(--dim); }
 .theme-card.on { border-color: var(--accent-s); box-shadow: 0 0 0 1px var(--accent-s); }
@@ -784,6 +787,260 @@ p { margin: 0; max-width: 66ch; }
 .screen[data-dir="c"] .theme-card, .screen[data-dir="c"] .saver, .screen[data-dir="c"] .meter > div { border-radius: 6px; border-width: 1.5px; border-color: var(--trace); }
 .screen[data-dir="c"] .theme-card.on, .screen[data-dir="c"] .saver.on { border-color: var(--accent-s); }
 .screen[data-dir="c"] .set-btn { border-radius: 4px; }
+.screen[data-dir="i"] :is(.set-win, .set-nav, .theme-card, .theme-card .tp, .saver, .saver .sp, .seg, .seg button, .set-btn, .chip, .note, .gen-in, .num input, .num select, .meter > div) { border-radius: 0; }
+.screen[data-dir="i"] .set-brand i { border-radius: 0; }
+.screen[data-dir="i"] .set-main h3 { font-weight: 900; letter-spacing: -.02em; font-size: 28px; }
+.screen[data-dir="i"] .set-grp > .gl { text-transform: uppercase; letter-spacing: .1em; font-size: 11.5px; font-weight: 700; }
+.screen[data-dir="i"] .set-nav.on { box-shadow: inset 4px 0 0 var(--accent-s); }
+
+
+/* ---------------- H · Pano: task-list panel ---------------- */
+.screen[data-dir="h"] {
+  --fg-s: #f3f4f6; --dim: #a3a8b0; --faint: #3d4148; --line-s: #262a30; --accent-s: #4fd1c5;
+  --edge: 0px; --bar-h: 48px; --rail: 64px; --pad: 10px; --gap: 8px; --radius: 8px; --win-bg: #0a0b0d; --win-line: #24282e;
+  --surf: #121418; --surf-alt: #0d0f12; --surf-sel: #1f232a; --surf-line: #2c3138;
+  --ui: "Inter", "Segoe UI", sans-serif; --num: "Inter", "Segoe UI", sans-serif;
+}
+.screen[data-dir="h"] .bar { background: var(--surf); font-size: 13px; }
+.screen[data-dir="h"][data-pos="bottom"] .bar { border-top: 1px solid var(--line-s); }
+.screen[data-dir="h"][data-pos="top"] .bar { border-bottom: 1px solid var(--line-s); }
+.screen[data-dir="h"][data-pos="left"] .bar { border-right: 1px solid var(--line-s); }
+.screen[data-dir="h"][data-pos="right"] .bar { border-left: 1px solid var(--line-s); }
+.screen[data-dir="h"]:is([data-pos="top"], [data-pos="bottom"]) .bar { grid-template-columns: 1fr auto auto; padding: 0 6px; }
+.screen[data-dir="h"]:is([data-pos="top"], [data-pos="bottom"]) .bar-r { grid-column: 2; grid-row: 1; }
+.screen[data-dir="h"]:is([data-pos="top"], [data-pos="bottom"]) .bar-c { grid-column: 3; grid-row: 1; }
+.screen[data-dir="h"] :is(.bar-l, .bar-r) { gap: 2px; }
+.screen[data-dir="h"] .grp { gap: 6px; }
+.screen[data-dir="h"]:is([data-pos="top"], [data-pos="bottom"]) .grp { padding: 0 8px; }
+.screen[data-dir="h"] .logo { display: grid; grid-template-columns: 7px 7px; gap: 2px; width: 34px; height: 34px; place-content: center; border-radius: 6px; }
+.screen[data-dir="h"] .logo::before, .screen[data-dir="h"] .logo::after { content: ""; width: 7px; height: 16px; background: linear-gradient(var(--accent-s) 0 7px, transparent 7px 9px, var(--accent-s) 9px); }
+.screen[data-dir="h"] .ws { width: 26px; height: 26px; border-radius: 6px; font-size: 12px; font-weight: 600; }
+.screen[data-dir="h"] .ws.on { background: var(--surf-sel); }
+.screen[data-dir="h"] .ws.busy:not(.on)::after { content: ""; position: absolute; bottom: 3px; width: 8px; height: 2px; border-radius: 1px; background: var(--dim); }
+.screen[data-dir="h"] .layout-ind, .screen[data-dir="h"] .title { display: none; }
+.screen[data-dir="h"] .bar-l > .grp:nth-child(2) { display: none; }
+.screen[data-dir="h"] .tasks { display: flex; align-items: center; gap: 4px; padding-left: 10px; border-left: 1px solid var(--line-s); }
+.screen[data-dir="h"]:is([data-pos="top"], [data-pos="bottom"]) .tasks { height: 36px; }
+.task { font: inherit; font-size: 13px; color: var(--dim); background: none; border: 0; border-radius: 6px; height: 36px; padding: 0 12px; display: flex; align-items: center; gap: 9px; cursor: pointer; position: relative; max-width: 210px; }
+.task span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task:hover { background: var(--surf-alt); }
+.task.on { color: var(--fg-s); background: var(--surf-sel); }
+.task.on::after { content: ""; position: absolute; left: 50%; bottom: 2px; width: 18px; height: 3px; margin-left: -9px; border-radius: 2px; background: var(--accent-fill); }
+.task svg.i { flex: none; }
+.screen[data-dir="h"]:is([data-pos="left"], [data-pos="right"]) .tasks { flex-direction: column; border-left: 0; padding: 10px 0 0; border-top: 1px solid var(--line-s); }
+.screen[data-dir="h"]:is([data-pos="left"], [data-pos="right"]) .task { padding: 0 10px; }
+.screen[data-dir="h"]:is([data-pos="left"], [data-pos="right"]) .task span { display: none; }
+.screen[data-dir="h"]:is([data-pos="left"], [data-pos="right"]) .task.on::after { left: 2px; bottom: 50%; width: 3px; height: 16px; margin: 0 0 -8px; }
+.screen[data-dir="h"] .media .bars { display: none; }
+.screen[data-dir="h"] .clock { flex-direction: column; align-items: flex-end; gap: 0; line-height: 1.25; }
+.screen[data-dir="h"] .clock .t { font-size: 13px; font-weight: 500; order: -1; }
+.screen[data-dir="h"] .clock .d { font-size: 12px; }
+.screen[data-dir="h"] .win.active { border-color: var(--accent-s); }
+.screen[data-dir="h"] .win { box-shadow: 0 8px 24px -12px var(--shadow); }
+.screen[data-dir="h"] .app-top { background: var(--surf-alt); }
+.screen[data-dir="h"] .launcher { width: 600px; background: var(--surf); border: 1px solid var(--surf-line); border-radius: 10px; padding: 12px; box-shadow: 0 24px 60px var(--shadow); }
+.screen[data-dir="h"][data-pos="bottom"] .launcher { left: 8px; bottom: calc(var(--bar-h) + 8px); }
+.screen[data-dir="h"][data-pos="top"] .launcher { left: 8px; top: calc(var(--bar-h) + 8px); }
+.screen[data-dir="h"][data-pos="left"] .launcher { left: calc(var(--rail) + 8px); bottom: 8px; }
+.screen[data-dir="h"][data-pos="right"] .launcher { right: calc(var(--rail) + 8px); bottom: 8px; }
+.screen[data-dir="h"] .l-in { background: var(--surf-alt); border: 1px solid var(--surf-line); border-bottom: 2px solid var(--accent-s); border-radius: 6px; padding: 9px 12px; color: var(--dim); }
+.screen[data-dir="h"] .l-in input { font-size: 15px; }
+.screen[data-dir="h"] .l-list { padding-top: 10px; gap: 2px; }
+.screen[data-dir="h"] .l-row { border-radius: 6px; padding: 8px 10px; }
+.screen[data-dir="h"] .l-row.sel { background: var(--surf-sel); }
+.screen[data-dir="h"] .l-row .ic { color: var(--accent-s); }
+.screen[data-dir="h"] .toast { background: var(--surf); border: 1px solid var(--surf-line); border-radius: 8px; box-shadow: 0 16px 40px var(--shadow); }
+.screen[data-dir="h"][data-pos="bottom"] .toast { top: auto; bottom: calc(var(--bar-h) + 12px); right: 12px; }
+.screen[data-dir="h"] .toast .ti { border-radius: 6px; background: var(--surf-sel); color: var(--accent-s); }
+.screen[data-dir="h"] .osd { background: var(--surf); border: 1px solid var(--surf-line); border-radius: 8px; }
+.screen[data-dir="h"] .osd .track i { background: var(--accent-fill); }
+
+/* ---------------- I · Izgara: Swiss grid, heavy type ---------------- */
+.screen[data-dir="i"] {
+  --fg-s: #f4f2ee; --dim: #9c9890; --faint: #3a3833; --line-s: #33312c; --accent-s: #ff4b3e; --accent2: #ff4b3e;
+  --edge: 0px; --bar-h: 52px; --rail: 76px; --pad: 0px; --gap: 0px; --radius: 0px; --win-bg: #000; --win-line: #3a3833;
+  --surf: #000; --surf-alt: #0b0b0a; --surf-sel: #1c1b19; --surf-line: #4a4741;
+  --ui: "Archivo", "Segoe UI", sans-serif; --num: "Archivo", "Segoe UI", sans-serif;
+}
+.screen[data-dir="i"] .bar { background: var(--desk); font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+.screen[data-dir="i"][data-pos="top"] .bar { border-bottom: 3px solid var(--fg-s); }
+.screen[data-dir="i"][data-pos="bottom"] .bar { border-top: 3px solid var(--fg-s); }
+.screen[data-dir="i"][data-pos="left"] .bar { border-right: 3px solid var(--fg-s); }
+.screen[data-dir="i"][data-pos="right"] .bar { border-left: 3px solid var(--fg-s); }
+.screen[data-dir="i"] :is(.bar-l, .bar-c, .bar-r) { gap: 0; }
+.screen[data-dir="i"]:is([data-pos="top"], [data-pos="bottom"]) .bar { grid-template-columns: auto 1fr auto; }
+.screen[data-dir="i"]:is([data-pos="top"], [data-pos="bottom"]) .bar-c { justify-content: center; }
+.screen[data-dir="i"]:is([data-pos="left"], [data-pos="right"]) .bar-l > .grp:first-child { padding: 0; }
+.screen[data-dir="i"]:is([data-pos="left"], [data-pos="right"]) .ws-list { width: 100%; align-items: stretch; }
+.screen[data-dir="i"]:is([data-pos="top"], [data-pos="bottom"]) .grp { padding: 0 18px; }
+.screen[data-dir="i"]:is([data-pos="top"], [data-pos="bottom"]) .grp + .grp { border-left: 1px solid var(--faint); }
+.screen[data-dir="i"]:is([data-pos="left"], [data-pos="right"]) .grp + .grp { border-top: 1px solid var(--faint); }
+.screen[data-dir="i"] .ws-list { gap: 0; }
+.screen[data-dir="i"] .ws { font-size: 22px; font-weight: 900; letter-spacing: -.02em; width: 46px; height: 52px; font-variant-numeric: tabular-nums; }
+.screen[data-dir="i"]:is([data-pos="left"], [data-pos="right"]) .ws { width: 100%; height: 46px; }
+.screen[data-dir="i"] .ws.on { background: var(--accent-fill); color: var(--on-accent); }
+.screen[data-dir="i"] .ws.busy:not(.on) { color: var(--fg-s); }
+.screen[data-dir="i"] .layout-ind { font-size: 12px; letter-spacing: .1em; }
+.screen[data-dir="i"] .layout-ind svg { display: none; }
+.screen[data-dir="i"] .title { color: var(--dim); font-size: 12.5px; letter-spacing: .08em; }
+.screen[data-dir="i"] .title b { font-weight: 800; color: var(--fg-s); margin-right: 8px; }
+.screen[data-dir="i"] .clock { gap: 12px; align-items: center; }
+.screen[data-dir="i"] .clock .t { font-family: var(--num); font-size: 26px; font-weight: 900; letter-spacing: -.03em; }
+.screen[data-dir="i"] .clock .d { font-size: 12px; letter-spacing: .1em; font-weight: 700; color: var(--fg-s); }
+.screen[data-dir="i"] .mod svg.i, .screen[data-dir="i"] .media svg.i { display: none; }
+.screen[data-dir="i"] .mod .lbl { display: inline; font-size: 11px; letter-spacing: .1em; color: var(--dim); }
+.screen[data-dir="i"] .mod .v { font-family: var(--num); font-weight: 800; font-size: 14px; letter-spacing: 0; text-transform: none; }
+.screen[data-dir="i"] .grp:has(.mod) { gap: 18px; }
+.screen[data-dir="i"] .media .bars i { width: 3px; border-radius: 0; }
+.screen[data-dir="i"] .media .mt { font-size: 12px; letter-spacing: .08em; }
+.screen[data-dir="i"] .bell .n { border-radius: 0; }
+.screen[data-dir="i"] .tiles { background: var(--faint); gap: 1px; }
+.screen[data-dir="i"] .win { border: 0; animation-duration: .2s; }
+.screen[data-dir="i"] .win.active { box-shadow: inset 0 5px 0 var(--accent-s); }
+.screen[data-dir="i"] .app-top { text-transform: uppercase; letter-spacing: .08em; font-size: 11.5px; font-weight: 700; font-family: var(--ui); border-bottom-color: var(--faint); }
+.screen[data-dir="i"] .win.active .app-top { padding-top: 5px; }
+.screen[data-dir="i"] .tab { border-radius: 0; }
+.screen[data-dir="i"] .tiles:has(> .win.float) { background: transparent; }
+.screen[data-dir="i"] .win.float { border: 2px solid var(--fg-s); }
+.screen[data-dir="i"] .launcher { background: var(--desk); border: 3px solid var(--fg-s); width: 820px; }
+.screen[data-dir="i"][data-pos="top"] .launcher { left: 0; top: var(--bar-h); }
+.screen[data-dir="i"][data-pos="bottom"] .launcher { left: 0; bottom: var(--bar-h); }
+.screen[data-dir="i"][data-pos="left"] .launcher { left: var(--rail); top: 0; }
+.screen[data-dir="i"][data-pos="right"] .launcher { right: var(--rail); top: 0; }
+.screen[data-dir="i"] .l-in { padding: 20px 24px; border-bottom: 3px solid var(--fg-s); color: var(--fg-s); }
+.screen[data-dir="i"] .l-in input { font-size: 40px; font-weight: 900; letter-spacing: -.03em; }
+.screen[data-dir="i"] .l-row { padding: 14px 24px; border-bottom: 1px solid var(--faint); font-weight: 600; }
+.screen[data-dir="i"] .l-row .kind { text-transform: uppercase; letter-spacing: .1em; font-size: 11px; font-weight: 700; }
+.screen[data-dir="i"] .l-row.sel { background: var(--fg-s); color: var(--desk); }
+.screen[data-dir="i"] .l-row.sel :is(.sub, .kind, mark, .ic) { color: var(--desk); }
+.screen[data-dir="i"] .l-row mark { color: var(--fg-s); text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
+.screen[data-dir="i"] .l-foot { border-top: 0; padding: 12px 24px; text-transform: uppercase; letter-spacing: .08em; font-size: 11px; }
+.screen[data-dir="i"] .toast { background: var(--desk); border: 3px solid var(--fg-s); border-radius: 0; }
+.screen[data-dir="i"][data-pos="top"] .toast { top: calc(var(--bar-h) + 16px); right: 16px; }
+.screen[data-dir="i"] .toast b { text-transform: uppercase; letter-spacing: .06em; font-weight: 800; }
+.screen[data-dir="i"] .toast .ti { background: var(--accent-fill); color: var(--on-accent); }
+.screen[data-dir="i"] .osd { background: var(--desk); border: 3px solid var(--fg-s); border-radius: 0; }
+.screen[data-dir="i"] .osd .track { height: 8px; border-radius: 0; }
+.screen[data-dir="i"] .osd .track i { background: var(--accent-fill); }
+.screen[data-dir="i"] .osd .v { font-weight: 900; }
+
+
+/* ---------------- J · Defter: editorial serif ---------------- */
+.screen[data-dir="j"] {
+  --fg-s: #ece4d4; --dim: #a59c8a; --faint: #3b362e; --line-s: #2f2a23; --accent-s: #a8d5a2;
+  --edge: 0px; --bar-h: 50px; --rail: 70px; --pad: 18px; --gap: 18px; --radius: 3px; --win-bg: #070605; --win-line: #2a261f;
+  --surf: #0c0b09; --surf-alt: #090807; --surf-sel: #1a1814; --surf-line: #3a352c;
+  --ui: "Newsreader", Georgia, serif; --num: "Newsreader", Georgia, serif;
+}
+.screen[data-dir="j"] .bar { font-size: 15px; background: var(--desk); }
+.screen[data-dir="j"][data-pos="top"] .bar { border-bottom: 3px double var(--line-s); }
+.screen[data-dir="j"][data-pos="bottom"] .bar { border-top: 3px double var(--line-s); }
+.screen[data-dir="j"][data-pos="left"] .bar { border-right: 3px double var(--line-s); }
+.screen[data-dir="j"][data-pos="right"] .bar { border-left: 3px double var(--line-s); }
+.screen[data-dir="j"]:is([data-pos="top"], [data-pos="bottom"]) .bar { grid-template-columns: 1fr auto 1fr; padding: 0 12px; }
+.screen[data-dir="j"]:is([data-pos="top"], [data-pos="bottom"]) .grp + .grp::before { content: "·"; color: var(--dim); margin-right: 4px; }
+.screen[data-dir="j"] .ws .wn { display: none; }
+.screen[data-dir="j"] .ws .wr { display: inline; }
+.screen[data-dir="j"] .ws { font-size: 16px; min-width: 30px; height: 30px; letter-spacing: .04em; }
+.screen[data-dir="j"] .ws.on { color: var(--fg-s); font-weight: 600; }
+.screen[data-dir="j"] .ws.on::after { content: ""; position: absolute; left: 6px; right: 6px; bottom: 2px; height: 2px; background: var(--accent-fill); }
+.screen[data-dir="j"]:is([data-pos="left"], [data-pos="right"]) .ws.on::after { left: auto; right: -6px; top: 6px; bottom: 6px; width: 2px; height: auto; }
+.screen[data-dir="j"] .layout-ind { font-style: italic; font-size: 14px; }
+.screen[data-dir="j"] .layout-ind svg { display: none; }
+.screen[data-dir="j"] .title { font-style: italic; font-size: 15px; }
+.screen[data-dir="j"] .title b { font-style: normal; font-weight: 600; margin-right: 6px; }
+.screen[data-dir="j"] .clock { gap: 12px; align-items: baseline; }
+.screen[data-dir="j"] .clock .t { font-size: 21px; font-weight: 500; font-variant-numeric: lining-nums tabular-nums; }
+.screen[data-dir="j"] .clock .d { font-size: 15px; font-style: italic; }
+.screen[data-dir="j"] .mod svg.i, .screen[data-dir="j"] .media svg.i, .screen[data-dir="j"] .media .bars { display: none; }
+.screen[data-dir="j"] .mod .lbl { display: inline; font-variant: small-caps; letter-spacing: .04em; font-size: 15px; }
+.screen[data-dir="j"] .mod .v { font-family: var(--num); font-size: 15px; font-variant-numeric: lining-nums; }
+.screen[data-dir="j"] .media .mt { font-style: italic; font-size: 15px; }
+.screen[data-dir="j"] .grp:has(.mod) { gap: 16px; }
+.screen[data-dir="j"] .bell .n { font-family: var(--ui); border-radius: 50%; }
+.screen[data-dir="j"] .win { box-shadow: 0 0 0 1px var(--win-line); border: 0; }
+.screen[data-dir="j"] .win.active { box-shadow: 0 0 0 1px var(--surf-line); }
+.screen[data-dir="j"] .app-top { font-family: var(--ui); font-size: 14px; font-style: italic; }
+.screen[data-dir="j"] .tab { border-radius: 0; }
+.screen[data-dir="j"] .tab.on { background: none; box-shadow: inset 0 -2px 0 var(--fg-s); font-style: normal; font-weight: 600; }
+.screen[data-dir="j"] .win.active .tab.on { box-shadow: inset 0 -2px 0 var(--accent-s); }
+.screen[data-dir="j"] .launcher { left: 50%; top: 200px; transform: translateX(-50%); width: 720px; background: var(--surf); border: 1px solid var(--surf-line); border-radius: 3px; padding: 26px 34px 18px; box-shadow: 0 30px 80px var(--shadow); }
+.screen[data-dir="j"] .l-in { border-bottom: 3px double var(--surf-line); padding-bottom: 12px; color: var(--dim); }
+.screen[data-dir="j"] .l-in input { font-size: 30px; font-style: italic; font-family: var(--ui); }
+.screen[data-dir="j"] .l-list { padding-top: 6px; }
+.screen[data-dir="j"] .l-row { padding: 11px 4px; border-bottom: 1px dotted var(--surf-line); font-size: 16px; }
+.screen[data-dir="j"] .l-row .sub { font-style: italic; font-size: 14px; }
+.screen[data-dir="j"] .l-row .kind { font-variant: small-caps; letter-spacing: .05em; font-size: 14px; }
+.screen[data-dir="j"] .l-row.sel { background: var(--surf-sel); }
+.screen[data-dir="j"] .l-row mark { color: var(--fg-s); text-decoration: underline; text-decoration-color: var(--accent-s); text-decoration-thickness: 2px; text-underline-offset: 4px; }
+.screen[data-dir="j"] .l-foot { font-style: italic; font-size: 13px; padding: 12px 4px 0; }
+.screen[data-dir="j"] .toast { background: var(--surf); border: 1px solid var(--surf-line); border-radius: 3px; font-size: 15px; }
+.screen[data-dir="j"] .toast b { font-size: 16px; }
+.screen[data-dir="j"] .toast span { font-style: italic; font-size: 14px; }
+.screen[data-dir="j"] .toast .ti { color: var(--accent-s); border: 1px solid var(--surf-line); border-radius: 50%; }
+.screen[data-dir="j"] .osd { background: var(--surf); border: 1px solid var(--surf-line); border-radius: 3px; }
+.screen[data-dir="j"] .osd .track { height: 2px; }
+.screen[data-dir="j"] .osd .track i { background: var(--accent-fill); }
+.screen[data-dir="j"] :is(.set-main h3) { font-weight: 500; font-size: 30px; font-style: italic; }
+.screen[data-dir="j"] .set-grp > .gl { font-variant: small-caps; letter-spacing: .05em; font-size: 15px; }
+
+/* ---------------- K · Piksel: 90s bevels ---------------- */
+.screen[data-dir="k"] {
+  --fg-s: #ececec; --dim: #a6a6ae; --faint: #3c3c44; --line-s: #303036; --accent-s: #7b8cff;
+  --edge: 0px; --bar-h: 40px; --rail: 64px; --pad: 8px; --gap: 6px; --radius: 0px; --win-bg: #0a0a0c; --win-line: #000;
+  --surf: #1e1e23; --surf-alt: #141418; --surf-sel: #2c2c34; --surf-line: #000;
+  --hi: #4c4c56; --lo: #000; --hi2: #33333a;
+  --raised: inset 1px 1px 0 var(--hi), inset -1px -1px 0 var(--lo), inset 2px 2px 0 var(--hi2);
+  --sunken: inset 1px 1px 0 var(--lo), inset -1px -1px 0 var(--hi), inset 2px 2px 0 #050506;
+  --ui: "Pixelify Sans", "Segoe UI", sans-serif; --num: "VT323", Consolas, monospace;
+}
+.screen[data-dir="k"] .bar { background: var(--surf); box-shadow: var(--raised); font-size: 14px; }
+.screen[data-dir="k"]:is([data-pos="top"], [data-pos="bottom"]) .bar { padding: 0 4px; }
+.screen[data-dir="k"] :is(.bar-l, .bar-r) { gap: 4px; }
+.screen[data-dir="k"]:is([data-pos="top"], [data-pos="bottom"]) .grp { height: 30px; padding: 0 10px; }
+.screen[data-dir="k"] .bar-r .grp, .screen[data-dir="k"] .bar-c .grp { box-shadow: var(--sunken); background: var(--surf-alt); }
+.screen[data-dir="k"] .bar-l > .grp:first-child { padding: 0 2px; }
+.screen[data-dir="k"] .ws-list { gap: 3px; }
+.screen[data-dir="k"] .ws { width: 30px; height: 26px; background: var(--surf); box-shadow: var(--raised); font-family: var(--num); font-size: 21px; line-height: 1; color: var(--fg-s); }
+.screen[data-dir="k"] .ws.on { box-shadow: var(--sunken); background: var(--surf-sel); }
+.screen[data-dir="k"] .ws.busy:not(.on)::after { content: ""; position: absolute; right: 4px; top: 4px; width: 3px; height: 3px; background: var(--dim); }
+.screen[data-dir="k"] .layout-ind { font-size: 13px; }
+.screen[data-dir="k"] .title { font-size: 14px; }
+.screen[data-dir="k"] .clock .t { font-size: 23px; font-weight: 400; }
+.screen[data-dir="k"] .clock .d { font-size: 13px; }
+.screen[data-dir="k"] .mod .v { font-size: 19px; }
+.screen[data-dir="k"] .osd .v { font-family: var(--num); font-size: 20px; }
+.screen[data-dir="k"] .media .bars i { border-radius: 0; width: 3px; }
+.screen[data-dir="k"] .bell .n { border-radius: 0; }
+.screen[data-dir="k"] .win { border: 0; box-shadow: var(--raised), 0 0 0 1px #000; padding: 3px; background: var(--surf); }
+.screen[data-dir="k"] .win > :not(.app-top):not(.grip):not(.via) { background: var(--win-bg); box-shadow: var(--sunken); flex: 1 1 auto; min-height: 0; }
+.screen[data-dir="k"] .app-top { background: var(--surf-sel); border-bottom: 0; height: 30px; margin-bottom: 3px; color: var(--dim); font-family: var(--ui); font-size: 14px; }
+.screen[data-dir="k"] .win.active .app-top { background: var(--accent-fill); }
+.screen[data-dir="k"] .win.active .app-top, .screen[data-dir="k"] .win.active .app-top .tab { color: var(--on-accent); }
+.screen[data-dir="k"] .tab { border-radius: 0; padding: 4px 10px; }
+.screen[data-dir="k"] .tab.on { background: none; color: var(--fg-s); font-weight: 700; }
+.screen[data-dir="k"] .win.active .tab.on { text-decoration: underline; text-underline-offset: 3px; }
+.screen[data-dir="k"] .web-url { border-radius: 0; box-shadow: var(--sunken); }
+.screen[data-dir="k"] .win.active { border: 0; }
+.screen[data-dir="k"] .launcher { left: 50%; top: 220px; transform: translateX(-50%); width: 640px; background: var(--surf); box-shadow: var(--raised), 0 0 0 1px #000, 8px 8px 0 rgba(0,0,0,.6); padding: 3px 3px 10px; }
+.screen[data-dir="k"] .launcher::before { content: attr(aria-label); display: block; background: var(--accent-fill); color: var(--on-accent); font-weight: 700; font-size: 14px; padding: 6px 10px; margin-bottom: 10px; }
+.screen[data-dir="k"] .l-in { margin: 0 10px; padding: 8px 10px; background: var(--win-bg); box-shadow: var(--sunken); color: var(--dim); }
+.screen[data-dir="k"] .l-in input { font-size: 18px; font-family: var(--ui); }
+.screen[data-dir="k"] .l-list { margin: 10px 10px 0; background: var(--win-bg); box-shadow: var(--sunken); padding: 3px; }
+.screen[data-dir="k"] .l-row { padding: 7px 10px; }
+.screen[data-dir="k"] .l-row.sel { background: var(--accent-fill); color: var(--on-accent); }
+.screen[data-dir="k"] .l-row.sel :is(.sub, .kind, mark, .ic) { color: var(--on-accent); }
+.screen[data-dir="k"] .l-row mark { color: var(--accent-s); text-decoration: underline; }
+.screen[data-dir="k"] .l-foot { padding: 10px 14px 0; }
+.screen[data-dir="k"] .toast { background: var(--surf); box-shadow: var(--raised), 0 0 0 1px #000, 6px 6px 0 rgba(0,0,0,.6); border-radius: 0; }
+.screen[data-dir="k"] .toast .ti { background: var(--accent-fill); color: var(--on-accent); box-shadow: var(--raised); }
+.screen[data-dir="k"] .osd { background: var(--surf); box-shadow: var(--raised), 0 0 0 1px #000; border-radius: 0; }
+.screen[data-dir="k"] .osd .track { height: 14px; border-radius: 0; background: var(--win-bg); box-shadow: var(--sunken); }
+.screen[data-dir="k"] .osd .track i { background: repeating-linear-gradient(90deg, var(--accent-fill) 0 8px, transparent 8px 10px); top: 3px; bottom: 3px; left: 3px; }
+.screen[data-dir="k"] :is(.set-win, .set-nav, .theme-card, .theme-card .tp, .saver, .saver .sp, .seg, .seg button, .set-btn, .chip, .note, .gen-in, .num input, .num select, .meter > div) { border-radius: 0; }
+.screen[data-dir="k"] .set-btn { box-shadow: var(--raised); }
+.screen[data-dir="k"] .seg { box-shadow: var(--sunken); border: 0; }
+.screen[data-dir="k"] .seg button.on { box-shadow: var(--raised); }
 
 /* ===================================================================
    LIGHT MODE — same looks, light surfaces. Accent defaults are darker so they stay readable on white.
@@ -804,6 +1061,10 @@ p { margin: 0; max-width: 66ch; }
 .screen[data-mode="light"][data-dir="e"] { --desk: #f7f4f9; --fg-s: #241f29; --dim: #7a7183; --faint: #d5cddc; --line-s: #ddd6e3; --win-bg: #f7f4f9; --win-line: #d7cfdf; --surf: #f7f4f9; --surf-sel: #efe6f3; --surf-line: #ddd6e3; --accent-s: #c2367a; --accent2: #0e7490; }
 .screen[data-mode="light"][data-dir="f"] { --desk: #e8eaef; --fg-s: #1d1d1f; --dim: #6e6e73; --faint: #c7c7cc; --line-s: #d2d2d7; --win-line: #d6d6db; --surf: rgba(255,255,255,.96); --surf-sel: rgba(0,0,0,.08); --surf-line: #c9c9ce; --accent-s: #0a7aff; }
 .screen[data-mode="light"][data-dir="g"] { --desk: #f6f5f4; --fg-s: #1e1e1e; --dim: #77767b; --faint: #cfcecb; --line-s: #deddda; --win-line: #deddda; --surf: #ffffff; --surf-alt: #f4f4f5; --surf-sel: #e8e8ea; --surf-line: #d0cfcc; --accent-s: #3584e4; }
+.screen[data-mode="light"][data-dir="h"] { --desk: #eef0f3; --fg-s: #15181c; --dim: #5d636c; --faint: #c9ced5; --line-s: #d7dbe1; --win-bg: #ffffff; --win-line: #d5dae0; --surf: #f7f8fa; --surf-alt: #eef0f3; --surf-sel: #e2e6eb; --surf-line: #cfd4db; --accent-s: #0f766e; }
+.screen[data-mode="light"][data-dir="i"] { --desk: #f4f2ee; --fg-s: #111110; --dim: #5e5b55; --faint: #c9c5bd; --line-s: #d3cfc6; --win-bg: #fbfaf8; --win-line: #c9c5bd; --surf: #f4f2ee; --surf-alt: #ebe8e2; --surf-sel: #e2ded6; --surf-line: #8f8a80; --accent-s: #d4231b; --accent2: #d4231b; }
+.screen[data-mode="light"][data-dir="j"] { --desk: #f5f0e6; --fg-s: #1f1b14; --dim: #6b6253; --faint: #d6cdbb; --line-s: #cfc5b2; --win-bg: #fbf8f1; --win-line: #ddd4c2; --surf: #fbf8f1; --surf-alt: #f2ece0; --surf-sel: #ece4d3; --surf-line: #c9bfab; --accent-s: #2f6b3a; }
+.screen[data-mode="light"][data-dir="k"] { --desk: #d4d0c8; --fg-s: #000000; --dim: #4a4a4a; --faint: #a0a0a0; --line-s: #808080; --win-bg: #ffffff; --win-line: #000; --surf: #d4d0c8; --surf-alt: #c8c4bc; --surf-sel: #b8b4ac; --surf-line: #000; --accent-s: #1f3fbf; --hi: #ffffff; --lo: #404040; --hi2: #e8e6e1; --sunken: inset 1px 1px 0 #808080, inset -1px -1px 0 #ffffff, inset 2px 2px 0 #404040; }
 /* GNOME keeps its black top bar in light mode too */
 .screen[data-mode="light"][data-dir="g"] .bar { --fg-s: #f6f5f4; --dim: #a8a6a3; color: var(--fg-s); }
 .screen[data-mode="light"] .theme-card .tp, .screen[data-mode="light"] .saver .sp { border-color: #d0d4da; }
@@ -845,7 +1106,7 @@ p { margin: 0; max-width: 66ch; }
 <main class="page">
   <section class="intro">
     <div class="name"><h1>Kabuk</h1><span class="tag">çalışma adı</span></div>
-    <p class="lede">İki OLED monitör için sıfırdan yazacağımız Windows kabuğu: ekranın dört kenarından birine yerleşen bar, tiling ve serbest pencere yönetimi, uygulama başlatıcı, gizlenen görev çubuğu ve hepsini yöneten bir ayarlar ekranı. Aşağıda aynı masaüstünün yedi görünümü var. Görünümler kalıcı birer tema olarak ürünün içinde kalacak; ayarlar ekranından aralarında geçiş yapılabilecek. Varsayılan olarak hangisiyle başlayacağımızı seç.</p>
+    <p class="lede">İki OLED monitör için sıfırdan yazacağımız Windows kabuğu: ekranın dört kenarından birine yerleşen bar, tiling ve serbest pencere yönetimi, uygulama başlatıcı, gizlenen görev çubuğu ve hepsini yöneten bir ayarlar ekranı. Aşağıda aynı masaüstünün on bir görünümü var. Görünümler kalıcı birer tema olarak ürünün içinde kalacak; ayarlar ekranından aralarında geçiş yapılabilecek. Varsayılan olarak hangisiyle başlayacağımızı seç.</p>
   </section>
 
   <section class="section" aria-labelledby="dirs-h">
@@ -858,6 +1119,10 @@ p { margin: 0; max-width: 66ch; }
       <button class="dir-btn" type="button" id="dir-e" data-dir="e" aria-pressed="false"><span class="dn"><span class="sw" style="background:#ff7eb6"></span>Konsol</span></button>
       <button class="dir-btn" type="button" id="dir-f" data-dir="f" aria-pressed="false"><span class="dn"><span class="sw" style="background:#0a84ff"></span>Rıhtım</span></button>
       <button class="dir-btn" type="button" id="dir-g" data-dir="g" aria-pressed="false"><span class="dn"><span class="sw" style="background:#3584e4"></span>Etkinlik</span></button>
+      <button class="dir-btn" type="button" id="dir-h" data-dir="h" aria-pressed="false"><span class="dn"><span class="sw" style="background:#4fd1c5"></span>Pano</span></button>
+      <button class="dir-btn" type="button" id="dir-i" data-dir="i" aria-pressed="false"><span class="dn"><span class="sw" style="background:#ff4b3e; border-radius:0"></span>Izgara</span></button>
+      <button class="dir-btn" type="button" id="dir-j" data-dir="j" aria-pressed="false"><span class="dn"><span class="sw" style="background:#a8d5a2"></span>Defter</span></button>
+      <button class="dir-btn" type="button" id="dir-k" data-dir="k" aria-pressed="false"><span class="dn"><span class="sw" style="background:#7b8cff; border-radius:0; box-shadow:inset 1px 1px 0 #fff6, inset -1px -1px 0 #0008"></span>Piksel</span></button>
     </div>
     <p class="dir-desc" id="dir-desc" aria-live="polite"></p>
     </div>
@@ -954,7 +1219,7 @@ p { margin: 0; max-width: 66ch; }
       <div class="crit"><b>Serbest pencereler</b><p>Her pencere başlığından sürüklenerek ya da tek kısayolla yüzen hale gelir; yüzen pencereler fareyle taşınır ve boyutlandırılır. İstenirse bir workspace tamamen yüzen düzende çalışır, istenirse varsayılan düzen yüzen seçilir.</p></div>
       <div class="crit"><b>Bar konumu</b><p>Bar her görünümde üst, alt, sol ya da sağ kenara yerleşebilir; Windows'un ayrılan çalışma alanı buna göre güncellenir ve büyütülen pencereler barın altına girmez.</p></div>
       <div class="crit"><b>Çok dilli arayüz</b><p>Arayüzdeki tüm metinler dil dosyalarından gelir; ilk açılışta Windows'un dili kullanılır, değişiklik yeniden başlatmadan uygulanır. Tarih, saat ve ondalık biçimleri dile göre değişir. Türkçe büyük-küçük harf (i, İ, ı, I) arama ve sıralamada doğru çalışır.</p></div>
-      <div class="crit"><b>Açık ve koyu mod</b><p>Yedi görünümün her biri açık ve koyu modda çalışır. Mod elle seçilir, Windows'un uygulama temasını izler ya da saate göre değişir; geçiş yeniden başlatmadan olur. Varsayılan koyu mod, çünkü OLED'de siyah piksel kapalıdır.</p></div>
+      <div class="crit"><b>Açık ve koyu mod</b><p>On bir görünümün her biri açık ve koyu modda çalışır. Mod elle seçilir, Windows'un uygulama temasını izler ya da saate göre değişir; geçiş yeniden başlatmadan olur. Varsayılan koyu mod, çünkü OLED'de siyah piksel kapalıdır.</p></div>
       <div class="crit"><b>Bar modülleri</b><p>Bardaki her modül (pencere başlığı, saat, tarih, medya, CPU, RAM, GPU, ağ, ses, tepsi, bildirimler, güç) ayarlardan tek tek açılıp kapatılır; kapatılan modül bardan hemen kalkar ve yerini diğerleri doldurur.</p></div>
       <div class="crit"><b>Okunabilirlik</b><p>Her görünümde, her modda ve her vurgu renginde tüm yazılar zeminine karşı en az <strong>4,5:1</strong> kontrasta sahip (büyük yazıda 3:1). Seçilen renk okunmuyorsa açıklığı otomatik ayarlanır, vurgunun üstündeki yazı siyah ya da beyaz olarak seçilir. Her sürümde tüm kombinasyonlar otomatik ölçülür; sınırı geçemeyen bir tema yüklenmez.</p></div>
       <div class="crit"><b>Temiz çıkış</b><p>Kabuk kapatılınca Windows eski haline döner: görev çubuğu, ekranın çalışma alanı ve pencere konumları.</p></div>
@@ -1007,8 +1272,8 @@ p { margin: 0; max-width: 66ch; }
       days: ["Paz", "Pzt", "Sal", "Çar", "Per", "Cum", "Cmt"],
       months: ["Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"],
       am: "ÖÖ", pm: "ÖS",
-      looks: { a: "Ada", b: "Çizgi", c: "Devre", d: "Ray", e: "Konsol", f: "Rıhtım", g: "Etkinlik" },
-      activities: "Etkinlikler",
+      looks: { a: "Ada", b: "Çizgi", c: "Devre", d: "Ray", e: "Konsol", f: "Rıhtım", g: "Etkinlik", h: "Pano", i: "Izgara", j: "Defter", k: "Piksel" },
+      activities: "Etkinlikler", tasksLbl: "Açık pencereler",
       accents: { "#8fd3ff": "Buz mavisi", "#fbc419": "Milva sarısı", "#7fe0b5": "Nane", "#ff8f6b": "Mercan", "#b9a7ff": "Leylak", "#ff7eb6": "Pembe", "#ecebe7": "Kırık beyaz" },
       positions: { top: "Üst", bottom: "Alt", left: "Sol", right: "Sağ" },
       layoutTile: "tile", layoutFloat: "yüzen",
@@ -1109,8 +1374,8 @@ p { margin: 0; max-width: 66ch; }
       days: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
       months: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
       am: "AM", pm: "PM",
-      looks: { a: "Island", b: "Line", c: "Circuit", d: "Rail", e: "Console", f: "Dock", g: "Activities" },
-      activities: "Activities",
+      looks: { a: "Island", b: "Line", c: "Circuit", d: "Rail", e: "Console", f: "Dock", g: "Activities", h: "Panel", i: "Grid", j: "Notebook", k: "Pixel" },
+      activities: "Activities", tasksLbl: "Open windows",
       accents: { "#8fd3ff": "Ice blue", "#fbc419": "Milva yellow", "#7fe0b5": "Mint", "#ff8f6b": "Coral", "#b9a7ff": "Lilac", "#ff7eb6": "Pink", "#ecebe7": "Off-white" },
       positions: { top: "Top", bottom: "Bottom", left: "Left", right: "Right" },
       layoutTile: "tile", layoutFloat: "float",
@@ -1221,10 +1486,10 @@ p { margin: 0; max-width: 66ch; }
   /* =====================================================================
      State
      ===================================================================== */
-  const looks = ["a", "b", "c", "d", "e", "f", "g"];
-  const lookDefaults = { a: "#8fd3ff", b: "#ecebe7", c: "#fbc419", d: "#ff8f6b", e: "#ff7eb6", f: "#0a84ff", g: "#3584e4" };
-  const lookGaps = { a: 14, b: 1, c: 12, d: 12, e: 12, f: 10, g: 10 };
-  const lookPos = { a: "top", b: "top", c: "top", d: "left", e: "bottom", f: "top", g: "top" };
+  const looks = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"];
+  const lookDefaults = { a: "#8fd3ff", b: "#ecebe7", c: "#fbc419", d: "#ff8f6b", e: "#ff7eb6", f: "#0a84ff", g: "#3584e4", h: "#4fd1c5", i: "#ff4b3e", j: "#a8d5a2", k: "#7b8cff" };
+  const lookGaps = { a: 14, b: 1, c: 12, d: 12, e: 12, f: 10, g: 10, h: 8, i: 1, j: 18, k: 6 };
+  const lookPos = { a: "top", b: "top", c: "top", d: "left", e: "bottom", f: "top", g: "top", h: "bottom", i: "top", j: "top", k: "top" };
   // Design-page copy (always Turkish): what each look is.
   const lookDesc = {
     a: "Yüzen kapsüller. Bar ekrana yapışmaz, her modül grubu ayrı bir ada. Pencereler yumuşak köşeli, aralarında nefes payı var.",
@@ -1233,6 +1498,10 @@ p { margin: 0; max-width: 66ch; }
     d: "Dolu bir ray. Varsayılan olarak solda dikey durur ve geniş monitörde yükseklikten değil genişlikten alır; saat alt alta, başlatıcı raydan yana açılır.",
     e: "Terminal estetiği. tmux tarzı bir durum satırı, adlı workspace'ler, başlığı çerçevesine yazılı pencereler ve fzf gibi açılan başlatıcı.",
     f: "macOS'a benzer: ince, yarı saydam bir menü çubuğu, solda etkin uygulamanın adı, sağda tarih ve saat; karşı kenarda uygulama dock'u. Başlatıcı Spotlight gibi ortada açılır.",
+    h: "Görev listeli panel: Windows ve KDE'den gelene tanıdık. Altta tek parça bir panel; solda başlat düğmesi ve workspace'ler, yanında açık pencerelerin listesi, sağda tepsi ve iki satırlı saat. Başlatıcı, başlat menüsü gibi panelin köşesinden açılır.",
+    i: "İsviçre grafik tasarımı: kalın grotesk yazı, büyük workspace rakamları, keskin köşeler ve kalın çizgiler. Pencereler aralıksız bir ızgarada kıl çizgilerle ayrılır; renk yalnızca kırmızı vurguda. Başlatıcı afiş gibi dev bir arama satırıyla açılır.",
+    j: "Editoryal: bir dergi ya da defter sayfası gibi. Serif yazı, Romen rakamlı workspace'ler, italik pencere başlıkları ve ince çift çizgiler. Renk yalnızca etkin olanın altını çizer. Başlatıcı, sözlük kartı gibi ortada açılır.",
+    k: "90'ların arayüzü: kabartma düğmeler, gömme göstergeler, piksel yazı. Etkin pencerenin başlık çubuğu vurgu renginde dolar; başlatıcı başlık şeritli eski bir diyalog kutusu gibi açılır, ses göstergesi bloklarla dolar.",
     g: "GNOME'a benzer: solda Etkinlikler düğmesi ve hap biçimli workspace göstergesi, ortada tarih ve saat, sağda tek parça sistem menüsü. Bildirimler üst ortadan iner.",
   };
   const accentList = ["#8fd3ff", "#fbc419", "#7fe0b5", "#ff8f6b", "#b9a7ff", "#ff7eb6", "#ecebe7"];
@@ -1254,7 +1523,7 @@ p { margin: 0; max-width: 66ch; }
   };
   try {
     const saved = JSON.parse(localStorage.getItem("kabuk-prefs") || "{}");
-    if (/^[a-g]$/.test(saved.dir || "")) state.dir = saved.dir;
+    if (/^[a-k]$/.test(saved.dir || "")) state.dir = saved.dir;
     if (/^#[0-9a-f]{6}$/i.test(saved.accent || "")) state.accent = saved.accent;
     if (/^(top|bottom|left|right)$/.test(saved.pos || "")) state.pos = saved.pos;
     if (/^(system|tr|en)$/.test(saved.lang || "")) state.langSetting = saved.lang;
@@ -1411,6 +1680,8 @@ p { margin: 0; max-width: 66ch; }
   /* =====================================================================
      Sample app windows (third-party content; not translated)
      ===================================================================== */
+  const winNames = { ed: "MilvaScene.cs", term: "pwsh", web: "Milvaion", notes: "Notes" };
+  const winIcons = { ed: "file", term: "term", web: "globe", notes: "file" };
   const winTitles = { ed: "<b>MilvaScene.cs</b>  OledSaver", term: "<b>pwsh</b>  C:\\src\\kabuk", web: "<b>Milvaion</b>  localhost:5000/jobs", notes: "<b>Notes</b>" };
   const editorHtml = () => {
     const lines = [
@@ -1536,9 +1807,10 @@ launcher   idle      Alt+Space
   /* The photo URL is set after render so it never passes through an HTML attribute string. */
   function applyPhotos(root) { if (state.wallImage) root.querySelectorAll("[data-photo]").forEach((el) => { el.style.backgroundImage = `url("${state.wallImage}")`; }); }
 
+  const roman = (n) => ["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX"][n] || String(n);
   function screenHtml(opts) {
     const { primary, wsSet, ws } = opts;
-    const wsButtons = wsSet.map((n) => `<button class="ws${n === ws ? " on" : ""}${state.order[n] ? " busy" : ""}" type="button" data-ws="${n}" aria-label="Workspace ${n}">${n}</button>`).join("");
+    const wsButtons = wsSet.map((n) => `<button class="ws${n === ws ? " on" : ""}${state.order[n] ? " busy" : ""}" type="button" data-ws="${n}" aria-label="Workspace ${n}"><span class="wn">${n}</span><span class="wr" aria-hidden="true">${roman(n)}</span></button>`).join("");
     const s = state.stats;
     const m = state.modules;
     const statDefs = [
@@ -1569,6 +1841,7 @@ launcher   idle      Alt+Space
         <div class="bar-l">
           <div class="grp"><span class="logo" aria-hidden="true"></span><span class="act">${t("activities")}</span><div class="ws-list">${wsButtons}</div></div>
           <div class="grp"><span class="layout-ind">${icon("tile")}<span data-layout-label>${t("layoutTile")}</span></span>${m.title ? `<span class="title" data-title></span>` : ""}</div>
+          <div class="grp tasks" data-tasks role="group" aria-label="${t("tasksLbl")}"></div>
         </div>
         <div class="bar-c">${center}</div>
         <div class="bar-r">${right}</div>
@@ -1628,6 +1901,9 @@ launcher   idle      Alt+Space
     if (label) label.textContent = allFloating ? t("layoutFloat") : t("layoutTile");
     const title = screen.querySelector("[data-title]");
     if (title) title.innerHTML = winTitles[state.focus[ws]] || "";
+    // Task list (Pano): one button per window on this workspace, in layout order.
+    const tasks = screen.querySelector("[data-tasks]");
+    if (tasks) tasks.innerHTML = order.map((key) => `<button class="task${state.focus[ws] === key ? " on" : ""}" type="button" data-task="${key}" aria-pressed="${state.focus[ws] === key}" title="${winNames[key]}">${icon(winIcons[key])}<span>${winNames[key]}</span></button>`).join("");
   }
 
   /* =====================================================================
@@ -1974,6 +2250,14 @@ launcher   idle      Alt+Space
   miniLook.f = `<div style="position:absolute;left:0;right:0;top:0;height:9px;background:#1c1c1e;display:flex;align-items:center;gap:4px;padding:0 5px"><span style="width:5px;height:5px;border-radius:50%;border:1.5px solid #ddd"></span><span style="width:16px;height:2px;background:#ddd"></span><span style="flex:1"></span><span style="width:14px;height:2px;background:#888"></span></div>
         <div style="position:absolute;left:5px;right:5px;top:13px;bottom:20px;display:grid;grid-template-columns:1.3fr 1fr;grid-template-rows:1fr 1fr;gap:4px"><span style="grid-row:span 2;border:1px solid #3a3a3e;border-radius:4px;box-shadow:0 4px 8px #000"></span><span style="border:1px solid #2a2a2d;border-radius:4px"></span><span style="border:1px solid #2a2a2d;border-radius:4px"></span></div>
         <div style="position:absolute;left:50%;bottom:3px;transform:translateX(-50%);height:13px;padding:2px 3px;display:flex;gap:2px;background:#1c1c1e;border-radius:4px"><i style="width:9px;border-radius:2px;background:VAR"></i><i style="width:9px;border-radius:2px;background:#3a3a3c"></i><i style="width:9px;border-radius:2px;background:#2fc4b2"></i><i style="width:9px;border-radius:2px;background:#8e6cf7"></i></div>`;
+  miniLook.h = `<div style="position:absolute;left:5px;right:5px;top:5px;bottom:16px;display:grid;grid-template-columns:1.3fr 1fr;grid-template-rows:1fr 1fr;gap:3px"><span style="grid-row:span 2;border:1px solid VAR;border-radius:3px"></span><span style="border:1px solid #24282e;border-radius:3px"></span><span style="border:1px solid #24282e;border-radius:3px"></span></div>
+        <div style="position:absolute;left:0;right:0;bottom:0;height:12px;background:#121418;border-top:1px solid #262a30;display:flex;align-items:center;gap:3px;padding:0 4px"><i style="width:6px;height:6px;background:VAR"></i><i style="width:20px;height:7px;border-radius:2px;background:#1f232a;box-shadow:inset 0 -1px 0 VAR"></i><i style="width:16px;height:7px;border-radius:2px;background:#16191e"></i><i style="width:16px;height:7px;border-radius:2px;background:#16191e"></i><i style="flex:1"></i><i style="width:12px;height:2px;background:#a3a8b0"></i></div>`;
+  miniLook.i = `<div style="position:absolute;left:0;right:0;top:0;height:13px;border-bottom:2px solid #f4f2ee;display:flex;align-items:center;justify-content:space-between;padding-right:5px"><span style="display:flex;height:100%"><i style="width:11px;height:100%;background:VAR"></i><i style="width:11px"></i><i style="width:11px"></i></span><span style="width:20px;height:5px;background:#f4f2ee"></span></div>
+        <div style="position:absolute;left:0;right:0;top:15px;bottom:0;display:grid;grid-template-columns:1.3fr 1fr;grid-template-rows:1fr 1fr;gap:1px;background:#3a3833"><span style="grid-row:span 2;background:#000;box-shadow:inset 0 3px 0 VAR"></span><span style="background:#000"></span><span style="background:#000"></span></div>`;
+  miniLook.j = `<div style="position:absolute;left:0;right:0;top:0;height:12px;border-bottom:3px double #3a352c;display:flex;align-items:center;justify-content:space-between;padding:0 6px"><span style="font:italic 8px Newsreader,serif;color:#ece4d4">I <u style="text-decoration-color:VAR">II</u> III</span><span style="font:9px Newsreader,serif;color:#ece4d4">16:42</span><span style="width:16px;height:2px;background:#a59c8a"></span></div>
+        <div style="position:absolute;left:7px;right:7px;top:20px;bottom:7px;display:grid;grid-template-columns:1.3fr 1fr;grid-template-rows:1fr 1fr;gap:6px"><span style="grid-row:span 2;box-shadow:0 0 0 1px #3a352c, inset 0 6px 0 -4px VAR"></span><span style="box-shadow:0 0 0 1px #2a261f"></span><span style="box-shadow:0 0 0 1px #2a261f"></span></div>`;
+  miniLook.k = `<div style="position:absolute;left:0;right:0;top:0;height:12px;background:#1e1e23;box-shadow:inset 1px 1px 0 #4c4c56, inset -1px -1px 0 #000;display:flex;align-items:center;gap:2px;padding:0 3px"><i style="width:8px;height:7px;background:#2c2c34;box-shadow:inset 1px 1px 0 #000, inset -1px -1px 0 #4c4c56"></i><i style="width:8px;height:7px;background:#1e1e23;box-shadow:inset 1px 1px 0 #4c4c56, inset -1px -1px 0 #000"></i><i style="flex:1"></i><i style="width:18px;height:7px;background:#141418;box-shadow:inset 1px 1px 0 #000, inset -1px -1px 0 #4c4c56"></i></div>
+        <div style="position:absolute;left:4px;right:4px;top:16px;bottom:4px;display:grid;grid-template-columns:1.3fr 1fr;grid-template-rows:1fr 1fr;gap:3px"><span style="grid-row:span 2;background:#1e1e23;box-shadow:inset 1px 1px 0 #4c4c56, inset -1px -1px 0 #000;border-top:5px solid VAR"></span><span style="background:#1e1e23;box-shadow:inset 1px 1px 0 #4c4c56, inset -1px -1px 0 #000;border-top:5px solid #2c2c34"></span><span style="background:#1e1e23;box-shadow:inset 1px 1px 0 #4c4c56, inset -1px -1px 0 #000;border-top:5px solid #2c2c34"></span></div>`;
   miniLook.g = `<div style="position:absolute;left:0;right:0;top:0;height:10px;background:#000;display:flex;align-items:center;justify-content:space-between;padding:0 5px"><span style="display:flex;gap:2px;align-items:center"><i style="width:10px;height:2px;background:#ddd"></i><i style="width:7px;height:3px;border-radius:2px;background:VAR"></i><i style="width:3px;height:3px;border-radius:2px;background:#777"></i></span><span style="width:16px;height:2px;background:#ddd"></span><span style="width:12px;height:5px;border-radius:3px;background:#2e2e32"></span></div>
         <div style="position:absolute;left:5px;right:5px;top:14px;bottom:5px;display:grid;grid-template-columns:1.3fr 1fr;grid-template-rows:1fr 1fr;gap:4px"><span style="grid-row:span 2;border:1px solid #3a3a3a;border-radius:5px"></span><span style="border:1px solid #262626;border-radius:5px"></span><span style="border:1px solid #262626;border-radius:5px"></span></div>`;
   const saverArt = () => ({
@@ -1986,7 +2270,7 @@ launcher   idle      Alt+Space
      grid from the look's tokens, so they follow its mode and accent. Kabuk renders the
      same drawings into Windows' .ico files. Each look keeps its own character: Ada soft
      and filled, Çizgi hairlines, Devre traces and vias, Ray bold, Konsol square with a
-     block cursor, Rıhtım macOS-like, Etkinlik Adwaita-like. */
+     block cursor, Rıhtım macOS-like, Etkinlik Adwaita-like, Pano Windows-like, Izgara square and heavy, Defter fine pen, Piksel 90s chunky. */
   const SYS_ICONS = ["folder", "folderOpen", "drive", "pc", "binEmpty", "binFull", "text", "image", "audio", "video", "archive", "code", "pdf", "program", "other"];
   const sysIconLook = {
     a: { r: 3, sw: 1.6, solid: true, page: "surf-sel", ink: "dim" },
@@ -1997,6 +2281,12 @@ launcher   idle      Alt+Space
     // Rıhtım's and Etkinlik's pages are light in both modes, as on macOS and GNOME.
     f: { r: 2.5, sw: 1, solid: true, page: { dark: "fg-s", light: "surf" }, ink: "faint", soft: true },
     g: { r: 2.5, sw: 1, solid: true, page: { dark: "fg-s", light: "surf" }, ink: "faint", twoTone: true, roundPage: true },
+    // Pano: Windows 11-like, solid folders on light pages. Izgara: square, heavy outlines, colour only in the glyph.
+    h: { r: 1.5, sw: 1.2, solid: true, page: { dark: "fg-s", light: "surf" }, ink: "faint" },
+    i: { r: 0, sw: 2.2, solid: false, page: "", ink: "fg-s" },
+    // Defter: fine pen lines. Piksel: chunky filled pages with a block cursor, like 90s icons.
+    j: { r: 1, sw: 1.1, solid: false, page: "", ink: "fg-s" },
+    k: { r: 0, sw: 2, solid: true, page: "surf-sel", ink: "fg-s", block: true },
   };
   function systemIcon(kind, dir, mode) {
     const look = sysIconLook[dir] || sysIconLook.a;
@@ -2402,6 +2692,8 @@ launcher   idle      Alt+Space
   stage.addEventListener("click", (e) => {
     const ws = e.target.closest(".ws");
     if (ws) { setWs(Number(ws.dataset.ws)); return; }
+    const task = e.target.closest("[data-task]");
+    if (task) { state.focus[state.ws] = task.dataset.task; layoutTiles(stage.querySelector(".screen"), state.ws, true); return; }
     const r = e.target.closest(".l-row");
     if (r) { sel = Number(r.dataset.i); runSelected(); return; }
     if (state.launcher && !e.target.closest("[data-launcher]")) closeLauncher();
