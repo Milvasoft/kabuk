@@ -1919,6 +1919,58 @@ fn a_hot_corner_reached_does_what_was_chosen() {
     assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
 }
 
+/// Found by the user in a video: editing the app grid drew its apps over the desktop, the
+/// grid's blurred picture gone, and the icons blank for a moment. A tray icon's change
+/// cleared every picture but the tray's and the bar's apps' from the store. The grid
+/// keeps its pictures while the tray changes.
+#[test]
+fn the_app_grid_keeps_its_pictures_while_the_tray_changes() {
+    use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_APP_GRID};
+    use kabuk_win::msgloop::{post_message, Msg};
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    // The tray is taken from Explorer for a few seconds, as the tray tests do.
+    let _shell = sandbox.kabuk_with(&[TAKE_EXPLORER, "--no-wm"]);
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("tray window up") == 1).is_some());
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
+    let grid = |wparam: usize| {
+        post_message(
+            control,
+            Msg {
+                id: MSG_TEST_APP_GRID,
+                wparam,
+                lparam: 0,
+            },
+        )
+        .unwrap()
+    };
+    grid(1);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("app grid shown") == 1).is_some());
+    assert!(
+        sandbox
+            .last_log_line(&["app grid shown"])
+            .is_some_and(|l| l.contains("wallpaper=true")),
+        "the grid has its picture"
+    );
+    // A program's tray icon comes while the grid is open.
+    let log = sandbox.dir.path().join("tray-calls.txt");
+    let tip = title("tray-keeps");
+    let _app = TestWindow::open(&["--title", &tip, "--tray-log", log.to_str().unwrap()]);
+    assert!(wait_until(SETTLE, || sandbox.last_log_line(&["tray call", &tip]).is_some()).is_some());
+    grid(2);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("app grid editing on=true") == 1).is_some());
+    assert_eq!(sandbox.log_lines("app grid picture lost"), 0);
+    grid(0);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("app grid closed") == 1).is_some());
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
+}
+
 /// DECISIONS D68 (asked for by the user, who will try it on a touchpad): with swipes on,
 /// the bar's control window watches the touchpad, and a swipe does what was chosen for
 /// its way; turned off live, the watch goes. This machine has no touchpad, so the test

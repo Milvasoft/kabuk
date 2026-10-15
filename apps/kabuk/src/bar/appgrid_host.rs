@@ -744,6 +744,13 @@ impl Shared {
         } = self;
         let AppGridState { open, pictures, .. } = app_grid;
         let Some(o) = open.as_mut() else { return };
+        if let (true, Some(key)) = (chrome, o.backdrop) {
+            if !gpu.images.contains(key) {
+                // Found by the user: editing drew the grid over the desktop, its picture
+                // gone from the store.
+                tracing::warn!(key, "app grid picture lost");
+            }
+        }
         let frame = view::Frame {
             size: o.size,
             i18n,
@@ -1185,14 +1192,17 @@ impl Shared {
 
     /// Integration tests: open on the primary monitor without the keyboard, or close.
     #[cfg(feature = "integration")]
-    pub(super) fn test_app_grid(&mut self, open: bool) {
-        if open {
-            if self.app_grid.open.is_none() {
-                let primary = kabuk_win::shell::monitors().into_iter().find(|m| m.primary);
-                self.open_app_grid(primary, false);
+    /// `what`: 0 closes the grid, 1 opens it on the primary monitor, 2 starts editing.
+    pub(super) fn test_app_grid(&mut self, what: usize) {
+        match what {
+            0 => self.close_app_grid(),
+            1 => {
+                if self.app_grid.open.is_none() {
+                    let primary = kabuk_win::shell::monitors().into_iter().find(|m| m.primary);
+                    self.open_app_grid(primary, false);
+                }
             }
-        } else {
-            self.close_app_grid();
+            _ => self.app_grid_edit(true),
         }
     }
 }

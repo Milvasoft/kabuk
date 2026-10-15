@@ -55,6 +55,14 @@ impl Images {
         self.0.borrow_mut().retain(|k, _| keep(*k));
     }
 
+    /// Forgets the pictures of `keys`; the others stay.
+    pub fn forget(&self, keys: impl IntoIterator<Item = u64>) {
+        let mut store = self.0.borrow_mut();
+        for k in keys {
+            store.remove(&k);
+        }
+    }
+
     pub(crate) fn with<R>(&self, key: u64, f: impl FnOnce((u32, u32), &[u8]) -> R) -> Option<R> {
         self.0.borrow().get(&key).map(|(size, px)| f(*size, px))
     }

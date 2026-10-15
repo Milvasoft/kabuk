@@ -170,6 +170,11 @@ fn stored_images_are_drawn_scaled_and_unknown_ones_skipped() {
     assert!(g.images.contains(7) && !g.images.contains(8));
     g.images.retain(|k| k != 7);
     assert!(!g.images.contains(7));
+    // Forgetting some keys keeps every other picture.
+    g.images.set(1, 1, vec![0; 4]);
+    g.images.set(2, 1, vec![0; 4]);
+    g.images.forget([1, 99]);
+    assert!(!g.images.contains(1) && g.images.contains(2));
 }
 
 /// A picture of any shape is stretched over the size it is given (the app grid's blurred

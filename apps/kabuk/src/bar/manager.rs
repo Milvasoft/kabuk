@@ -454,6 +454,9 @@ struct Shared {
     pending: Rc<Cell<Pending>>,
     /// Other programs' tray icons, and the calls not applied yet.
     tray: Tray,
+    /// The tray's and the bar apps' pictures last kept in the store: the ones of them no
+    /// longer shown are forgotten, never another part's (the app grid's, the launcher's).
+    tray_images: Vec<u64>,
     tray_calls: Rc<RefCell<VecDeque<IconCall>>>,
     /// Kabuk hides the Windows taskbar while it runs (not with `--leave-explorer`).
     hides_taskbar: bool,
@@ -722,6 +725,7 @@ impl BarManager {
                 windows_light,
                 pending: Rc::default(),
                 tray: Tray::default(),
+                tray_images: Vec::new(),
                 tray_calls: Rc::default(),
                 hides_taskbar: !leave_explorer,
                 app_mode_file,
@@ -1088,7 +1092,7 @@ impl Shared {
             }
             #[cfg(feature = "integration")]
             MSG_TEST_APP_GRID => {
-                self.test_app_grid(m.wparam == 1);
+                self.test_app_grid(m.wparam);
                 Some(0)
             }
             #[cfg(feature = "integration")]
@@ -1925,7 +1929,8 @@ impl Shared {
         if !on {
             if self.tray_host.take().is_some() {
                 self.tray = Tray::default();
-                self.gpu.images.retain(|_| false);
+                let tray = self.tray.visible().map(|i| i.icon).collect::<Vec<_>>();
+                self.forget_tray_images(tray);
                 self.render_all(false);
             }
             return;
@@ -1987,8 +1992,18 @@ impl Shared {
                 }
             }
         }
-        let app_keys = self.app_image_keys();
-        self.gpu.images.retain(|k| keys.contains(&k) || app_keys.contains(&k));
+        self.forget_tray_images(keys);
+    }
+
+    /// Forgets the tray's and the bar apps' pictures no longer shown, `tray` the tray's
+    /// shown now. Found by the user: this cleared the whole store, so the app grid being
+    /// edited lost its blurred picture and its icons.
+    fn forget_tray_images(&mut self, tray: Vec<u64>) {
+        let mut kept = tray;
+        kept.extend(self.app_image_keys());
+        let gone: Vec<u64> = self.tray_images.iter().copied().filter(|k| !kept.contains(k)).collect();
+        self.gpu.images.forget(gone);
+        self.tray_images = kept;
     }
 
     /// Icons whose program went away without removing them.
