@@ -152,6 +152,20 @@ async function main() {
   check((await page.locator(".set-nav").count()) === 12, "12 pages in the navigation");
   check((await page.locator(".set-nav").first().innerText()).includes("Görünüm"), "Turkish words from the language files");
 
+  // A short window: the menu scrolls, so its last page can be reached (found by the user:
+  // the last pages were cut off).
+  await page.setViewportSize({ width: 900, height: 420 });
+  const side = await page.$eval(".set-side", (s) => ({ scroll: s.scrollHeight, client: s.clientHeight, overflow: getComputedStyle(s).overflowY }));
+  check(side.overflow === "auto" && side.scroll > side.client, `the short window's menu scrolls (${side.scroll} in ${side.client})`);
+  await page.locator(`[data-page="about"]`).scrollIntoViewIfNeeded();
+  const last = await page.$eval(`[data-page="about"]`, (b) => { const r = b.getBoundingClientRect(); return r.bottom <= window.innerHeight && r.top >= 0; });
+  check(last, "the menu's last page scrolled into view");
+  await page.click(`[data-page="about"]`);
+  await settled();
+  check((await page.locator(`[data-page="about"].on`).count()) === 1, "the menu's last page opens in a short window");
+  await page.setViewportSize({ width: 1200, height: 740 });
+  await page.$eval(".set-side", (s) => { s.scrollTop = 0; });
+
   // Every page draws; every choice, switch and chip on it writes an accepted value.
   for (const p of PAGES) {
     await go(p);
