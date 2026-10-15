@@ -19,14 +19,16 @@ pub fn is_fullscreen(windows: impl IntoIterator<Item = Rect>, monitor: Rect) -> 
 }
 
 /// As [`is_fullscreen`], with each window's rectangle and whether it is maximised: a
-/// maximised window never counts, even where no taskbar or bar is reserved and it fills
-/// the whole monitor. A window is on the monitor that holds its centre, so one on the
-/// next monitor hanging its borders over the edge does not hide what is in front here.
+/// maximised window does not count, even where no taskbar or bar is reserved and it fills
+/// the whole monitor with its borders hanging over the edges; one sized exactly to the
+/// monitor, borders gone, does (Chrome's full screen keeps its window maximised). A
+/// window is on the monitor that holds its centre, so one on the next monitor hanging its
+/// borders over the edge does not hide what is in front here.
 pub fn is_fullscreen_front(windows: impl IntoIterator<Item = (Rect, bool)>, monitor: Rect) -> bool {
     let windows: Vec<(Rect, bool)> = windows.into_iter().collect();
     front_on(windows.iter().map(|(r, _)| *r), monitor)
         .and_then(|i| windows.get(i))
-        .is_some_and(|(w, maximized)| !*maximized && covers(w, &monitor))
+        .is_some_and(|(w, maximized)| covers(w, &monitor) && (!*maximized || *w == monitor))
 }
 
 /// Which of `windows` (front first) is the front one on `monitor`, the one holding its
@@ -158,6 +160,16 @@ mod tests {
     /// Found by the full integration run: on a monitor with no taskbar or bar reserved
     /// (Kabuk starting, Windows' taskbar hidden), a maximised window fills the whole
     /// monitor and was taken for a full-screen program; the bar stepped aside for it.
+    /// Found by the user watching a video: Chrome's full screen keeps its window maximised,
+    /// sized exactly to the monitor without the borders a maximised window hangs over it,
+    /// and the bar stayed over the video.
+    #[test]
+    fn a_maximised_window_exactly_the_monitor_is_full_screen() {
+        assert!(is_fullscreen_front([(M1, true)], M1));
+        assert!(is_fullscreen_front([(M2, true)], M2));
+        assert!(!is_fullscreen_front([(MAXIMISED, true)], M1));
+    }
+
     #[test]
     fn a_maximised_window_never_counts_even_where_it_fills_the_monitor() {
         let filling = Rect {
