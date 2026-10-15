@@ -113,6 +113,8 @@ pub enum Action {
     NextTab,
     /// Drop the terminal down, or hide it (DECISIONS D62).
     Dropdown,
+    /// Switch the focused monitor this many workspaces on (a touchpad swipe, D68).
+    StepWorkspace(i32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

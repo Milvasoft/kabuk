@@ -40,6 +40,12 @@ pub fn validate(config: &Config) -> Vec<(KeyPath, Problem)> {
         config.dropdown.height,
         DROPDOWN_HEIGHT_RANGE,
     );
+    range(
+        &mut push,
+        &["gestures", "fingers"],
+        config.gestures.fingers,
+        GESTURE_FINGERS_RANGE,
+    );
 
     // wallpaper
     let w = &config.wallpaper;

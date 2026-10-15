@@ -42,6 +42,14 @@ top_right = "none"
 bottom_left = "none"
 bottom_right = "none"
 
+[gestures]                # swipes on a precision touchpad; set Windows' own to "Nothing" first
+enabled = false
+fingers = 3               # 3 or 4
+swipe_left = "next_workspace"      # none, next_workspace, previous_workspace, overview, app_grid, launcher
+swipe_right = "previous_workspace"
+swipe_up = "overview"
+swipe_down = "app_grid"
+
 [wallpaper]
 kind = "windows"          # windows (your own, untouched), black, gradient, image, circuit, constellation, generated, gallery
 # gallery = "wall-live/aurora-shore"   # with kind = "gallery": wall-live/… is played, wall-still/… is drawn once

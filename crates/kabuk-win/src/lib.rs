@@ -39,6 +39,7 @@ pub mod system_colors;
 pub mod takeover;
 pub mod taskbar_guard;
 pub mod thumbnail;
+pub mod touchpad;
 pub mod tray;
 pub mod wallpaper;
 pub mod watch;

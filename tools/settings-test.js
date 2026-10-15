@@ -265,6 +265,25 @@ async function main() {
   await page.selectOption(`[data-select="hot_corners.top_left"]`, "none"); await settled();
   check(/top_left = "none"/.test(toml()), "hot corners: back to nothing");
 
+  // Touchpad swipes (DECISIONS D68): off by default, the ways shown once on, the fingers
+  // and each way's choice written; Windows' touchpad page a button away (not pressed here).
+  check((await page.locator(`[data-tgl="gestures.enabled"]`).getAttribute("aria-checked")) === "false", "gestures: off by default");
+  check((await page.locator(`[data-select^="gestures."]`).count()) === 0, "gestures: no ways while off");
+  check((await page.locator(`[data-touchpad-settings]`).count()) === 1, "gestures: Windows' touchpad page a button away");
+  await page.click(`[data-tgl="gestures.enabled"]`); await settled();
+  check(/\[gestures\][^[]*enabled = true/.test(toml()), "gestures: turned on");
+  check((await page.locator(`[data-select^="gestures."]`).count()) === 4, "gestures: four ways");
+  await page.click(`[data-set="gestures.fingers"][data-val='4']`); await settled();
+  check(/fingers = 4/.test(toml()), "gestures: four fingers");
+  await page.selectOption(`[data-select="gestures.swipe_up"]`, "launcher"); await settled();
+  check(/swipe_up = "launcher"/.test(toml()), "gestures: up opens the launcher");
+  if (shots) {
+    await page.locator("[data-touchpad-settings]").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(shots, "windows-gestures.png") });
+  }
+  await page.click(`[data-tgl="gestures.enabled"]`); await settled();
+  check(/enabled = false/.test(toml()), "gestures: off again");
+
   // The all-apps grid (asked for by the user): an app hidden on the grid is listed and
   // shown again, the order goes back to alphabetical.
   const gridFile = path.join(dir, "app-grid.json");

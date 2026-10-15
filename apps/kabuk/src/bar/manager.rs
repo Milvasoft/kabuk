@@ -58,6 +58,8 @@ mod appgrid_host;
 mod apps_host;
 #[path = "cursors_host.rs"]
 pub mod cursors_host;
+#[path = "gesture_host.rs"]
+mod gesture_host;
 #[path = "idle_host.rs"]
 mod idle_host;
 #[path = "motion_host.rs"]
@@ -110,6 +112,9 @@ const MSG_NOTIF_COUNT: u32 = msg::APP + 31;
 const MSG_NOTIF_CHANGED: u32 = msg::APP + 34;
 pub use apps_host::MSG_TEST_APP_CLICK;
 pub use idle_host::{MSG_INPUT, MSG_TEST_DIM};
+/// Integration tests: a touchpad swipe (`wparam`: 0 left, 1 right, 2 up, 3 down), as the
+/// touchpad's fingers would make it (DECISIONS D68; this machine has no touchpad).
+pub const MSG_TEST_SWIPE: u32 = msg::APP + 51;
 #[path = "tray_panel_host.rs"]
 mod tray_panel_host;
 pub use tray_panel_host::{MSG_TEST_TRAY_PANEL, MSG_TEST_TRAY_PANEL_CLICK};
@@ -491,6 +496,8 @@ struct Shared {
     game_devices: Vec<String>,
     /// Idle dimming's overlays while dimmed.
     idle: idle_host::IdleState,
+    /// Touchpad swipes (DECISIONS D68).
+    gestures: gesture_host::GestureState,
     /// The screen saver Kabuk set.
     saver: saver_host::SaverState,
     /// The power menu while it is open.
@@ -745,6 +752,7 @@ impl BarManager {
                 notices: notify_host::NotifyState::default(),
                 game_devices: Vec::new(),
                 idle: idle_host::IdleState::default(),
+                gestures: gesture_host::GestureState::default(),
                 saver: saver_host::SaverState::default(),
                 power_menu: None,
                 keys_card: Default::default(),
@@ -836,6 +844,7 @@ impl BarManager {
             s.apply_saver();
             s.apply_wallpaper();
             s.schedule_idle();
+            s.apply_gestures();
             s.rebuild();
             s.schedule_clock();
             s.schedule_mode_flip();
@@ -1140,10 +1149,19 @@ impl Shared {
                 }
                 Some(0)
             }
-            // Raw input, watched only while dimmed; Windows' own handling follows.
+            // Raw input: keys and the mouse while dimmed, the touchpad while swipes are
+            // on; Windows' own handling follows.
             MSG_INPUT => {
                 self.input_seen();
+                self.touchpad_input(m.lparam);
                 None
+            }
+            #[cfg(feature = "integration")]
+            MSG_TEST_SWIPE => {
+                use kabuk_core::gesture::Swipe;
+                let ways = [Swipe::Left, Swipe::Right, Swipe::Up, Swipe::Down];
+                self.swipe(*ways.get(m.wparam)?);
+                Some(0)
             }
             #[cfg(feature = "integration")]
             MSG_TEST_DIM => {
@@ -1583,6 +1601,7 @@ impl Shared {
         self.apply_saver();
         self.apply_wallpaper();
         self.schedule_idle();
+        self.apply_gestures();
     }
 
     /// Recreates every bar (and Rıhtım's dock) from the current monitors and configuration.

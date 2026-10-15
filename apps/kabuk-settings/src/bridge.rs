@@ -38,6 +38,8 @@
 //!   made of the windows the running shell manages (DECISIONS D65; a test passes
 //!   `"windows"` as `query windows` gives them), or `{"op":"profile","done":"empty"}`;
 //!   `{"op":"profile-open","name":…}` → `{"op":"profile","done":"opened"|"not-running"}`.
+//! - `{"op":"touchpad-settings"}` → `{"op":"touchpad-settings","opened":…}`: Windows'
+//!   touchpad page, where its own gestures are turned off (DECISIONS D68).
 //! - `gen-…`: the Create tab ([`crate::create`]).
 
 use std::path::PathBuf;
@@ -140,6 +142,12 @@ impl Bridge {
             "update-open" => {
                 let page = m.get("page").and_then(Value::as_str)?;
                 open_release_page(page)?
+            }
+            "touchpad-settings" => {
+                let opened = kabuk_win::shellitems::open(TOUCHPAD_SETTINGS)
+                    .map_err(|e| tracing::error!(error = %e, "touchpad settings not opened"))
+                    .is_ok();
+                json!({ "op": "touchpad-settings", "opened": opened })
             }
             "app-grid-show" => {
                 let open = m.get("open").and_then(Value::as_str)?;
@@ -519,6 +527,9 @@ fn latest_release() -> Value {
 }
 
 /// Opens a release page of Kabuk's repository in the browser; anything else is refused.
+/// Windows' touchpad settings, where its own three- and four-finger gestures are set.
+const TOUCHPAD_SETTINGS: &str = "ms-settings:devices-touchpad";
+
 fn open_release_page(page: &str) -> Option<Value> {
     if !page.starts_with(&format!("{}/releases/", kabuk_core::update::REPOSITORY)) {
         tracing::warn!("update page outside Kabuk's repository refused");

@@ -414,7 +414,8 @@
       ${rowFor("windows.minimize_effect", t("setMinimize"), t("setMinimizeH"), segFor("windows.minimize_effect", t("setMinimize"), [["genie", t("setMinimizeGenie")], ["windows", t("setMinimizeWindows")]]))}</div>
       ${dropdownGroup()}
       ${profilesGroup()}
-      ${hotCornersGroup()}`;
+      ${hotCornersGroup()}
+      ${gesturesGroup()}`;
   }
 
   // Layout profiles (DECISIONS D65): programs over monitors and workspaces, saved from the
@@ -446,6 +447,19 @@
     const c = cfg().hot_corners;
     const rows = CORNERS.map(([k, name]) => row(t(name), "", `<span class="num"><select data-select="hot_corners.${k}" aria-label="${t(name)}">${CORNER_ACTIONS.map(([v, n]) => `<option value="${v}"${c[k] === v ? " selected" : ""}>${t(n)}</option>`).join("")}</select></span>`)).join("");
     return `<div class="set-grp"><span class="gl">${t("hc")}. ${t("hcH")}</span>${rows}</div>`;
+  }
+
+  // Touchpad swipes (DECISIONS D68, off by default): Windows' own gestures for as many
+  // fingers must be set to "Nothing" first, so a button opens its touchpad page.
+  const SWIPES = [["swipe_left", "gsLeft"], ["swipe_right", "gsRight"], ["swipe_up", "gsUp"], ["swipe_down", "gsDown"]];
+  const SWIPE_ACTIONS = [["none", "hcNone"], ["next_workspace", "gsNext"], ["previous_workspace", "gsPrevious"], ["overview", "hcOverview"], ["app_grid", "hcAppGrid"], ["launcher", "hcLauncher"]];
+  function gesturesGroup() {
+    const g = cfg().gestures;
+    const ways = g.enabled ? SWIPES.map(([k, name]) => row(t(name), "", `<span class="num"><select data-select="gestures.${k}" aria-label="${t(name)}">${SWIPE_ACTIONS.map(([v, n]) => `<option value="${v}"${g[k] === v ? " selected" : ""}>${t(n)}</option>`).join("")}</select></span>`)).join("") : "";
+    const fingers = g.enabled ? rowFor("gestures.fingers", t("gsFingers"), "", segFor("gestures.fingers", t("gsFingers"), [[3, "3"], [4, "4"]])) : "";
+    return `<div class="set-grp"><span class="gl">${t("gs")}. ${t("gsH")}</span>
+      ${tgl("gestures.enabled", t("gsOn"), t("gsOnH"))}${fingers}${ways}
+      <div><button class="set-btn ghost" type="button" data-touchpad-settings>${t("gsWindows")}</button></div></div>`;
   }
 
   function ruleText(r) {
@@ -690,6 +704,7 @@
     if (on("[data-quit]")) { post({ op: "quit" }); return; }
     if (on("[data-update-check]")) { post({ op: "update-check" }); return; }
     if (on("[data-update-open]")) { if (ui.update && ui.update.page) post({ op: "update-open", page: ui.update.page }); return; }
+    if (on("[data-touchpad-settings]")) { post({ op: "touchpad-settings" }); return; }
     if ((el = on("[data-folder-drop]"))) { set("launcher.indexed_folders", cfg().launcher.indexed_folders.filter((_, i) => i !== Number(el.dataset.folderDrop))); return; }
     if ((el = on("[data-dim]"))) {
       if (el.dataset.dim === "custom") { ui.dimCustom = true; render(); document.getElementById("dim-value")?.focus(); return; }

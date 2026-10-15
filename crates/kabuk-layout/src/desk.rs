@@ -640,6 +640,21 @@ impl Desk {
         self.sync(&before, &reflow, focus)
     }
 
+    /// Switches a monitor `by` workspaces on from its active one (a touchpad swipe,
+    /// DECISIONS D68); past the first or the last, nothing.
+    pub fn step(&mut self, monitor: &str, by: i32) -> Vec<Effect> {
+        let Some(m) = self.monitor(monitor) else {
+            return Vec::new();
+        };
+        let count = self.monitors[m].workspaces.len() as i64;
+        let to = self.monitors[m].active as i64 + i64::from(by);
+        if by == 0 || !(0..count).contains(&to) {
+            return Vec::new();
+        }
+        // `to` is a 0-based index within `count`; workspaces are numbered from 1.
+        self.switch(monitor, u32::try_from(to + 1).unwrap_or(0))
+    }
+
     /// Shows the workspace holding `id` on its monitor and focuses it (the launcher's
     /// open windows). Minimised windows are Windows' to restore.
     pub fn reveal(&mut self, id: WindowId) -> Vec<Effect> {

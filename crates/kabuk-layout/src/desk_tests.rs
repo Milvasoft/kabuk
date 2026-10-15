@@ -149,6 +149,24 @@ fn switching_hides_the_old_workspace_and_shows_the_new_one_in_place() {
     assert_eq!(d.switch("nope", 2), vec![]);
 }
 
+/// DECISIONS D68: a swipe goes to the workspace beside the active one; none past the
+/// first or the last.
+#[test]
+fn stepping_goes_to_the_neighbouring_workspace() {
+    let mut d = desk(false);
+    d.add(new(1));
+    assert_eq!(d.step(M1, -1), vec![], "none before the first");
+    assert_eq!(d.step(M1, 0), vec![]);
+    assert_eq!(d.step(M1, 1), vec![Effect::Hide(1)]);
+    assert_eq!(d.active_workspace(M1), Some(2));
+    assert_eq!(shown(&d.step(M1, -1)), vec![1]);
+    assert_eq!(d.active_workspace(M1), Some(1));
+    d.switch(M1, 9);
+    assert_eq!(d.step(M1, 1), vec![], "none after the last");
+    assert_eq!(d.active_workspace(M1), Some(9));
+    assert_eq!(d.step("nope", 1), vec![]);
+}
+
 #[test]
 fn a_rule_can_send_a_new_window_to_a_hidden_workspace() {
     let mut d = desk(false);

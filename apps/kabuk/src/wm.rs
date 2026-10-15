@@ -1016,6 +1016,7 @@ impl Wm {
         let focused = self.desk.focus();
         let effects = match a {
             Action::Workspace(n) => monitor.map(|m| self.desk.switch(&m, n)).unwrap_or_default(),
+            Action::StepWorkspace(by) => monitor.map(|m| self.desk.step(&m, by)).unwrap_or_default(),
             Action::MoveToWorkspace(n) => focused.map(|f| self.desk.move_to(f, n)).unwrap_or_default(),
             Action::Focus(d) => self.desk.focus_toward(toward(d)).into_iter().collect(),
             Action::Move(d) => self.desk.swap_toward(toward(d)),

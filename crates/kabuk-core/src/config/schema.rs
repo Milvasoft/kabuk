@@ -30,6 +30,7 @@ pub struct Config {
     pub system_theme: SystemTheme,
     pub hot_corners: HotCorners,
     pub dropdown: Dropdown,
+    pub gestures: Gestures,
     /// Layout profiles (DECISIONS D65), `[[profile]]`.
     #[serde(rename = "profile", skip_serializing_if = "Vec::is_empty")]
     pub profiles: Vec<Profile>,
@@ -79,6 +80,62 @@ impl Default for Dropdown {
 }
 
 pub const DROPDOWN_HEIGHT_RANGE: (u32, u32) = (20, 90);
+
+/// `[gestures]` (DECISIONS D68, `kabuk_core::gesture`): swipes on a precision touchpad.
+/// Off by default, as Windows has its own three- and four-finger gestures.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Gestures {
+    pub enabled: bool,
+    /// How many fingers swipe (3 or 4).
+    pub fingers: u32,
+    pub swipe_left: GestureAction,
+    pub swipe_right: GestureAction,
+    pub swipe_up: GestureAction,
+    pub swipe_down: GestureAction,
+}
+
+impl Default for Gestures {
+    fn default() -> Self {
+        // As macOS: the fingers push the workspaces aside, up shows every workspace.
+        Gestures {
+            enabled: false,
+            fingers: 3,
+            swipe_left: GestureAction::NextWorkspace,
+            swipe_right: GestureAction::PreviousWorkspace,
+            swipe_up: GestureAction::Overview,
+            swipe_down: GestureAction::AppGrid,
+        }
+    }
+}
+
+pub const GESTURE_FINGERS_RANGE: (u32, u32) = (3, 4);
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GestureAction {
+    #[default]
+    None,
+    /// The workspace after the shown one on the monitor in front (none after the last).
+    NextWorkspace,
+    PreviousWorkspace,
+    /// Every workspace side by side (Win+Tab).
+    Overview,
+    /// Every app on a grid (SPEC 2.5b).
+    AppGrid,
+    Launcher,
+}
+
+impl GestureAction {
+    pub const ALL: [GestureAction; 6] = [
+        GestureAction::None,
+        GestureAction::NextWorkspace,
+        GestureAction::PreviousWorkspace,
+        GestureAction::Overview,
+        GestureAction::AppGrid,
+        GestureAction::Launcher,
+    ];
+}
 
 /// `[hot_corners]` (asked for by the user, `kabuk_core::hot_corner`): what the mouse
 /// pushed into each corner of the screen does; nothing by default.
@@ -144,6 +201,7 @@ impl Default for Config {
             system_theme: SystemTheme::default(),
             hot_corners: HotCorners::default(),
             dropdown: Dropdown::default(),
+            gestures: Gestures::default(),
             profiles: Vec::new(),
         }
     }

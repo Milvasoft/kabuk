@@ -1919,6 +1919,51 @@ fn a_hot_corner_reached_does_what_was_chosen() {
     assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
 }
 
+/// DECISIONS D68 (asked for by the user, who will try it on a touchpad): with swipes on,
+/// the bar's control window watches the touchpad, and a swipe does what was chosen for
+/// its way; turned off live, the watch goes. This machine has no touchpad, so the test
+/// sends the swipe the fingers would make.
+#[test]
+fn a_touchpad_swipe_does_what_was_chosen() {
+    use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_SWIPE};
+    use kabuk_win::msgloop::{post_message, Msg};
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    let on = "schema = 1\n[gestures]\nenabled = true\nswipe_up = \"app_grid\"\nswipe_down = \"none\"\n";
+    std::fs::write(sandbox.config_file(), on).unwrap();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    assert!(wait_until(SETTLE, || sandbox.log_lines("touchpad watched on=true") == 1).is_some());
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
+    let swipe = |wparam: usize| {
+        post_message(
+            control,
+            Msg {
+                id: MSG_TEST_SWIPE,
+                wparam,
+                lparam: 0,
+            },
+        )
+        .unwrap()
+    };
+    // Down: nothing chosen. Up: the grid of every app, and again to close it.
+    swipe(3);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("touchpad swipe") == 1).is_some());
+    swipe(2);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("app grid shown") == 1).is_some());
+    swipe(2);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("app grid closed") == 1).is_some());
+    // Off, live: the watch goes.
+    std::fs::write(sandbox.config_file(), "schema = 1\n[gestures]\nenabled = false\n").unwrap();
+    assert!(wait_until(SETTLE, || sandbox.log_lines("touchpad watched on=false") == 1).is_some());
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
+}
+
 /// Reported by the user: a click on the volume icon showed no slider. The left click's
 /// panel (the level's track, the speaker, Windows' mixer and sound settings) and the right
 /// click's menu (the entries only) open under the volume and close again. No test sets

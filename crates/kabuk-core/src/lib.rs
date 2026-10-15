@@ -9,6 +9,7 @@ pub mod dropdown;
 pub mod fsutil;
 pub mod fullscreen;
 pub mod genie;
+pub mod gesture;
 pub mod grab;
 pub mod hang;
 pub mod hot_corner;

@@ -78,6 +78,35 @@ fn defaults_follow_the_spec() {
     assert_eq!(codes, vec!["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]);
 }
 
+/// DECISIONS D68: touchpad swipes are off by default, three fingers, as macOS; four
+/// fingers may be chosen, two or five may not.
+#[test]
+fn gestures_default_off_with_three_fingers() {
+    let g = Config::default().gestures;
+    assert!(!g.enabled);
+    assert_eq!(g.fingers, 3);
+    assert_eq!(
+        (g.swipe_left, g.swipe_right, g.swipe_up, g.swipe_down),
+        (
+            GestureAction::NextWorkspace,
+            GestureAction::PreviousWorkspace,
+            GestureAction::Overview,
+            GestureAction::AppGrid
+        )
+    );
+    let four = parse("schema = 1\n[gestures]\nenabled = true\nfingers = 4\nswipe_up = \"launcher\"\n").unwrap();
+    assert_eq!(
+        (four.config.gestures.fingers, four.config.gestures.swipe_up),
+        (4, GestureAction::Launcher)
+    );
+    for wrong in [2, 5] {
+        assert!(
+            parse(&format!("schema = 1\n[gestures]\nfingers = {wrong}\n")).is_err(),
+            "{wrong} fingers"
+        );
+    }
+}
+
 /// The new looks are written by their ASCII names, like the others.
 #[test]
 fn new_looks_parse_by_name() {
