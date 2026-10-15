@@ -21,6 +21,6 @@ Commands:
 Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/Milvasoft/kabuk/releases/download/v0.1.0/kabuk-setup.exe
-    InstallerSha256: FA0EDFAF46B619D161978F3B624EB02CBCFBDDC194C7E28D7D23E3FC9FEFB240
+    InstallerSha256: 8B85FC1ED7540552A45055A3AADD56E4CAC88E1EC9E5A6369F65B8D9186A95DE
 ManifestType: installer
 ManifestVersion: 1.9.0
