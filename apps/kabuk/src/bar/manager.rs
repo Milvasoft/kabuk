@@ -93,7 +93,8 @@ mod volume_panel_host;
 mod wallpaper_host;
 pub use app_menu_host::{
     MSG_TEST_APP_MENU, TEST_CLOSE as APP_MENU_CLOSE, TEST_CLOSE_WINDOWS as APP_MENU_CLOSE_WINDOWS,
-    TEST_OPEN as APP_MENU_OPEN, TEST_PIN as APP_MENU_PIN, TEST_TO_FRONT as APP_MENU_TO_FRONT,
+    TEST_FLOAT_RULE as APP_MENU_FLOAT_RULE, TEST_OPEN as APP_MENU_OPEN, TEST_PIN as APP_MENU_PIN,
+    TEST_TO_FRONT as APP_MENU_TO_FRONT,
 };
 pub use keys_card_host::MSG_TEST_KEYS_CARD;
 pub use power_menu_host::MSG_TEST_POWER_MENU;

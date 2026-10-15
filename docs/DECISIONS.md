@@ -8,6 +8,9 @@ No open decisions (the user decided D39, D43, D44 and the still pictures' drift 
 
 ## Decided and proposed
 
+### D63 · Window rules from the app's menu — Decided by the user (2026-10-15)
+Suggested as a feature (a rule made where the window is, not typed in) and asked for by the user: a program's menu on the bar offers "always open floating" and "always open on workspace n" (the workspace its window is on now), each saying when it is on and taking it off again. They are the program's own rule in `[[rules.rule]]` (its file name alone, no other matcher), made, changed or removed once it says nothing, in the configuration file as the settings write it; the settings' rules page lists it, and Kabuk opens the program's next windows by it.
+
 ### D62 · A drop-down terminal — Decided by the user (2026-10-15)
 Suggested as a feature and asked for by the user: `shortcuts.dropdown` (`Win+Enter`) drops a terminal down from the top of the monitor the user works on, as Quake's console, and hides it again; it stays over every workspace. `[dropdown] command` names the program (empty: Windows Terminal in a window of its own, `wt -w new`, else PowerShell) and `height` its share of the monitor's height (20-90 %, 40 by default). The window manager starts the program and takes the first terminal window that comes within ten seconds (Windows Terminal's or the console host's class; any window for the user's own command); that window stays out of the layout (it never tiles, workspaces leave it alone) and is recorded before it hides, as every hidden window is. Closed, it is forgotten and the next press starts it again.
 

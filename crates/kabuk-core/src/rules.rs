@@ -160,6 +160,50 @@ impl Rules {
     }
 }
 
+/// The user's own rule for program `exe` alone (its name, no other matcher), made from
+/// the bar's app menu (DECISIONS D63).
+fn own_rule(rules: &[Rule], exe: &str) -> Option<usize> {
+    rules.iter().position(|r| {
+        r.exe.eq_ignore_ascii_case(exe) && r.class.is_empty() && r.title.is_empty() && !r.regex && !r.ignore
+    })
+}
+
+/// Whether `exe`'s windows always float by a rule of the user's.
+pub fn floats_by_rule(rules: &[Rule], exe: &str) -> bool {
+    own_rule(rules, exe).is_some_and(|i| rules[i].float)
+}
+
+/// The workspace `exe`'s windows always open on by a rule of the user's.
+pub fn workspace_by_rule(rules: &[Rule], exe: &str) -> Option<u32> {
+    own_rule(rules, exe).and_then(|i| rules[i].workspace)
+}
+
+/// Sets what `exe`'s own rule says (`float`, `workspace`): the rule is made, changed, or,
+/// saying nothing any more, removed.
+pub fn set_own_rule(rules: &mut Vec<Rule>, exe: &str, change: impl FnOnce(&mut Rule)) {
+    let i = match own_rule(rules, exe) {
+        Some(i) => i,
+        None => {
+            rules.push(Rule {
+                exe: exe.to_string(),
+                ..Rule::default()
+            });
+            rules.len() - 1
+        }
+    };
+    change(&mut rules[i]);
+    let r = &rules[i];
+    let says_nothing = !r.float
+        && r.workspace.is_none()
+        && r.monitor.is_none()
+        && r.min_width.is_none()
+        && r.placement.is_none()
+        && !r.no_grab;
+    if says_nothing {
+        rules.remove(i);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //! Edge cases: no rules, plain text in any case and as part of the value, a regex
@@ -348,5 +392,39 @@ mod tests {
             (Some(7), Some(2), Some(940), false)
         );
         assert_eq!(o.matched, vec![Source::User(0), Source::User(2)]);
+    }
+
+    /// DECISIONS D63: the app menu's rules for one program: made, changed, removed once
+    /// they say nothing; another matcher's rule for the same program is left alone.
+    #[test]
+    fn a_programs_own_rule_is_made_changed_and_removed() {
+        let other = Rule {
+            exe: "Discord.exe".into(),
+            title: "Settings".into(),
+            float: true,
+            ..Rule::default()
+        };
+        let mut rules = vec![other.clone()];
+        assert!(!floats_by_rule(&rules, "discord.exe"), "a title's rule is not its own");
+        set_own_rule(&mut rules, "Discord.exe", |r| r.float = true);
+        assert!(floats_by_rule(&rules, "DISCORD.EXE"));
+        set_own_rule(&mut rules, "discord.exe", |r| r.workspace = Some(3));
+        assert_eq!(rules.len(), 2, "the same rule changed");
+        assert_eq!(workspace_by_rule(&rules, "Discord.exe"), Some(3));
+        set_own_rule(&mut rules, "Discord.exe", |r| r.float = false);
+        assert!(
+            !floats_by_rule(&rules, "Discord.exe") && rules.len() == 2,
+            "it still says the workspace"
+        );
+        set_own_rule(&mut rules, "Discord.exe", |r| r.workspace = None);
+        assert_eq!(rules, vec![other], "saying nothing, it goes");
+        // Rules that apply: the made one floats the program.
+        set_own_rule(&mut rules, "Slack.exe", |r| r.float = true);
+        let o = Rules::new(&cfg(false, rules)).apply(&Subject {
+            exe: "slack.exe",
+            class: "x",
+            title: "y",
+        });
+        assert!(o.float);
     }
 }

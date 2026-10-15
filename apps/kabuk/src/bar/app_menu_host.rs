@@ -26,6 +26,8 @@ pub const TEST_OPEN: usize = 1;
 pub const TEST_PIN: usize = 2;
 pub const TEST_CLOSE_WINDOWS: usize = 3;
 pub const TEST_TO_FRONT: usize = 4;
+/// The app's own rule: always floating (on, then off again).
+pub const TEST_FLOAT_RULE: usize = 5;
 
 /// Where an app's menu was asked for: a bar (by index) or Rıhtım's dock.
 #[derive(Clone, Copy, Debug)]
@@ -135,6 +137,16 @@ impl Shared {
         let Some(app) = self.apps.list.get(index).cloned() else {
             return;
         };
+        let exe = program_file(&app.source);
+        let rules = &self.config().rules.user;
+        let workspace = self.wm.as_ref().and_then(|l| {
+            l.view()
+                .windows
+                .into_iter()
+                .find(|w| app.windows.contains(&w.hwnd) && !w.minimized)
+                .map(|w| w.workspace)
+                .filter(|n| *n != kabuk_layout::desk::SCRATCHPAD)
+        });
         let mut subject = Subject {
             name: display_name(&app),
             pinned: app.link.is_some(),
@@ -142,6 +154,14 @@ impl Shared {
             groups: kabuk_win::jumplist::jump_list(&self.app_ids_of(&app), app_menu::MAX_PER_GROUP),
             pictures: Vec::new(),
             app_picture: Some(self.picture_key(&app.icon)).filter(|k| self.gpu.images.contains(*k)),
+            floats: exe
+                .as_deref()
+                .is_some_and(|e| kabuk_core::rules::floats_by_rule(rules, e)),
+            rule_workspace: exe
+                .as_deref()
+                .and_then(|e| kabuk_core::rules::workspace_by_rule(rules, e)),
+            exe,
+            workspace,
         };
         let weak = self.me.clone();
         let window = match Window::input_surface(MENU_CLASS, "", PxRect::default(), move |m| {
@@ -284,6 +304,36 @@ impl Shared {
                     Hwnd(*h).close_async();
                 }
             }
+            Action::FloatRule | Action::WorkspaceRule(_) => {
+                let Some(exe) = program_file(&app.source) else { return };
+                self.edit_own_rule(&exe, |r| match action {
+                    Action::FloatRule => r.float = !r.float,
+                    Action::WorkspaceRule(n) => r.workspace = if r.workspace == Some(n) { None } else { Some(n) },
+                    _ => {}
+                });
+            }
+        }
+    }
+
+    /// Changes the user's own rule for program `exe` in the configuration file (the
+    /// settings' rules page shows it; Kabuk reloads the file and opens its next windows
+    /// by it, DECISIONS D63).
+    fn edit_own_rule(&mut self, exe: &str, change: impl FnOnce(&mut kabuk_core::config::Rule)) {
+        // The file as it is now: a change made a moment ago may not be read back yet.
+        let source = std::fs::read_to_string(&self.config_file).unwrap_or_default();
+        let mut rules = kabuk_core::config::parse(&source)
+            .map(|l| l.config.rules.user)
+            .unwrap_or_else(|_| self.config().rules.user.clone());
+        kabuk_core::rules::set_own_rule(&mut rules, exe, change);
+        let value = serde_json::to_value(&rules).unwrap_or(serde_json::Value::Null);
+        let written = kabuk_core::config::edit::set(&source, "rules.rule", &value)
+            .map_err(|e| e.to_string())
+            .and_then(|text| {
+                kabuk_core::fsutil::write_atomic(&self.config_file, text.as_bytes()).map_err(|e| e.to_string())
+            });
+        match written {
+            Ok(()) => tracing::info!(exe, rules = rules.len(), "app rule saved"),
+            Err(e) => tracing::warn!(exe, error = %e, "app rule not saved"),
         }
     }
 
@@ -313,6 +363,7 @@ impl Shared {
                 self.app_action(index, action);
             }
             TEST_TO_FRONT => self.app_dragged(index, 0),
+            TEST_FLOAT_RULE => self.app_action(index, Action::FloatRule),
             _ => {}
         }
     }
@@ -345,4 +396,11 @@ impl Shared {
             _ => None,
         }
     }
+}
+
+/// The program file's name of an app (rules match it); `None` for one that is not a
+/// program file (a packaged app's id).
+fn program_file(source: &str) -> Option<String> {
+    let name = source.rsplit(['\\', '/']).next()?;
+    name.to_ascii_lowercase().ends_with(".exe").then(|| name.to_string())
 }

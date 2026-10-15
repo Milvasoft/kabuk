@@ -2,7 +2,8 @@
 //! right click): the program's jump list (its pinned entries, its own categories, its
 //! frequent or recent files, its tasks; [`kabuk_core::jumplist`]), then its name (a new
 //! window), pin or unpin, and close its window or all of them, in Windows' order, in the
-//! tray panel's surface (D21, D26). Pure.
+//! tray panel's surface (D21, D26). For a program, its own rules too (DECISIONS D63):
+//! always open floating, always open on the workspace its window is on. Pure.
 
 use kabuk_core::jumplist::{Group, Heading, Launch};
 use kabuk_i18n::I18n;
@@ -25,6 +26,10 @@ pub enum Action {
     Unpin,
     /// Close its one window, or all of them.
     Close,
+    /// Its windows open floating from now on, or no longer (D63).
+    FloatRule,
+    /// Its windows open on this workspace from now on, or no longer.
+    WorkspaceRule(u32),
 }
 
 /// The most entries a group of the jump list shows (Windows' own default is 10).
@@ -52,6 +57,12 @@ pub struct Subject {
     pub pictures: Vec<Option<u64>>,
     /// The app's own picture, for its name's entry (as on Windows' taskbar).
     pub app_picture: Option<u64>,
+    /// Its program's file name (rules match it), and what its own rule says: floating,
+    /// and the workspace; the workspace its window is on now.
+    pub exe: Option<String>,
+    pub floats: bool,
+    pub rule_workspace: Option<u32>,
+    pub workspace: Option<u32>,
 }
 
 /// The side of an entry's picture (DIPs).
@@ -86,18 +97,29 @@ pub fn entries(s: &Subject) -> Vec<(&'static str, String, Action)> {
     } else {
         out.push(("tile", String::new(), Action::Pin));
     }
+    if s.exe.is_some() {
+        out.push(("tile", String::new(), Action::FloatRule));
+        if let Some(n) = s.workspace {
+            out.push(("tile", String::new(), Action::WorkspaceRule(n)));
+        }
+    }
     if s.windows > 0 {
         out.push(("power", String::new(), Action::Close));
     }
     out
 }
 
-fn words(i18n: &I18n, text: &str, action: &Action, windows: usize) -> String {
+fn words(i18n: &I18n, text: &str, action: &Action, s: &Subject) -> String {
+    let n = |n: u32| [("value", kabuk_i18n::Arg::Num(f64::from(n)))];
     match action {
         Action::Pin => i18n.tr("app-pin"),
         Action::Unpin => i18n.tr("app-unpin"),
-        Action::Close if windows > 1 => i18n.tr("app-close-all"),
+        Action::Close if s.windows > 1 => i18n.tr("app-close-all"),
         Action::Close => i18n.tr("app-close"),
+        Action::FloatRule if s.floats => i18n.tr("app-float-rule-off"),
+        Action::FloatRule => i18n.tr("app-float-rule"),
+        Action::WorkspaceRule(w) if s.rule_workspace == Some(*w) => i18n.tr_args("app-ws-rule-off", &n(*w)),
+        Action::WorkspaceRule(w) => i18n.tr_args("app-ws-rule", &n(*w)),
         _ => text.to_string(),
     }
 }
@@ -154,11 +176,7 @@ pub fn view(i18n: &I18n, text_scale: f32, s: &TipStyle, subject: &Subject) -> No
         rows.push(
             Node::row(vec![
                 picture,
-                line(
-                    words(i18n, text, action, subject.windows),
-                    Role::Fg,
-                    s.text * text_scale,
-                ),
+                line(words(i18n, text, action, subject), Role::Fg, s.text * text_scale),
             ])
             .gap(ICON_GAP)
             .align(Align::Center)
@@ -223,6 +241,10 @@ mod tests {
             },
             pictures: Vec::new(),
             app_picture: None,
+            exe: None,
+            floats: false,
+            rule_workspace: None,
+            workspace: None,
         }
     }
 
@@ -281,6 +303,10 @@ mod tests {
             // A favicon for the first site; the rest show a plain icon.
             pictures: vec![Some(77), None, None, None],
             app_picture: Some(99),
+            exe: None,
+            floats: false,
+            rule_workspace: None,
+            workspace: None,
         };
         let t = texts(&view(&i18n, 1.0, &TIP, &s));
         let expected = [
@@ -338,6 +364,44 @@ mod tests {
             assert_eq!(t[0], i18n.tr("app-recent"));
             assert!(t.contains(&"Visual Studio Code".to_string()));
             assert!(t.contains(&i18n.tr("app-close-all")));
+        }
+    }
+
+    /// DECISIONS D63: a program's menu offers its own rules: floating and its window's
+    /// workspace, each said as it is now; an app with no program file has none.
+    #[test]
+    fn a_programs_menu_offers_its_own_rules() {
+        let i18n = I18n::new(Lang::En);
+        let mut s = subject(false, 1, 0);
+        let t = texts(&view(&i18n, 1.0, &TIP, &s));
+        assert!(!t.contains(&i18n.tr("app-float-rule")), "no program, no rules");
+        s.exe = Some("Code.exe".into());
+        s.workspace = Some(3);
+        let t = texts(&view(&i18n, 1.0, &TIP, &s));
+        let ws = |key: &str| i18n.tr_args(key, &[("value", kabuk_i18n::Arg::Num(3.0))]);
+        assert!(
+            t.contains(&i18n.tr("app-float-rule")) && t.contains(&ws("app-ws-rule")),
+            "{t:?}"
+        );
+        let acts: Vec<Action> = entries(&s).into_iter().map(|(_, _, a)| a).collect();
+        assert!(acts.contains(&Action::FloatRule) && acts.contains(&Action::WorkspaceRule(3)));
+        s.floats = true;
+        s.rule_workspace = Some(3);
+        let t = texts(&view(&i18n, 1.0, &TIP, &s));
+        assert!(
+            t.contains(&i18n.tr("app-float-rule-off")) && t.contains(&ws("app-ws-rule-off")),
+            "{t:?}"
+        );
+        // Not on a workspace (minimised): only floating.
+        s.workspace = None;
+        assert!(!entries(&s)
+            .iter()
+            .any(|(_, _, a)| matches!(a, Action::WorkspaceRule(_))));
+        for lang in [Lang::Tr, Lang::En] {
+            let i = I18n::new(lang);
+            for key in ["app-float-rule", "app-float-rule-off", "app-ws-rule", "app-ws-rule-off"] {
+                assert_ne!(i.tr(key), key, "{key} {lang:?}");
+            }
         }
     }
 }

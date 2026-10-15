@@ -820,12 +820,13 @@ fn an_apps_icon_shows_its_window_and_minimizes_it_when_in_front() {
 
 /// DECISIONS D45 (asked for by the user: Windows' taskbar on a right click): an app's menu opens
 /// and closes; pin keeps the program in Kabuk's own pins, dragged to the front it stays
-/// first, unpin takes it off again, and "close" closes its window.
+/// first, unpin takes it off again, and "close" closes its window. Its own rule (D63):
+/// always floating is written to the configuration file, and taken out again.
 #[test]
 fn an_apps_menu_pins_moves_unpins_and_closes() {
     use kabuk::bar::manager::{
-        APP_MENU_CLOSE, APP_MENU_CLOSE_WINDOWS, APP_MENU_OPEN, APP_MENU_PIN, APP_MENU_TO_FRONT, CONTROL_CLASS,
-        MSG_TEST_APP_MENU,
+        APP_MENU_CLOSE, APP_MENU_CLOSE_WINDOWS, APP_MENU_FLOAT_RULE, APP_MENU_OPEN, APP_MENU_PIN, APP_MENU_TO_FRONT,
+        CONTROL_CLASS, MSG_TEST_APP_MENU,
     };
     use kabuk_win::msgloop::{post_message, Msg};
     let before = work_areas();
@@ -881,9 +882,10 @@ fn an_apps_menu_pins_moves_unpins_and_closes() {
         wait_until(SETTLE, || menu().is_some()).is_some(),
         "the menu did not open"
     );
-    // Not pinned, one window: a new window, pin, close.
+    // Not pinned, one window on workspace 1: a new window, pin, always floating, always
+    // on workspace 1, close.
     assert!(wait_until(SETTLE, || sandbox.log_lines("app menu opened") == 1).is_some());
-    assert_eq!(sandbox.log_lines("entries=3"), 1);
+    assert_eq!(sandbox.log_lines("entries=5"), 1);
     post(APP_MENU_CLOSE);
     assert!(wait_until(SETTLE, || menu().is_none()).is_some(), "the menu stayed");
 
@@ -905,6 +907,20 @@ fn an_apps_menu_pins_moves_unpins_and_closes() {
         "not unpinned: {:?}",
         pins()
     );
+    // Always floating: the program's own rule in the file, then gone again.
+    let floats = || {
+        let text = std::fs::read_to_string(sandbox.config_file()).unwrap_or_default();
+        text.contains("[[rules.rule]]") && text.contains("kabuk-testapp.exe") && text.contains("float = true")
+    };
+    post(APP_MENU_FLOAT_RULE);
+    assert!(
+        wait_until(SETTLE, floats).is_some(),
+        "{}",
+        std::fs::read_to_string(sandbox.config_file()).unwrap_or_default()
+    );
+    post(APP_MENU_FLOAT_RULE);
+    assert!(wait_until(SETTLE, || !floats()).is_some(), "the rule stayed");
+    assert_eq!(sandbox.log_lines("app rule saved"), 2);
     post(APP_MENU_CLOSE_WINDOWS);
     assert!(wait_until(SETTLE, || !w.hwnd.exists()).is_some(), "the window stayed");
 
