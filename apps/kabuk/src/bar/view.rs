@@ -118,7 +118,7 @@ pub struct BarData {
     pub tray: Vec<TrayIcon>,
     /// Tray icons left for the overflow panel (DECISIONS D26).
     pub tray_more: usize,
-    /// Pinned and open apps (DECISIONS D25; primary monitor only).
+    /// Pinned and open apps (DECISIONS D25), on every monitor's bar (D53).
     pub apps: Vec<AppIcon>,
     /// Notices in Windows' notification centre; `None` when it cannot be read (D32).
     pub notif_count: Option<u32>,
@@ -705,7 +705,7 @@ pub const APP_HOVER: f32 = 1.18;
 
 fn apps(d: &BarData, s: &Style) -> Option<Node> {
     // In Rıhtım the apps live in the dock (DECISIONS D17).
-    if !d.primary || !d.modules.taskbar || d.apps.is_empty() || crate::bar::dock::shown(s.look) {
+    if !d.modules.taskbar || d.apps.is_empty() || crate::bar::dock::shown(s.look) {
         return None;
     }
     let icons = d
@@ -1368,23 +1368,21 @@ mod tests {
             .hits
             .iter()
             .any(|(_, h)| h.module == hit::APP));
-        // Not on a secondary monitor, not when the module is off.
-        for other in [
-            BarData {
-                primary: false,
-                ..d.clone()
+        // On a secondary monitor too (D53, chosen by the user: every bar lists every app).
+        let secondary = BarData {
+            primary: false,
+            ..d.clone()
+        };
+        assert!(render(&secondary, &tr).hits.iter().any(|(_, h)| h.module == hit::APP));
+        // Not when the module is off.
+        let off = BarData {
+            modules: Modules {
+                taskbar: false,
+                ..Modules::default()
             },
-            BarData {
-                modules: Modules {
-                    taskbar: false,
-                    ..Modules::default()
-                },
-                ..d.clone()
-            },
-        ] {
-            let l = render(&other, &tr);
-            assert!(!l.hits.iter().any(|(_, h)| h.module == hit::APP), "{:?}", other.edge);
-        }
+            ..d.clone()
+        };
+        assert!(!render(&off, &tr).hits.iter().any(|(_, h)| h.module == hit::APP));
     }
 
     /// A click on the layout indicator switches the workspace's layout; it shows which one.

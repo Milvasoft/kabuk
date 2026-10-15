@@ -47,7 +47,7 @@ Target platform: Windows 11 22H2 and later. Windows 10 22H2 is supported on a be
   | `power` | Power menu | Lock, sleep, restart, shut down, sign out |
 
 - The workspace indicator is always present (not in the module list); clicking switches to that workspace, occupied workspaces are marked.
-- The bar on the second and later monitors is minimal: workspaces, layout indicator, clock, CPU and RAM. These modules also follow the global module setting.
+- The bar on the second and later monitors is minimal: workspaces, layout indicator, apps, clock, CPU and RAM. These modules also follow the global module setting. Every monitor's bar lists every app, as Windows' "show apps on all taskbars" (chosen by the user on 2026-10-15; DECISIONS D53).
 - Auto-hide: when enabled the bar reserves no space and waits off its edge with 2 px left on screen; it slides in when the mouse reaches that edge and slides off 0.6 s after the mouse left it (at once without full animations).
 - Background: solid (default, the desk colour over the bar's whole edge, as on the design's black desk), blur (the wallpaper blurred and tinted, as Windows' taskbar) or off (requested by the user on 2026-10-13; DECISIONS D28).
 - Height: the bar's thickness can be set (24-72 px; default the look's own; DECISIONS D29).

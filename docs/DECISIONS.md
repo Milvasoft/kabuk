@@ -8,6 +8,9 @@ No open decisions (the user decided D39, D43, D44 and the still pictures' drift 
 
 ## Decided and proposed
 
+### D53 · Every bar lists every app — Decided by the user (2026-10-15)
+Found using Kabuk: Monitor 2's bar showed no apps, so the windows there were reached only from Monitor 1's bar. Asked between "each bar its own monitor's apps", "every bar every app" and "minimal as before", the user chose every bar every app (Windows' "Show my taskbar apps on: all taskbars"). A window minimised to its icon goes to the icon on the bar of its own monitor.
+
 ### D52 · An app's right-click menu is its Windows jump list — Decided by the user (2026-10-14)
 The user asked for the same menu as Windows' taskbar. Windows gives other programs no call for another program's jump list, so Kabuk reads the files Windows keeps it in, named by the app id's CRC-64 under `%APPDATA%\Microsoft\Windows\Recent`: the program's own list (`CustomDestinations`: its categories, such as Chrome's "Most visited" and "Recently closed", and its tasks, such as "New window") and Windows' record (`AutomaticDestinations`, whose `DestList` stream marks the pinned entries). Each link is loaded with Windows' own `ShellLink` (title, program, arguments); frequent and recent files come from the documented `IApplicationDocumentLists`. The formats are undocumented but unchanged since Windows 7 (checked on this machine against Chrome's and File Explorer's lists); a file not understood shows only what the documented calls give. Read only: nothing is written into Windows' lists.
 

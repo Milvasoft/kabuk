@@ -2097,20 +2097,34 @@ impl Shared {
     fn publish_app_icons(&mut self) {
         let Some(link) = &self.wm else { return };
         let primary = self.bars.iter().position(|b| b.primary);
+        // Each window's genie goes to its app's icon on the bar of its own monitor (D53).
+        let devices: std::collections::HashMap<u64, String> =
+            link.view().windows.into_iter().map(|w| (w.hwnd, w.device)).collect();
+        let bar_of = |h: u64| {
+            devices
+                .get(&h)
+                .and_then(|d| self.bars.iter().position(|b| &b.monitor.device == d))
+                .or(primary)
+        };
         let mut icons = Vec::new();
         for (i, app) in self.apps.list.iter().enumerate() {
             let v = u32::try_from(i).unwrap_or(u32::MAX);
-            let rect = primary
-                .and_then(|b| self.hit_rect(b, view::hit::APP, v))
-                .or_else(|| self.dock_hit_rect(v));
-            if let Some(r) = rect {
-                let r = kabuk_core::state::Rect {
-                    left: r.x,
-                    top: r.y,
-                    right: r.x + r.w,
-                    bottom: r.y + r.h,
-                };
-                icons.extend(app.windows.iter().map(|h| (*h, r)));
+            for h in &app.windows {
+                let rect = bar_of(*h)
+                    .and_then(|b| self.hit_rect(b, view::hit::APP, v))
+                    .or_else(|| primary.and_then(|b| self.hit_rect(b, view::hit::APP, v)))
+                    .or_else(|| self.dock_hit_rect(v));
+                if let Some(r) = rect {
+                    icons.push((
+                        *h,
+                        kabuk_core::state::Rect {
+                            left: r.x,
+                            top: r.y,
+                            right: r.x + r.w,
+                            bottom: r.y + r.h,
+                        },
+                    ));
+                }
             }
         }
         if icons != self.icons_sent {
@@ -2831,7 +2845,7 @@ impl Shared {
             } else {
                 0
             },
-            apps: if primary { self.app_icons() } else { Vec::new() },
+            apps: self.app_icons(),
             notif_count: if primary { self.notif_count } else { None },
         }
     }
