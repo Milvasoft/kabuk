@@ -359,6 +359,16 @@ Reported or asked for by the user on 2026-10-14, in this order of work (bugs fir
 - Checked (2026-10-15, night): fmt, clippy, every unit test, the settings page test, the design checks; the integration run passes but for the screen saver test, which Windows refuses at night with 0x80070149 (it passed in a later run). Idle, with the user away: the shell 27 MB and 47 ms of CPU in 2 minutes (0.04 % of one core); the animated wallpaper 30 fps at 2.9 % of one core on two monitors, paused while covered.
 - Not done yet: the volume keys and `Win+Shift+L` tried by the user's hand (tests never press keys).
 
+**Using it on the user's desktop (2026-10-15)**
+- Launcher: a word typed whole beats letters scattered over a long title ("chro" found bookmarks before Google Chrome); apps show their own icons (loaded on a worker); an empty launcher lists open windows, recent runs, then the bar's pins.
+- Overview: a layout bug hid everything inside a layer's rows (the window boxes' icons and titles never showed); the overview holds the bar's workspaces, numbered, the shown one framed on every monitor.
+- Bar: a window's preview has a × that closes it; a middle or Shift click starts another window; a click on an app with several windows goes to the next; no preview pops up after a click; a minimised window Windows keeps in front is brought back, not minimised again; every monitor's bar lists every app (D53); the volume panel chooses the output device (D54).
+- Volume keys: the laptop's Fn keys come injected by keyboard software; they are taken now (tried by the user: one indicator).
+- A shell that lost the desk leaves by itself (a test's shell had fought the user's over the tray all night).
+- The genie: the window was minimised a compositor frame before its picture was on screen, so for one frame what is behind showed (found with `flash_probe`, which records every composed frame: 5 of 6 minimises); fixed, 0 of the following.
+- Settings: the mode's hint says what the chosen mode does.
+- Checked: fmt, clippy, every unit test, the settings page and design checks, the integration run but `focus_toward_brings_the_neighbour_to_the_front`, which failed once while the user was using the machine (Windows refuses a foreground change then) and passed again alone.
+
 **Done criteria**
 - [ ] Each bug is first caught by a failing test, then fixed ✔; tried on the user's desktop (waits for the user).
 - [ ] Every item works end to end (settings, both languages, live), with its tests ✔, and was tried by hand with the user (waits for the user).
