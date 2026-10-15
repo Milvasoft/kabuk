@@ -225,6 +225,62 @@ fn focus_float_and_layout_act_on_the_focused_monitor() {
     assert_eq!(sandbox.restore().0, 0);
 }
 
+/// DECISIONS D65: `query windows` tells each window's program and what opens it again;
+/// a layout profile opened by name moves the program's open window to its workspace and
+/// starts the program again for its second place, whose window goes there as it comes.
+#[test]
+fn a_layout_profile_moves_open_windows_and_starts_the_rest() {
+    let sandbox = Sandbox::new();
+    let exe = testapp_exe();
+    let main = kabuk_win::shell::monitors()
+        .into_iter()
+        .find(|m| m.primary)
+        .unwrap()
+        .number;
+    let profile = format!(
+        "[[profile]]\nname = \"Test layout\"\n\
+         [[profile.window]]\nexe = \"kabuk-testapp.exe\"\nopen = '{0}'\nmonitor = {main}\nworkspace = 3\n\
+         [[profile.window]]\nexe = \"kabuk-testapp.exe\"\nopen = '{0}'\nmonitor = {main}\nworkspace = 4\n",
+        exe.display()
+    );
+    let _shell = Shell::start_with(&sandbox, &profile);
+    let a = TestWindow::open(&["--title", &title("profile-a")]);
+    managed(&sandbox, &a);
+    let entry = window_entry(&sandbox, &a);
+    assert_eq!(entry["exe"], "kabuk-testapp.exe", "{entry}");
+    assert!(
+        entry["open"]
+            .as_str()
+            .is_some_and(|o| o.to_lowercase().ends_with("kabuk-testapp.exe")),
+        "{entry}"
+    );
+
+    ok(&sandbox, &["profile", "test", "layout"]);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("layout profile opened") == 1).is_some());
+    assert!(wait_until(SETTLE, || window_entry(&sandbox, &a)["workspace"] == 3).is_some());
+    // The second place: the program started again, its window put there.
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox
+        .log_lines("window placed by a layout profile")
+        == 1)
+    .is_some());
+    let windows = ok(&sandbox, &["query", "windows"]).json();
+    let started = windows
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["hwnd"] != a.hwnd.0 && e["exe"] == "kabuk-testapp.exe")
+        .cloned()
+        .expect("the started window");
+    assert_eq!(started["workspace"], 4, "{started}");
+    if let Some(h) = started["hwnd"].as_u64() {
+        kabuk_win::window::Hwnd(h).close_async();
+    }
+    let unknown = msg(&sandbox, &["profile", "nope"]);
+    assert_eq!(unknown.code, 0, "a profile that is not there is said in the log");
+    assert!(wait_until(SETTLE, || sandbox.log_lines("no such layout profile") == 1).is_some());
+    assert_eq!(sandbox.restore().0, 0);
+}
+
 #[test]
 fn reload_and_launcher_reach_the_bar_and_the_window_manager() {
     let sandbox = Sandbox::new();

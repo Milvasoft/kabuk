@@ -30,6 +30,33 @@ pub struct Config {
     pub system_theme: SystemTheme,
     pub hot_corners: HotCorners,
     pub dropdown: Dropdown,
+    /// Layout profiles (DECISIONS D65), `[[profile]]`.
+    #[serde(rename = "profile", skip_serializing_if = "Vec::is_empty")]
+    pub profiles: Vec<Profile>,
+}
+
+/// A layout profile (`kabuk_core::profile`): programs over monitors and workspaces.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Profile {
+    pub name: String,
+    #[serde(rename = "window", skip_serializing_if = "Vec::is_empty")]
+    pub windows: Vec<ProfileWindow>,
+}
+
+/// A program's place in a layout profile.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProfileWindow {
+    /// Its program's file name, as rules match it.
+    pub exe: String,
+    /// What starts it (its file, or a packaged app's `shell:AppsFolder\…`).
+    pub open: String,
+    /// Windows' number of the monitor ("Monitor 1"), and the workspace (1-based).
+    pub monitor: u32,
+    pub workspace: u32,
+    #[serde(skip_serializing_if = "is_false")]
+    pub floating: bool,
 }
 
 /// `[dropdown]` (DECISIONS D62): the terminal that drops down from the top of the monitor.
@@ -117,6 +144,7 @@ impl Default for Config {
             system_theme: SystemTheme::default(),
             hot_corners: HotCorners::default(),
             dropdown: Dropdown::default(),
+            profiles: Vec::new(),
         }
     }
 }

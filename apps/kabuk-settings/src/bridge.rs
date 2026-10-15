@@ -34,6 +34,10 @@
 //!   `{"op":"theme","done":"exported","path":…}`, the import a fresh `state` with
 //!   `"theme_imported"` (the theme's name), either `{"op":"theme","done":"cancelled"}`
 //!   or `{"op":"theme","done":"failed"}`.
+//! - `{"op":"profile-save","name":…}` → a fresh `state` with the layout profile `name`
+//!   made of the windows the running shell manages (DECISIONS D65; a test passes
+//!   `"windows"` as `query windows` gives them), or `{"op":"profile","done":"empty"}`;
+//!   `{"op":"profile-open","name":…}` → `{"op":"profile","done":"opened"|"not-running"}`.
 //! - `gen-…`: the Create tab ([`crate::create`]).
 
 use std::path::PathBuf;
@@ -143,6 +147,20 @@ impl Bridge {
             }
             "app-grid-reset" => self.arrange_app_grid(Arrangement::reset_order),
             "theme-export" => self.export_theme(m.get("path").and_then(Value::as_str)),
+            "profile-save" => {
+                let name = m.get("name").and_then(Value::as_str)?;
+                let windows = m.get("windows").cloned().or_else(|| self.ask(&["query", "windows"]));
+                self.save_profile(name, windows.as_ref())
+            }
+            "profile-open" => {
+                let name = m.get("name").and_then(Value::as_str)?;
+                let done = if self.ask(&["profile", name]).is_some() || self.ask(&["query", "state"]).is_some() {
+                    "opened"
+                } else {
+                    "not-running"
+                };
+                json!({ "op": "profile", "done": done })
+            }
             "theme-import" => self.import_theme(m.get("path").and_then(Value::as_str)),
             "capture-keys" => self.capture_keys(m.get("on").and_then(Value::as_bool).unwrap_or(false)),
             "pick" => {
@@ -257,6 +275,38 @@ impl Bridge {
                 json!({ "op": "theme", "done": "failed" })
             }
         }
+    }
+
+    /// Saves layout profile `name` (DECISIONS D65) from `windows` (`query windows`' answer):
+    /// it replaces a profile of that name.
+    fn save_profile(&self, name: &str, windows: Option<&Value>) -> Value {
+        use kabuk_core::profile::{capture, Seen};
+        let seen: Vec<Seen> = windows
+            .and_then(Value::as_array)
+            .map(|list| {
+                list.iter()
+                    .filter_map(|w| {
+                        Some(Seen {
+                            hwnd: w["hwnd"].as_u64()?,
+                            exe: w["exe"].as_str()?.to_string(),
+                            open: w["open"].as_str()?.to_string(),
+                            monitor: u32::try_from(w["monitor"].as_u64()?).ok()?,
+                            workspace: u32::try_from(w["workspace"].as_u64()?).ok()?,
+                            floating: w["floating"].as_bool().unwrap_or(false),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let profile = capture(name, &seen);
+        if profile.name.is_empty() || profile.windows.is_empty() {
+            return json!({ "op": "profile", "done": "empty" });
+        }
+        let mut profiles = self.config().profiles;
+        profiles.retain(|p| !p.name.eq_ignore_ascii_case(&profile.name));
+        profiles.push(profile);
+        let value = serde_json::to_value(&profiles).unwrap_or(Value::Null);
+        self.set("profile", &value)
     }
 
     /// The app grid's arrangement in the state folder; none without its file.
@@ -762,5 +812,47 @@ command = \"evil.exe\"
         let refused = reply(&b, json!({ "op": "theme-import", "path": junk.display().to_string() }));
         assert_eq!(refused["done"], "failed");
         assert_eq!(std::fs::read_to_string(to.path().join("kabuk.toml")).unwrap(), text);
+    }
+
+    /// DECISIONS D65: a layout profile is saved from the shell's windows (here as `query
+    /// windows` gives them) and replaces one of its name; no window saves nothing.
+    #[test]
+    fn a_layout_profile_is_saved_from_the_windows() {
+        let dir = tempfile::tempdir().unwrap();
+        let b = bridge(
+            &dir,
+            Some(
+                "schema = 1
+",
+            ),
+        );
+        let windows = json!([
+            { "hwnd": 1, "exe": "Code.exe", "open": r"C:\Code\Code.exe", "monitor": 1, "workspace": 2, "floating": false },
+            { "hwnd": 2, "exe": "Slack.exe", "open": r"shell:AppsFolder\Slack", "monitor": 2, "workspace": 1, "floating": true },
+        ]);
+        let state = reply(
+            &b,
+            json!({ "op": "profile-save", "name": "Kodlama", "windows": windows }),
+        );
+        assert_eq!(state["op"], "state", "{state}");
+        let profiles = &state["config"]["profile"];
+        assert_eq!(profiles[0]["name"], "Kodlama");
+        assert_eq!(profiles[0]["window"].as_array().map(Vec::len), Some(2));
+        // Saved again: replaced, not added.
+        let state = reply(
+            &b,
+            json!({ "op": "profile-save", "name": "kodlama", "windows": [windows[0].clone()] }),
+        );
+        assert_eq!(state["config"]["profile"].as_array().map(Vec::len), Some(1));
+        assert_eq!(
+            state["config"]["profile"][0]["window"].as_array().map(Vec::len),
+            Some(1)
+        );
+        let empty = reply(&b, json!({ "op": "profile-save", "name": "Toplanti", "windows": [] }));
+        assert_eq!(empty["done"], "empty");
+        let text = std::fs::read_to_string(dir.path().join("kabuk.toml")).unwrap();
+        let saved = config::parse(&text).expect("a valid file").config.profiles;
+        assert_eq!(saved.len(), 1, "{text}");
+        assert_eq!((saved[0].windows[0].monitor, saved[0].windows[0].workspace), (1, 2));
     }
 }

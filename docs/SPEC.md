@@ -88,6 +88,7 @@ Target platform: Windows 11 22H2 and later. Windows 10 22H2 is supported on a be
 ### 2.5 Launcher
 
 - Default shortcut `Win+R`. Depending on the look it opens centred (Ada, Devre, Rıhtım, Etkinlik), full-width under the bar (Çizgi), beside the rail (Ray) or from the bottom like fzf (Konsol).
+- Layout profiles (requested by the user on 2026-10-15; DECISIONS D65): the windows open now saved under a name (Settings › Windows), opened again in one go from the settings, the launcher or `kabuk msg profile <name>`: open programs go to their places, the rest start and their windows go there.
 - Sources: open windows on all workspaces (selecting one switches to that workspace and focuses it; stands in for Alt+Tab), installed applications (Start menu shortcuts and Store apps), recent files, files and folders in indexed folders, browser bookmarks, system commands (lock, sleep, start screen saver, restart, shut down), calculator (`12*8` → result, Enter copies to the clipboard).
 - Fuzzy search; matched letters are highlighted. Turkish case handling works correctly: searching "EKRANI" finds "Ekranı kilitle" (Lock screen), and the "ı/I" and "i/İ" distinction is preserved.
 - Keyboard: up/down selects, Enter opens, Esc closes. Clicking outside closes it.

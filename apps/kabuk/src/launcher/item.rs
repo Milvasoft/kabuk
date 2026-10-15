@@ -95,6 +95,8 @@ pub enum Target {
     Command(SystemCommand),
     /// Put on the clipboard (the calculator's result).
     Copy(String),
+    /// A layout profile opens (DECISIONS D65).
+    Profile(String),
 }
 
 impl Target {
@@ -104,6 +106,7 @@ impl Target {
         match self {
             Target::Shell(s) => Some(s.clone()),
             Target::Command(c) => Some(format!("command:{c:?}")),
+            Target::Profile(name) => Some(format!("profile:{name}")),
             Target::Window(_) | Target::Copy(_) => None,
         }
     }

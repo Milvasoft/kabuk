@@ -412,7 +412,18 @@
       ${tgl("windows.follow_look", t("setFollowLook"), t("setFollowLookH"))}
       ${rowFor("windows.minimize_effect", t("setMinimize"), t("setMinimizeH"), segFor("windows.minimize_effect", t("setMinimize"), [["genie", t("setMinimizeGenie")], ["windows", t("setMinimizeWindows")]]))}</div>
       ${dropdownGroup()}
+      ${profilesGroup()}
       ${hotCornersGroup()}`;
+  }
+
+  // Layout profiles (DECISIONS D65): programs over monitors and workspaces, saved from the
+  // windows open now and opened again in one go.
+  function profilesGroup() {
+    const list = cfg().profile || [];
+    const rows = list.map((p, i) => row(escapeHtml(p.name), tv("pfCount", (p.window || []).length), `<span style="display:flex;gap:10px"><button type="button" class="linkish" data-profile-open="${i}">${t("pfOpen")}</button><button type="button" class="linkish" data-profile-drop="${i}">${t("setRemove")}</button></span>`)).join("");
+    return `<div class="set-grp"><span class="gl">${t("pf")}. ${t("pfH")}</span>${rows || `<div class="set-row"><span>${t("pfNone")}</span></div>`}
+      <div style="display:flex;gap:8px;align-items:center"><span class="num"><input type="text" id="profile-name" style="width:200px" placeholder="${t("pfNamePh")}" aria-label="${t("pfName")}"></span><button class="set-btn ghost" type="button" data-profile-save>${t("pfSave")}</button></div>
+      ${ui.profileMsg ? `<div class="note" role="status">${escapeHtml(ui.profileMsg)}</div>` : ""}</div>`;
   }
 
   // The drop-down terminal (DECISIONS D62): its program and how tall it drops.
@@ -660,6 +671,13 @@
     }
     if (on("[data-genstop]")) { post({ op: "gen-cancel" }); return; }
     if (on("[data-genapply]")) { post({ op: "gen-apply" }); return; }
+    if ((el = on("[data-profile-save]"))) {
+      const name = (document.getElementById("profile-name") || {}).value || "";
+      if (!name.trim()) { ui.profileMsg = t("pfNameMissing"); render(); return; }
+      ui.profileMsg = ""; post({ op: "profile-save", name: name.trim() }); return;
+    }
+    if ((el = on("[data-profile-open]"))) { const p = (cfg().profile || [])[Number(el.dataset.profileOpen)]; if (p) post({ op: "profile-open", name: p.name }); return; }
+    if ((el = on("[data-profile-drop]"))) { const i = Number(el.dataset.profileDrop); set("profile", (cfg().profile || []).filter((_, j) => j !== i)); return; }
     if ((el = on("[data-theme-file]"))) { ui.themeMsg = ""; post({ op: "theme-" + el.dataset.themeFile }); return; }
     if ((el = on("[data-grid-show]"))) { post({ op: "app-grid-show", open: el.dataset.gridShow }); return; }
     if ((el = on("[data-grid-reset]"))) { post({ op: "app-grid-reset" }); return; }
@@ -800,6 +818,10 @@
       case "gallery-preview":
         ui.previews[m.key] = m.url;
         document.querySelectorAll("img[data-gprev]").forEach((img) => { if (img.dataset.gprev === m.key) img.src = m.url; });
+        break;
+      case "profile":
+        ui.profileMsg = m.done === "empty" ? t("pfEmpty") : m.done === "not-running" ? t("pfNotRunning") : t("pfOpened");
+        render();
         break;
       case "theme":
         ui.themeMsg = m.done === "exported" ? tv("thExported", m.path) : m.done === "failed" ? t("thFailed") : "";

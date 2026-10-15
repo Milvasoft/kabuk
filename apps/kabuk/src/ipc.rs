@@ -99,6 +99,7 @@ fn handle(line: &str, t: &Targets) -> Reply {
         Request::Overview => to_bar(MSG_OPEN_OVERVIEW),
         Request::Saver => to_bar(MSG_START_SAVER),
         Request::AppGrid => to_bar(MSG_OPEN_APP_GRID),
+        Request::Profile(name) => to_wm(Command::OpenProfile(name)),
         Request::Query(kind) => Response::with(query(kind, t)),
         Request::Restore => {
             let event = t.instance.emergency_event();
@@ -154,11 +155,19 @@ fn query(kind: QueryKind, t: &Targets) -> Value {
                 .iter()
                 .map(|w| {
                     let h = Hwnd(w.hwnd);
+                    let path = h
+                        .pid()
+                        .and_then(|pid| kabuk_win::process::Process::open(pid).ok())
+                        .and_then(|p| p.image_path());
                     json!({
                         "hwnd": w.hwnd,
                         "title": h.title(),
                         "class": h.class_name(),
                         "pid": h.pid(),
+                        "exe": path.as_deref().and_then(|p| p.rsplit(['\\', '/']).next()),
+                        // What opens the program again: a packaged app by its id, as its
+                        // file under WindowsApps cannot be started (layout profiles, D65).
+                        "open": open_target(path.as_deref(), h),
                         "device": w.device,
                         "monitor": view.monitors.iter().find(|m| m.device == w.device).map(|m| m.number),
                         "workspace": w.workspace,
@@ -190,4 +199,14 @@ fn query(kind: QueryKind, t: &Targets) -> Value {
                 .collect(),
         ),
     }
+}
+
+/// What opens a window's program again: its file, or for a packaged app (its file under
+/// `WindowsApps`) `shell:AppsFolder\<its app id>`.
+fn open_target(path: Option<&str>, h: Hwnd) -> Option<String> {
+    let path = path?;
+    if path.to_ascii_lowercase().contains("\\windowsapps\\") {
+        return kabuk_win::shellitems::window_app_id(h).map(|id| format!("shell:AppsFolder\\{id}"));
+    }
+    Some(path.to_string())
 }

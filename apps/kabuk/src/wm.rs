@@ -217,6 +217,9 @@ pub enum Command {
     Grab(Order),
     /// A click on the bar minimises the app's front window.
     Minimize(u64),
+    /// `kabuk msg profile <name>`, the launcher or the settings: a layout profile opens
+    /// (DECISIONS D65).
+    OpenProfile(String),
     /// Where each window's app icon is on the bar (screen pixels), for the genie.
     AppIcons(Vec<(u64, state::Rect)>),
     /// The mouse is on an app's icon: a genie may come soon (its renderer is made ahead).
@@ -439,6 +442,9 @@ struct Wm {
     /// its program was started while its window has not come yet.
     dropdown: Option<u64>,
     dropdown_wait: Option<Instant>,
+    /// Programs a layout profile started, waiting for their windows: the program, where
+    /// its window goes, and since when (D65).
+    profile_wait: Vec<(kabuk_core::config::ProfileWindow, Instant)>,
 }
 
 fn run(
@@ -485,6 +491,7 @@ fn run(
         unmaximizing: None,
         dropdown: None,
         dropdown_wait: None,
+        profile_wait: Vec::new(),
     }));
     let weak = Rc::downgrade(&wm);
     let own = Rc::new(std::cell::Cell::new(None));
@@ -876,6 +883,7 @@ impl Wm {
             }
             Command::Grab(order) => self.grab(order),
             Command::Minimize(hwnd) => self.minimize(hwnd),
+            Command::OpenProfile(name) => self.open_profile(&name),
             Command::AppIcons(icons) => {
                 tracing::debug!(icons = icons.len(), "app icons known");
                 self.icons = icons.into_iter().collect();
@@ -1111,6 +1119,76 @@ impl Wm {
         tracing::info!(hwnd = id, monitor = %m.device, ?at, "dropdown shown");
     }
 
+    /// Opens layout profile `name` (DECISIONS D65): each program open goes to its place,
+    /// the rest start and their windows go there as they come.
+    fn open_profile(&mut self, name: &str) {
+        use kabuk_core::profile::{plan, Seen, Step};
+        let Some(p) = self
+            .config
+            .current()
+            .profiles
+            .iter()
+            .find(|p| p.name.eq_ignore_ascii_case(name))
+            .cloned()
+        else {
+            tracing::warn!(name, "no such layout profile");
+            return;
+        };
+        let open: Vec<Seen> = self
+            .desk
+            .all_windows()
+            .into_iter()
+            .filter_map(|id| {
+                let exe = Hwnd(id)
+                    .pid()
+                    .and_then(|pid| kabuk_win::process::Process::open(pid).ok())
+                    .and_then(|p| p.image_name())?;
+                Some(Seen {
+                    hwnd: id,
+                    exe,
+                    open: String::new(),
+                    monitor: 0,
+                    workspace: 0,
+                    floating: false,
+                })
+            })
+            .collect();
+        let monitors = kabuk_win::shell::monitors();
+        let (mut moved, mut started) = (0, 0);
+        for step in plan(&p, &open) {
+            match step {
+                Step::Move {
+                    hwnd,
+                    monitor,
+                    workspace,
+                } => {
+                    let Some(m) = monitors
+                        .iter()
+                        .find(|m| m.number == monitor)
+                        .or_else(|| monitors.iter().find(|m| m.primary))
+                    else {
+                        continue;
+                    };
+                    let effects = self.desk.move_to_place(hwnd, &m.device, workspace);
+                    self.apply(effects);
+                    moved += 1;
+                }
+                Step::Launch(w) => {
+                    let target = w.open.clone();
+                    std::thread::spawn(move || {
+                        kabuk_win::system::com_init();
+                        if let Err(e) = kabuk_win::shellitems::open(&target) {
+                            tracing::warn!(%target, error = %e, "layout profile program not started");
+                        }
+                    });
+                    self.profile_wait.push((w, Instant::now()));
+                    started += 1;
+                }
+            }
+        }
+        tracing::info!(name = %p.name, moved, started, "layout profile opened");
+    }
+
     /// Where workspace actions apply: the focused window's monitor, else the primary one.
     fn action_monitor(&self) -> Option<String> {
         self.desk.focused_monitor().or_else(|| {
@@ -1334,7 +1412,7 @@ impl Wm {
             .and_then(|p| p.image_name())
             .unwrap_or_default();
         let title = hwnd.title();
-        let rule = self.rules.apply(&rules::Subject {
+        let mut rule = self.rules.apply(&rules::Subject {
             exe: &exe,
             class: &facts.class,
             title: &title,
@@ -1342,6 +1420,20 @@ impl Wm {
         if rule.ignore {
             tracing::info!(hwnd = hwnd.0, exe = %exe, rules = ?rule.matched, "window ignored by a rule");
             return;
+        }
+        // A window a layout profile started: its place there (D65).
+        self.profile_wait
+            .retain(|(_, since)| since.elapsed() < kabuk_core::profile::WAIT);
+        if let Some(i) = self
+            .profile_wait
+            .iter()
+            .position(|(w, _)| w.exe.eq_ignore_ascii_case(&exe))
+        {
+            let (w, _) = self.profile_wait.remove(i);
+            rule.monitor = Some(w.monitor);
+            rule.workspace = Some(w.workspace);
+            rule.float |= w.floating;
+            tracing::info!(hwnd = hwnd.0, exe = %exe, "window placed by a layout profile");
         }
         let floating = floating || rule.float;
         if rule.no_grab {

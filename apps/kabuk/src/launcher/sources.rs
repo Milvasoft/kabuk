@@ -138,6 +138,23 @@ pub fn commands(i18n: &I18n) -> Vec<Item> {
         .collect()
 }
 
+/// The layout profiles (DECISIONS D65), each to open by its name.
+pub fn profiles(i18n: &I18n, names: &[String]) -> Vec<Item> {
+    let label = i18n.tr("k-profile");
+    names
+        .iter()
+        .map(|name| Item {
+            icon: "tile",
+            ..Item::new(
+                i18n.tr_args("k-profile-open", &[("value", kabuk_i18n::Arg::Str(name.clone()))]),
+                label.clone(),
+                Kind::Command,
+                Target::Profile(name.clone()),
+            )
+        })
+        .collect()
+}
+
 fn path_item(path: &Path, is_dir: bool) -> Item {
     let title = path
         .file_name()
@@ -424,6 +441,19 @@ mod tests {
         let got = recent(&recent_dir);
         assert_eq!(got, vec![(new, false), (files.clone(), true), (old, false)]);
         assert!(recent(&dir.path().join("nope")).is_empty());
+    }
+
+    /// DECISIONS D65: each layout profile is an entry that opens it by its name.
+    #[test]
+    fn layout_profiles_become_entries() {
+        let tr = I18n::new(Lang::Tr);
+        let p = profiles(&tr, &["Kodlama".to_string(), "Toplantı".to_string()]);
+        assert_eq!(p.len(), 2);
+        assert_eq!(p[0].title, "Kodlama düzenini aç");
+        assert_eq!(p[0].subtitle, tr.tr("k-profile"));
+        assert_eq!(p[1].target, Target::Profile("Toplantı".into()));
+        assert_eq!(p[1].target.memory().as_deref(), Some("profile:Toplantı"));
+        assert!(profiles(&tr, &[]).is_empty());
     }
 
     #[test]

@@ -26,6 +26,16 @@ colors = false            # Windows' mode and accent colour follow Kabuk's (reco
 command = ""              # empty: Windows Terminal (else PowerShell); or a program with its arguments
 height = 40               # percent of the monitor's height, 20-90
 
+# Layout profiles (Settings > Windows saves the windows open now; the launcher or
+# `kabuk msg profile Coding` opens one):
+# [[profile]]
+# name = "Coding"
+# [[profile.window]]
+# exe = "Code.exe"
+# open = 'C:\Users\you\AppData\Local\Programs\Microsoft VS Code\Code.exe'
+# monitor = 1
+# workspace = 2
+
 [hot_corners]             # the mouse pushed into a corner of the screen: none, app_grid, overview, launcher, screen_saver
 top_left = "none"
 top_right = "none"

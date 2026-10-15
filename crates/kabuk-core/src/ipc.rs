@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::wm::Direction;
 
 /// The commands of ARCHITECTURE §12.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Request {
     /// `workspace <n>`: switch the focused monitor to workspace n.
     Workspace(u32),
@@ -39,6 +39,8 @@ pub enum Request {
     Saver,
     /// `apps`: open the grid of every app (DECISIONS D56).
     AppGrid,
+    /// A layout profile opens (DECISIONS D65).
+    Profile(String),
     /// `restore`: emergency stop and restore, as `kabuk --restore`.
     Restore,
 }
@@ -165,6 +167,14 @@ pub fn parse(words: &[String]) -> Result<Request, IpcError> {
             takes(0, "no arguments")?;
             Request::AppGrid
         }
+        "profile" => {
+            // The name may have spaces; it is the rest of the words.
+            let name = rest.join(" ");
+            if name.trim().is_empty() {
+                return Err(one("a layout profile's name"));
+            }
+            Request::Profile(name.trim().to_string())
+        }
         "restore" => {
             takes(0, "no arguments")?;
             Request::Restore
@@ -281,6 +291,8 @@ mod tests {
         assert_eq!(p("overview"), Ok(Request::Overview));
         assert_eq!(p("saver"), Ok(Request::Saver));
         assert_eq!(p("apps"), Ok(Request::AppGrid));
+        assert_eq!(p("profile Kodlama gece"), Ok(Request::Profile("Kodlama gece".into())));
+        assert!(matches!(p("profile"), Err(IpcError::BadArgs { .. })));
         assert_eq!(p("restore"), Ok(Request::Restore));
     }
 

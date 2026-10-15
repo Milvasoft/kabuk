@@ -152,3 +152,28 @@ fn a_minimised_window_knows_its_place_to_come_back_to() {
     assert_eq!(d.parked_place(1), None);
     assert_eq!(d.rect_of(1), Some(tile));
 }
+
+/// DECISIONS D65: a layout profile puts a window on a workspace of another monitor (shown
+/// when that workspace is, hidden otherwise), or of its own; an unknown monitor or a
+/// workspace past the last changes nothing; the focus stays.
+#[test]
+fn a_window_goes_to_a_workspace_of_another_monitor() {
+    let mut d = desk(true);
+    d.add(window(1, false));
+    d.add(window(2, false));
+    d.focused(1);
+    let e = d.move_to_place(2, M2, 3);
+    assert_eq!(d.workspace_of(2), Some((M2.to_string(), 3)));
+    assert!(e.contains(&Effect::Hide(2)), "{e:?}");
+    assert!(!d.visible_windows().contains(&2));
+    let e = d.move_to_place(1, M2, 1);
+    assert_eq!(d.workspace_of(1), Some((M2.to_string(), 1)));
+    assert!(e.iter().any(|x| matches!(x, Effect::Place(1, _))), "{e:?}");
+    assert_eq!(d.focus(), Some(1));
+    // Its own monitor: as a move to a workspace.
+    d.move_to_place(1, M2, 3);
+    assert_eq!(d.workspace_of(1), Some((M2.to_string(), 3)));
+    assert_eq!(d.move_to_place(1, "nope", 2), vec![]);
+    assert_eq!(d.move_to_place(1, M1, 42), vec![]);
+    assert_eq!(d.move_to_place(99, M1, 1), vec![]);
+}

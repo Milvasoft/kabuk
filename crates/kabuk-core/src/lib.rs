@@ -19,6 +19,7 @@ pub mod jumplist;
 pub mod logging;
 pub mod oled;
 pub mod paths;
+pub mod profile;
 pub mod restart;
 pub mod rules;
 pub mod state;

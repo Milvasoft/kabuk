@@ -417,6 +417,33 @@ fn wallpaper_dependencies() {
     assert_eq!(e.problem, Problem::OutOfRange { min: 1, max: 16 });
 }
 
+/// DECISIONS D65: a layout profile reads back, and one with no name, nothing to start,
+/// a workspace past the last or no monitor is refused where it is wrong.
+#[test]
+fn layout_profiles() {
+    let good = "schema = 1\n[[profile]]\nname = \"Kodlama\"\n[[profile.window]]\nexe = \"Code.exe\"\nopen = 'C:\\Code\\Code.exe'\nmonitor = 2\nworkspace = 3\n";
+    let c = parse(good).unwrap().config;
+    assert_eq!(c.profiles.len(), 1);
+    assert_eq!(
+        (c.profiles[0].windows[0].monitor, c.profiles[0].windows[0].workspace),
+        (2, 3)
+    );
+    let e = single_error("schema = 1\n[[profile]]\nname = \" \"\n");
+    assert_eq!((e.path, e.problem), (path("profile[0].name"), Problem::Empty));
+    let e = single_error(
+        "schema = 1\n[[profile]]\nname = \"x\"\n[[profile.window]]\nexe = \"a.exe\"\nopen = \"a.exe\"\nmonitor = 1\nworkspace = 12\n",
+    );
+    assert_eq!(e.path, path("profile[0].window[0].workspace"));
+    let e = single_error(
+        "schema = 1\n[[profile]]\nname = \"x\"\n[[profile.window]]\nexe = \"a.exe\"\nopen = \"\"\nmonitor = 1\nworkspace = 1\n",
+    );
+    assert_eq!((e.path, e.problem), (path("profile[0].window[0].open"), Problem::Empty));
+    let e = single_error(
+        "schema = 1\n[[profile]]\nname = \"x\"\n[[profile.window]]\nexe = \"a.exe\"\nopen = \"a.exe\"\nworkspace = 1\n",
+    );
+    assert_eq!(e.path, path("profile[0].window[0].monitor"));
+}
+
 #[test]
 fn launcher_folders_and_url() {
     let e = single_error("schema = 1\n[launcher]\nindexed_folders = [\"C:\\\\src\", \" \"]\n");

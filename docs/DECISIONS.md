@@ -8,6 +8,9 @@ No open decisions (the user decided D39, D43, D44 and the still pictures' drift 
 
 ## Decided and proposed
 
+### D65 · Layout profiles — Decided by the user (2026-10-15)
+Suggested as a feature and asked for by the user: a named arrangement of programs over monitors and workspaces (`[[profile]]` with `name` and `[[profile.window]]` `exe`, `open`, `monitor` as Windows numbers it, `workspace`, `floating`), saved from the windows the shell manages now (Settings › Windows, through `query windows`, which now also tells each window's program file and what opens it again: its file, or a packaged app's `shell:AppsFolder\…`) and opened by name from the settings, the launcher ("Open the … layout") or `kabuk msg profile <name>`. Opening it moves an open window of each program to its place (each window taken once) and starts the program for the places left; a window that comes within 30 seconds from a program it started goes to its place, as a rule's would. Each program is kept once per monitor and workspace; the hidden workspace's windows are left out.
+
 ### D64 · Theme files to share — Decided by the user (2026-10-15)
 Suggested as a feature (themes shared grow a community) and asked for by the user: Settings › Appearance exports the look's settings to a `.kabuktheme` file (TOML: `[kabuk-theme] format = 1, name`, then `[theme.…]` with the look, mode, accent, text size, cursors, the bar's place, height, background and colour, the gap, a gallery wallpaper and screen saver and the wallpaper's brightness) and imports one. Only those settings are read from a file (`kabuk_core::theme_file::KEYS`): a theme from someone else never changes shortcuts, rules, programs to run or anything else. A picture of the user's or a wallpaper created on this machine stays home. The configuration must still be valid after the import, else nothing changes (a theme from a newer Kabuk may name a look this one lacks).
 

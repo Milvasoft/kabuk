@@ -1265,6 +1265,48 @@ impl Desk {
         effects
     }
 
+    /// Moves a window to workspace `n` (1-based) of `monitor` (a layout profile puts
+    /// windows where they were saved, DECISIONS D65); on its own monitor as
+    /// [`Desk::move_to`]. The focus stays where it is.
+    pub fn move_to_place(&mut self, id: WindowId, monitor: &str, n: u32) -> Vec<Effect> {
+        let (Some((m, w, i)), Some(t), Some(target)) = (self.find(id), self.monitor(monitor), index(n)) else {
+            return Vec::new();
+        };
+        if t == m {
+            return self.move_to(id, n);
+        }
+        if target >= self.monitors[t].workspaces.len() {
+            return Vec::new();
+        }
+        let before = self.visible_set();
+        let source = &mut self.monitors[m].workspaces[w];
+        let mut entry = source.entries.remove(i);
+        let next_tab = show_next_tab(source, &entry, i);
+        entry.group = None;
+        entry.tab_hidden = false;
+        if source.focus == Some(id) {
+            source.focus = next_tab.or_else(|| source.entries.last().map(|e| e.id));
+        }
+        let (from, to) = (self.monitors[m].info.area, self.monitors[t].info.area);
+        entry.float_rect = fit_inside(
+            Rect {
+                x: entry.float_rect.x - from.x + to.x,
+                y: entry.float_rect.y - from.y + to.y,
+                ..entry.float_rect
+            },
+            to,
+        );
+        adopt(&mut entry, self.monitors[t].workspaces[target].floats(&self.settings));
+        let floating = entry.floating;
+        let place = entry.float_rect;
+        self.monitors[t].workspaces[target].entries.push(entry);
+        let mut effects = self.sync(&before, &[(m, w), (t, target)], None);
+        if floating && target == self.monitors[t].active {
+            effects.push(Effect::Place(id, place));
+        }
+        effects
+    }
+
     /// Monitors were added, removed or changed. Windows of an unplugged monitor move to the
     /// same workspace of the primary monitor and go back when it returns. An empty list
     /// (everything unplugged, e.g. during sleep) changes nothing.

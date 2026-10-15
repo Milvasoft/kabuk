@@ -253,6 +253,8 @@ impl Shared {
             if l.slow.is_empty() && self.config().launcher.sources.commands {
                 // Until the worker is done, the commands are there at least.
                 items.extend(sources::commands(&self.i18n));
+                let profiles: Vec<String> = self.config().profiles.iter().map(|p| p.name.clone()).collect();
+                items.extend(sources::profiles(&self.i18n, &profiles));
             }
             items.extend(l.slow.iter().cloned());
             return crate::launcher::item::recent_first(items, &l.ran, &self.pinned_targets());
@@ -566,6 +568,11 @@ impl Shared {
                 Ok(()) => self.notify(crate::notify::Notice::Copied),
                 Err(e) => tracing::warn!(error = %e, "result not copied"),
             },
+            Target::Profile(name) => {
+                if let Some(link) = &self.wm {
+                    link.send(crate::wm::Command::OpenProfile(name));
+                }
+            }
             Target::Command(c) => {
                 let r = match c {
                     SystemCommand::Settings => self.open_settings(),
