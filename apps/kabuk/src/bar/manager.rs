@@ -459,6 +459,9 @@ struct Shared {
     /// longer shown are forgotten, never another part's (the app grid's, the launcher's).
     tray_images: Vec<u64>,
     tray_calls: Rc<RefCell<VecDeque<IconCall>>>,
+    /// Where each drawn tray icon is on screen, for programs that ask
+    /// (`Shell_NotifyIconGetRect`); written after every draw.
+    tray_places: Rc<RefCell<Vec<(Icon, PxRect)>>>,
     /// Every tray icon held (hidden ones too), for `kabuk msg query tray` on the
     /// command pipe's thread; written whenever the tray changes.
     tray_list: Arc<Mutex<Vec<Icon>>>,
@@ -731,6 +734,7 @@ impl BarManager {
                 tray: Tray::default(),
                 tray_images: Vec::new(),
                 tray_calls: Rc::default(),
+                tray_places: Rc::default(),
                 tray_list: Arc::default(),
                 hides_taskbar: !leave_explorer,
                 app_mode_file,
@@ -1953,18 +1957,28 @@ impl Shared {
             return;
         };
         let calls = self.tray_calls.clone();
-        let host = TrayHost::start(move |e| {
-            let TrayEvent::Call(c) = e;
-            calls.borrow_mut().push_back(c);
-            let _ = kabuk_win::msgloop::post_message(
-                control,
-                Msg {
-                    id: MSG_TRAY,
-                    wparam: 0,
-                    lparam: 0,
-                },
-            );
-        });
+        let places = self.tray_places.clone();
+        let host = TrayHost::start(
+            move |e| {
+                let TrayEvent::Call(c) = e;
+                calls.borrow_mut().push_back(c);
+                let _ = kabuk_win::msgloop::post_message(
+                    control,
+                    Msg {
+                        id: MSG_TRAY,
+                        wparam: 0,
+                        lparam: 0,
+                    },
+                );
+            },
+            move |q| {
+                places
+                    .borrow()
+                    .iter()
+                    .find(|(icon, _)| q.is_about(icon))
+                    .map(|(_, r)| *r)
+            },
+        );
         match host {
             Ok(h) => {
                 // Starting asks every program to register.
@@ -2267,6 +2281,29 @@ impl Shared {
             self.retire(Some(t));
             tracing::debug!("tray tooltip hidden");
         }
+    }
+
+    /// Where each drawn tray icon is: its place on the primary bar, or, for an icon in the
+    /// overflow panel, the button that opens the panel (the panel closes before the click
+    /// reaches the program, so its menu opens by that button).
+    fn publish_tray_places(&self) {
+        let Some(b) = self.bars.iter().position(|b| b.primary) else {
+            self.tray_places.borrow_mut().clear();
+            return;
+        };
+        let places = self
+            .tray
+            .visible()
+            .enumerate()
+            .map(|(i, icon)| {
+                let rect = self
+                    .hit_rect(b, view::hit::TRAY, u32::try_from(i).unwrap_or(u32::MAX))
+                    .or_else(|| self.hit_rect(b, view::hit::TRAY_MORE, 0))
+                    .unwrap_or(self.bars[b].rect);
+                (icon.clone(), rect)
+            })
+            .collect();
+        *self.tray_places.borrow_mut() = places;
     }
 
     /// Tells the window manager where each window's app icon is (the genie pours it
@@ -3163,6 +3200,7 @@ impl Shared {
             Err(e) => tracing::error!(error = %e, "dock render failed"),
         }
         self.publish_app_icons();
+        self.publish_tray_places();
         if drew {
             match self.gpu.commit() {
                 Ok(()) => {}

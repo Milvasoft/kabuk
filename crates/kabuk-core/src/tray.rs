@@ -268,6 +268,85 @@ pub fn click_messages(icon: &Icon, click: Click, x: i32, y: i32) -> Vec<(usize, 
     }
 }
 
+/// Which corner of its icon a program asks for: `Shell_NotifyIconGetRect` asks twice, the
+/// top-left corner first, then the bottom-right one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Corner {
+    TopLeft,
+    BottomRight,
+}
+
+/// A program asks where its icon is on screen (`Shell_NotifyIconGetRect`, `WM_COPYDATA`
+/// kind 3), to open its menu or flyout next to it. Found by the user: Kabuk passed this on
+/// to Explorer, whose taskbar is hidden, and the Bluetooth menu opened at the screen's
+/// left edge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RectQuery {
+    pub corner: Corner,
+    pub hwnd: u64,
+    pub uid: u32,
+    pub guid: Option<[u8; 16]>,
+}
+
+// Offsets in the internal `NOTIFYICONIDENTIFIER` the shell sends: signature, message
+// (1 = top-left, 2 = bottom-right), size, padding, then window, id and GUID.
+const RQ_MESSAGE: usize = 4;
+const RQ_HWND: usize = 16;
+const RQ_UID: usize = 20;
+const RQ_GUID: usize = 24;
+const RQ_SIZE: usize = RQ_GUID + 16;
+const RQ_TOP_LEFT: u32 = 1;
+const RQ_BOTTOM_RIGHT: u32 = 2;
+
+/// Reads a `Shell_NotifyIconGetRect` question (the `WM_COPYDATA` payload of kind 3).
+pub fn parse_rect_query(bytes: &[u8]) -> Option<RectQuery> {
+    if bytes.len() < RQ_SIZE || u32_at(bytes, 0)? != TRAY_SIGNATURE {
+        return None;
+    }
+    let corner = match u32_at(bytes, RQ_MESSAGE)? {
+        RQ_TOP_LEFT => Corner::TopLeft,
+        RQ_BOTTOM_RIGHT => Corner::BottomRight,
+        _ => return None,
+    };
+    let mut g = [0u8; 16];
+    g.copy_from_slice(&bytes[RQ_GUID..RQ_SIZE]);
+    Some(RectQuery {
+        corner,
+        hwnd: u64::from(u32_at(bytes, RQ_HWND)?),
+        uid: u32_at(bytes, RQ_UID)?,
+        guid: (g != [0; 16]).then_some(g),
+    })
+}
+
+impl RectQuery {
+    /// Whether the question is about `icon`: by GUID when it carries one, else (and as a
+    /// fallback) by window and id.
+    pub fn is_about(&self, icon: &Icon) -> bool {
+        let by_window = self.hwnd != 0 && icon.hwnd == self.hwnd && icon.uid == self.uid;
+        match self.guid {
+            Some(g) => icon.key == IconKey::Guid(g) || by_window,
+            None => by_window,
+        }
+    }
+
+    /// The answer for the icon at screen rectangle (left, top, right, bottom), in physical
+    /// pixels: the asked corner as `MAKELPARAM(x, y)`.
+    pub fn answer(&self, left: i32, top: i32, right: i32, bottom: i32) -> isize {
+        let (x, y) = match self.corner {
+            Corner::TopLeft => (left, top),
+            Corner::BottomRight => (right, bottom),
+        };
+        ((y as u16 as isize) << 16) | (x as u16 as isize)
+    }
+}
+
+impl Tray {
+    /// Where the icon a question is about is among the drawn icons.
+    pub fn shown_index(&self, q: &RectQuery) -> Option<usize> {
+        self.visible().position(|i| q.is_about(i))
+    }
+}
+
 #[cfg(test)]
 #[path = "tray_tests.rs"]
 mod tests;

@@ -17,7 +17,9 @@
 //!   --resize-self <ms>     change its own size on this interval
 //!   --cloak-after <ms>     cloak itself (as on another virtual desktop) after this long
 //!   --tray-log <path>      add a tray icon (tooltip = title, version 4) and append each
-//!                          callback message to <path> as "<wparam> <lparam>"
+//!                          callback message to <path> as "<wparam> <lparam>"; after a
+//!                          click asks the tray where its icon is and appends
+//!                          "rect <left> <top> <right> <bottom>"
 //!   --fullscreen           borderless window covering the primary monitor, above the
 //!                          others as a game is (so a maximised window of the user's in
 //!                          front does not decide the tests)
@@ -371,6 +373,21 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 if let Some(path) = &o.tray_log {
                     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
                         let _ = writeln!(f, "{} {}", wparam.0, lparam.0);
+                        // Like a program opening its menu by its icon: ask the tray where
+                        // the icon is, after the click's last message.
+                        let msg = (lparam.0 & 0xFFFF) as u32;
+                        if msg == windows::Win32::UI::Shell::NIN_SELECT || msg == WM_CONTEXTMENU {
+                            use windows::Win32::UI::Shell::{Shell_NotifyIconGetRect, NOTIFYICONIDENTIFIER};
+                            let id = NOTIFYICONIDENTIFIER {
+                                cbSize: std::mem::size_of::<NOTIFYICONIDENTIFIER>() as u32,
+                                hWnd: hwnd,
+                                uID: TRAY_ID,
+                                ..Default::default()
+                            };
+                            if let Ok(r) = Shell_NotifyIconGetRect(&id) {
+                                let _ = writeln!(f, "rect {} {} {} {}", r.left, r.top, r.right, r.bottom);
+                            }
+                        }
                     }
                 }
                 return LRESULT(0);

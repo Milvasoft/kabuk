@@ -8,7 +8,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use kabuk_core::tray::{self as model, IconCall};
+use kabuk_core::tray::{self as model, IconCall, RectQuery};
 
 use crate::msgloop::{self, PxRect, Window};
 use crate::window::{windows_of_class, Hwnd};
@@ -16,6 +16,8 @@ use crate::window::{windows_of_class, Hwnd};
 const TRAY_CLASS: &str = "Shell_TrayWnd";
 /// `WM_COPYDATA` kinds sent to the tray window.
 const COPYDATA_NOTIFY_ICON: usize = 1;
+/// `Shell_NotifyIconGetRect`: where is an icon on screen.
+const COPYDATA_ICON_RECT: usize = 3;
 /// How long a forwarded message may take in Explorer.
 const FORWARD_TIMEOUT: Duration = Duration::from_millis(1000);
 
@@ -71,8 +73,12 @@ pub struct TrayHost {
 
 impl TrayHost {
     /// Creates the window and asks every program to register its icons again. Calls
-    /// arrive on this thread's message loop.
-    pub fn start(sink: impl Fn(TrayEvent) + 'static) -> std::io::Result<TrayHost> {
+    /// arrive on this thread's message loop. `place` tells where an icon is on screen,
+    /// when a program asks (`None`: not one of Kabuk's, so Explorer answers).
+    pub fn start(
+        sink: impl Fn(TrayEvent) + 'static,
+        place: impl Fn(&RectQuery) -> Option<PxRect> + 'static,
+    ) -> std::io::Result<TrayHost> {
         let explorer = Rc::new(Cell::new(explorer_tray(None)));
         if explorer.get().is_none() {
             return Err(std::io::Error::other("Explorer's tray window was not found"));
@@ -94,6 +100,20 @@ impl TrayHost {
                 };
                 (cds.dw_data, bytes)
             };
+            // Where an icon is: Kabuk answers for the icons it draws, as Explorer's taskbar
+            // is hidden and would place a menu at the screen's edge.
+            if kind == COPYDATA_ICON_RECT {
+                let q = model::parse_rect_query(bytes);
+                if let Some((q, r)) = q.and_then(|q| place(&q).map(|r| (q, r))) {
+                    tracing::debug!(corner = ?q.corner, hwnd = q.hwnd, uid = q.uid, ?r, "tray icon place answered");
+                    return Some(q.answer(r.x, r.y, r.x + r.w, r.y + r.h));
+                }
+                tracing::debug!(
+                    parsed = q.is_some(),
+                    len = bytes.len(),
+                    "tray icon place left to Explorer"
+                );
+            }
             // Explorer first, so it keeps everything; its answer is the caller's result.
             let answer = target
                 .get()

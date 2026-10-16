@@ -5,7 +5,8 @@
 //!
 //! Edge cases: a program's icon appearing on the bar, a right click reaching the program
 //! with the version-4 message layout, the icon's program quitting, a forced kill with the
-//! taskbar hidden (the watchdog shows it within 2 s and puts auto-hide back).
+//! taskbar hidden (the watchdog shows it within 2 s and puts auto-hide back), a program
+//! asking where its icon is (`Shell_NotifyIconGetRect`) and getting its place on the bar.
 //!
 //! Run with: `cargo test -p kabuk --features integration -- --test-threads=1`
 
@@ -363,6 +364,116 @@ fn a_tray_icon_shows_its_tooltip_and_takes_double_clicks() {
         got(),
         story(&sandbox)
     );
+
+    app.close();
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || before.is_back()).is_some(), "desktop not back");
+}
+
+/// Found by the user: the Bluetooth icon's menu opened at the screen's left edge. A
+/// program that asks where its icon is (`Shell_NotifyIconGetRect`, to open its menu by
+/// it) must get the icon's place on Kabuk's bar, not one on Explorer's hidden taskbar.
+#[test]
+fn a_program_asking_where_its_icon_is_gets_its_place_on_the_bar() {
+    use kabuk::bar::manager::MSG_TEST_TRAY_WHERE;
+    let before = Desktop::now();
+    let sandbox = Sandbox::new();
+    // The test's icon comes after the user's own ones; keep it on the bar (D26).
+    std::fs::write(sandbox.config_file(), "schema = 1\n[bar]\ntray_shown = 12\n").unwrap();
+    let _shell = sandbox.kabuk_with(&[TAKE_EXPLORER, "--no-wm"]);
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("tray window up") == 1).is_some());
+    let log = sandbox.dir.path().join("tray-clicks.txt");
+    let tip = title("where");
+    let app = TestWindow::open(&["--title", &tip, "--tray-log", log.to_str().unwrap()]);
+    let control = kabuk_win::window::find_message_window(CONTROL_CLASS, "").expect("bar control window");
+    let mut point = 0isize;
+    assert!(
+        wait_until(SETTLE, || {
+            point = kabuk_win::msgloop::send_message(
+                control,
+                Msg {
+                    id: MSG_TEST_TRAY_WHERE,
+                    wparam: app.hwnd.0 as usize,
+                    lparam: 0,
+                },
+                Duration::from_secs(1),
+            )
+            .unwrap_or(0);
+            point != 0
+        })
+        .is_some(),
+        "our icon is not on the bar:\n{}",
+        story(&sandbox)
+    );
+    // The icon's centre on screen: its place on the primary bar plus the bar's corner.
+    let pid = sandbox.state().kabuk_pid.unwrap();
+    let primary = kabuk_win::shell::monitors().into_iter().find(|m| m.primary).unwrap();
+    let bar = kabuk_win::window::windows_of_class("Kabuk.Bar")
+        .into_iter()
+        .filter(|w| w.pid() == Some(pid))
+        .find_map(|w| w.window_rect().filter(|r| primary.rect.contains(r)))
+        .expect("primary bar");
+    let centre = (
+        bar.left + (point & 0xFFFF) as i16 as i32,
+        bar.top + (point >> 16) as i16 as i32,
+    );
+
+    // `query tray` tells the icon apart by its program (asked for when a second volume
+    // icon showed up on the bar).
+    let out = std::process::Command::new(kabuk_exe())
+        .arg("--state-dir")
+        .arg(sandbox.state_dir())
+        .arg("--config")
+        .arg(sandbox.config_file())
+        .args(["msg", "query", "tray"])
+        .output()
+        .expect("run kabuk msg");
+    let icons: serde_json::Value = serde_json::from_slice(&out.stdout).expect("query tray answers JSON");
+    let ours = icons
+        .as_array()
+        .and_then(|a| a.iter().find(|i| i["tip"] == tip.as_str()))
+        .unwrap_or_else(|| panic!("our icon not in `query tray`: {icons}"));
+    assert_eq!(ours["exe"], "kabuk-testapp.exe", "{ours}");
+    assert_eq!(
+        (ours["hwnd"].as_u64(), ours["shown"].as_bool()),
+        (Some(app.hwnd.0), Some(true)),
+        "{ours}"
+    );
+
+    // A right click: the program asks where its icon is after the menu message.
+    post_message(
+        control,
+        Msg {
+            id: MSG_TEST_TRAY_CLICK,
+            wparam: app.hwnd.0 as usize,
+            lparam: 1,
+        },
+    )
+    .unwrap();
+    let got = || std::fs::read_to_string(&log).unwrap_or_default();
+    let rect = || {
+        got().lines().find_map(|l| {
+            let v: Vec<i32> = l
+                .strip_prefix("rect ")?
+                .split(' ')
+                .filter_map(|n| n.parse().ok())
+                .collect();
+            (v.len() == 4).then(|| (v[0], v[1], v[2], v[3]))
+        })
+    };
+    assert!(
+        wait_until(SETTLE, || rect().is_some()).is_some(),
+        "the program got no place: {:?}\n{}",
+        got(),
+        story(&sandbox)
+    );
+    let (l, t, r, b) = rect().unwrap();
+    assert!(
+        l <= centre.0 && centre.0 <= r && t <= centre.1 && centre.1 <= b,
+        "place {:?} does not hold the icon's centre {centre:?} (bar at {bar:?})",
+        (l, t, r, b)
+    );
+    assert!(r > l && b > t, "an empty place: {:?}", (l, t, r, b));
 
     app.close();
     assert_eq!(sandbox.restore().0, 0);

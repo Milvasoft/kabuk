@@ -2,7 +2,9 @@
 //! modify that changes only some fields, a hidden icon, an icon identified by GUID (no
 //! window handle), a duplicate add, a modify or delete of an unknown icon, an owner window
 //! that disappears, data that is too short or has the wrong signature, an old (smaller)
-//! structure without a GUID, click messages for the old and the version-4 conventions.
+//! structure without a GUID, click messages for the old and the version-4 conventions;
+//! a question about where an icon is (each corner, by GUID or by window, a GUID nobody
+//! registered, a hidden icon, bad data, negative coordinates).
 
 use super::*;
 
@@ -302,4 +304,87 @@ fn clicks_follow_the_icons_version() {
     let (w, _) = click_messages(&v4, Click::Right, -2000, 30)[0];
     assert_eq!((w & 0xFFFF) as u16 as i16, -2000);
     assert_eq!((w >> 16) as u16 as i16, 30);
+}
+
+/// Builds the bytes of a `Shell_NotifyIconGetRect` question.
+fn rect_question(message: u32, hwnd: u32, uid: u32, guid: [u8; 16]) -> Vec<u8> {
+    let mut b = Vec::new();
+    for v in [TRAY_SIGNATURE, message, 40, 0, hwnd, uid] {
+        b.extend_from_slice(&v.to_le_bytes());
+    }
+    b.extend_from_slice(&guid);
+    b
+}
+
+#[test]
+fn reads_a_question_about_where_an_icon_is() {
+    let q = parse_rect_query(&rect_question(1, 0x1234, 7, [0; 16])).unwrap();
+    assert_eq!(
+        q,
+        RectQuery {
+            corner: Corner::TopLeft,
+            hwnd: 0x1234,
+            uid: 7,
+            guid: None
+        }
+    );
+    let g = [9u8; 16];
+    let q = parse_rect_query(&rect_question(2, 0, 0, g)).unwrap();
+    assert_eq!((q.corner, q.guid), (Corner::BottomRight, Some(g)));
+    // Wrong signature, an unknown message, data too short.
+    let mut bad = rect_question(1, 1, 1, [0; 16]);
+    bad[0] ^= 1;
+    assert_eq!(parse_rect_query(&bad), None);
+    assert_eq!(parse_rect_query(&rect_question(3, 1, 1, [0; 16])), None);
+    assert_eq!(parse_rect_query(&rect_question(1, 1, 1, [0; 16])[..39]), None);
+    assert_eq!(parse_rect_query(&[]), None);
+}
+
+#[test]
+fn a_question_finds_its_icon_by_guid_or_by_window() {
+    let mut t = Tray::default();
+    add(&mut t, 1, 1, "a");
+    let g = [5u8; 16];
+    t.apply(&parsed(Data {
+        hwnd: 2,
+        uid: 3,
+        flags: NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_GUID,
+        guid: g,
+        tip: "guid",
+        ..Data::default()
+    }));
+    add(&mut t, 4, 1, "c");
+    let ask = |hwnd: u32, uid: u32, guid: [u8; 16]| parse_rect_query(&rect_question(1, hwnd, uid, guid)).unwrap();
+    assert_eq!(t.shown_index(&ask(4, 1, [0; 16])), Some(2));
+    assert_eq!(t.shown_index(&ask(0, 0, g)), Some(1));
+    // A GUID nobody registered falls back to the window and id it carries.
+    assert_eq!(t.shown_index(&ask(1, 1, [7; 16])), Some(0));
+    // An unknown icon, and a question without a window or GUID, find nothing.
+    assert_eq!(t.shown_index(&ask(1, 2, [0; 16])), None);
+    assert_eq!(t.shown_index(&ask(0, 0, [0; 16])), None);
+    // A hidden icon is not among the drawn ones: the index counts drawn icons only.
+    t.apply(&parsed(Data {
+        message: NIM_MODIFY,
+        hwnd: 1,
+        uid: 1,
+        flags: NIF_STATE,
+        state: NIS_HIDDEN,
+        state_mask: NIS_HIDDEN,
+        ..Data::default()
+    }));
+    assert_eq!(t.shown_index(&ask(1, 1, [0; 16])), None);
+    assert_eq!(t.shown_index(&ask(4, 1, [0; 16])), Some(1));
+}
+
+#[test]
+fn the_answer_is_the_asked_corner() {
+    let top_left = parse_rect_query(&rect_question(1, 1, 1, [0; 16])).unwrap();
+    let bottom_right = parse_rect_query(&rect_question(2, 1, 1, [0; 16])).unwrap();
+    let a = top_left.answer(100, 20, 124, 44);
+    assert_eq!((a & 0xFFFF, a >> 16), (100, 20));
+    let b = bottom_right.answer(100, 20, 124, 44);
+    assert_eq!((b & 0xFFFF, b >> 16), (124, 44));
+    // Negative coordinates (Monitor 2 left of the primary) survive the packing.
+    let n = top_left.answer(-2000, -30, 0, 0);
+    assert_eq!(((n & 0xFFFF) as u16 as i16, (n >> 16) as u16 as i16), (-2000, -30));
 }
