@@ -315,7 +315,9 @@ fn an_open_tray_menu_is_not_closed_by_asking_programs_again() {
     post(control, MSG_TRAY_BEHIND);
     assert!(
         wait_until(SETTLE, || waited() >= 1).is_some(),
-        "the asking did not wait"
+        "the asking did not wait (menu open: {}):\n{}",
+        kabuk_win::window::popup_menu_open(),
+        story(&sandbox)
     );
     assert_eq!(
         sandbox.log_lines("programs asked to register again"),

@@ -1436,6 +1436,7 @@ impl Shared {
                 Some(0)
             }
             MSG_TRAY_BEHIND => {
+                tracing::debug!("tray found behind Explorer's; programs asked soon");
                 if let Some(c) = &self.control {
                     c.set_timer(timer::TRAY_AGAIN, TRAY_ASK_AGAIN);
                 }
