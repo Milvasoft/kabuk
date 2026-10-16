@@ -108,6 +108,20 @@ fn main() {
                 ("Speakers".to_string(), false),
                 ("Headphones (Bluetooth)".to_string(), true),
             ],
+            &[
+                kabuk::bar::volume_panel::MixerView {
+                    name: "Google Chrome".into(),
+                    image: None,
+                    percent: 60,
+                    muted: false,
+                },
+                kabuk::bar::volume_panel::MixerView {
+                    name: "Spotify".into(),
+                    image: None,
+                    percent: 35,
+                    muted: true,
+                },
+            ],
             &kabuk::bar::volume_panel::ENTRIES,
         )
     });

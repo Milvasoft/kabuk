@@ -375,6 +375,48 @@ impl Shared {
         self.apps.list.iter().map(|a| self.picture_key(&a.icon)).collect()
     }
 
+    /// The name and picture of program `exe` for the volume mixer (DECISIONS D69): an
+    /// app on the bar's own, else its Start menu name, else the name its audio session
+    /// gave (`session_name`, unless a resource reference), else its file's; the picture
+    /// loaded now if it was not (`None`: it could not be).
+    pub(super) fn program_look(&self, exe: &str, session_name: &str) -> (String, Option<u64>) {
+        let (name, icon) = match self.apps.list.iter().find(|a| a.source.eq_ignore_ascii_case(exe)) {
+            Some(a) => (self.app_name(a), a.icon.clone()),
+            None => {
+                let name = self
+                    .apps
+                    .names
+                    .borrow_mut()
+                    .entry(exe.to_string())
+                    .or_insert_with(|| {
+                        kabuk_win::shellitems::program_entry(exe)
+                            .map(|e| e.name)
+                            .or_else(|| {
+                                (!session_name.is_empty() && !session_name.starts_with('@'))
+                                    .then(|| session_name.to_string())
+                            })
+                            .unwrap_or_else(|| {
+                                Path::new(exe)
+                                    .file_stem()
+                                    .map_or_else(|| exe.to_string(), |s| s.to_string_lossy().into_owned())
+                            })
+                    })
+                    .clone();
+                (name, exe.to_string())
+            }
+        };
+        let key = self.picture_key(&icon);
+        if !self.gpu.images.contains(key) {
+            let side = self.apps.side;
+            let px = kabuk_win::icon::shell_item_icon_pixels(&icon, side)
+                .or_else(|| kabuk_win::icon::file_icon_pixels(Path::new(&icon), side));
+            if let Some(px) = px {
+                self.gpu.images.set(key, side, px);
+            }
+        }
+        (name, self.gpu.images.contains(key).then_some(key))
+    }
+
     /// The name app `a` goes by, looked up once.
     fn app_name(&self, a: &App) -> String {
         let key = a.link.clone().unwrap_or_else(|| a.source.clone());

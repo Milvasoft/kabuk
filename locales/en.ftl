@@ -86,6 +86,7 @@ launcher-shutdown = Shut down
 launcher-settings = Kabuk settings
 power-sign-out = Sign out
 vol-mixer = Open volume mixer
+vol-apps = Volume mixer
 vol-settings = Sound settings
 vol-troubleshoot = Troubleshoot sound problems
 clock-adjust = Adjust date and time

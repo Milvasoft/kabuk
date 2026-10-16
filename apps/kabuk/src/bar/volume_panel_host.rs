@@ -1,9 +1,12 @@
 //! The volume panel on the bar thread ([`crate::bar::volume_panel`]): placed like the
-//! power menu under the volume; a press on the track sets the level and a drag follows
-//! the mouse, the speaker mutes, an entry opens Windows' page; a click elsewhere or Esc
-//! closes it. The level is redrawn whenever the output's changes.
+//! power menu under the volume; a press on a level (the output's or an app's in the
+//! mixer) sets it and a drag follows the mouse, the speaker mutes the output and an
+//! app's icon the app, an entry opens Windows' page; a click elsewhere or Esc closes it.
+//! The level is redrawn whenever the output's changes, and the mixer whenever an app's
+//! session does (Core Audio tells; no polling).
 
 use kabuk_ui::geom::{Point, Scale};
+use kabuk_ui::motion::Level;
 use kabuk_ui::node::Layout;
 use kabuk_ui::render::WindowSurface;
 use kabuk_win::msgloop::{msg, vk, Msg, PxRect, Window};
@@ -12,7 +15,9 @@ use super::motion_host::Shown;
 use super::tooltip::{self, TIP};
 use super::view::hit;
 use super::Shared;
-use crate::bar::volume_panel::{self, Menu, FIRST_ENTRY, FIRST_OUTPUT, MUTE, TRACK};
+use crate::bar::volume_panel::{
+    self, Menu, MixerRow, MixerView, FIRST_APP, FIRST_APP_MUTE, FIRST_ENTRY, FIRST_OUTPUT, MUTE, TRACK,
+};
 use crate::notify::style::NotifyStyle;
 
 const PANEL_CLASS: &str = "Kabuk.VolumePanel";
@@ -27,8 +32,15 @@ pub(super) struct VolumePanel {
     scale: Scale,
     with_track: bool,
     menu: Menu,
-    /// The track is held (a drag sets the level as the mouse moves).
-    dragging: bool,
+    /// The bar and the icon it opened under, to be placed again when it changes size.
+    bar: usize,
+    anchor: (&'static str, u32),
+    /// The level held (the output's [`TRACK`] or an app's): a drag sets it as the mouse
+    /// moves.
+    dragging: Option<u32>,
+    /// The mixer's apps, and the watch on their sessions while the panel is open.
+    mixer: Vec<MixerRow>,
+    _sessions: Option<kabuk_win::audio::SessionWatch>,
 }
 
 impl Shared {
@@ -39,7 +51,7 @@ impl Shared {
     /// Opens an icon's menu under `anchor` (its hit), or closes it if it was the one open.
     /// Another icon's open menu gives way to this one at once (found by the user: the
     /// click only closed it, and a second was needed).
-    pub(super) fn toggle_system_menu(&mut self, bar: usize, menu: Menu, with_track: bool, anchor: (&str, u32)) {
+    pub(super) fn toggle_system_menu(&mut self, bar: usize, menu: Menu, with_track: bool, anchor: (&'static str, u32)) {
         let same = self
             .volume_panel
             .as_ref()
@@ -56,12 +68,32 @@ impl Shared {
         }
     }
 
-    fn volume_view(&self, menu: Menu, with_track: bool) -> kabuk_ui::node::Node {
+    /// The mixer's apps now (the volume's left click only).
+    fn mixer_now(&self, menu: Menu, with_track: bool) -> Vec<MixerRow> {
+        match (&self.audio, menu, with_track) {
+            (Some(a), Menu::Volume, true) => volume_panel::mixer_rows(&a.sessions()),
+            _ => Vec::new(),
+        }
+    }
+
+    fn volume_view(&self, menu: Menu, with_track: bool, mixer: &[MixerRow]) -> kabuk_ui::node::Node {
         let level = with_track.then(|| self.live.volume.map_or((0, false), |v| (v.percent, v.muted)));
         let outputs: Vec<(String, bool)> = self
             .outputs(menu, with_track)
             .into_iter()
             .map(|o| (o.name, o.default))
+            .collect();
+        let apps: Vec<MixerView> = mixer
+            .iter()
+            .map(|r| {
+                let (name, image) = self.program_look(&r.exe, &r.session_name);
+                MixerView {
+                    name,
+                    image,
+                    percent: r.percent,
+                    muted: r.muted,
+                }
+            })
             .collect();
         volume_panel::view(
             &self.i18n,
@@ -70,6 +102,7 @@ impl Shared {
             &NotifyStyle::of(self.config().appearance.look),
             level,
             &outputs,
+            &apps,
             menu.entries(),
         )
     }
@@ -82,37 +115,58 @@ impl Shared {
         }
     }
 
+    /// Opens the menu, or lays it out again in the window it has (it changed size: an
+    /// app joined or left the mixer), keeping the keyboard and not entering again.
     pub(super) fn open_system_menu(
         &mut self,
         bar: usize,
         menu: Menu,
         with_track: bool,
-        (module, value): (&str, u32),
+        anchor: (&'static str, u32),
         activate: bool,
     ) {
         self.hide_tooltip();
         self.close_tray_panel();
         self.close_power_menu();
         self.close_app_menu();
-        let weak = self.me.clone();
-        let window = match Window::input_surface(PANEL_CLASS, "", PxRect::default(), move |m| {
-            let rc = weak.upgrade()?;
-            let mut s = rc.try_borrow_mut().ok()?;
-            s.on_volume_panel(m)
-        }) {
-            Ok(w) => w,
-            Err(e) => {
-                tracing::warn!(error = %e, "volume panel window failed");
-                return;
+        let mixer = self.mixer_now(menu, with_track);
+        let (window, again, sessions) = match self.volume_panel.take() {
+            Some(p) => (p.shown.into_window(), true, p._sessions),
+            None => {
+                let weak = self.me.clone();
+                match Window::input_surface(PANEL_CLASS, "", PxRect::default(), move |m| {
+                    let rc = weak.upgrade()?;
+                    let mut s = rc.try_borrow_mut().ok()?;
+                    s.on_volume_panel(m)
+                }) {
+                    Ok(w) => (w, false, None),
+                    Err(e) => {
+                        tracing::warn!(error = %e, "volume panel window failed");
+                        return;
+                    }
+                }
             }
+        };
+        // The sessions are watched while the mixer shows; a new app's needs its own.
+        let sessions = if !(menu == Menu::Volume && with_track) {
+            None
+        } else if again {
+            sessions
+        } else {
+            self.audio.as_ref().and_then(kabuk_win::audio::Audio::watch_sessions)
         };
         let Some(b) = self.bars.get(bar) else { return };
         let scale = b.scale;
-        let layout = kabuk_ui::node::layout(&self.volume_view(menu, with_track), Point::default(), &self.gpu.text);
+        let layout = kabuk_ui::node::layout(
+            &self.volume_view(menu, with_track, &mixer),
+            Point::default(),
+            &self.gpu.text,
+        );
         let size = (
             (layout.size.w * scale.0).ceil() as i32,
             (layout.size.h * scale.0).ceil() as i32,
         );
+        let (module, value) = anchor;
         let button = self.hit_rect(bar, module, value).unwrap_or(b.rect);
         let rect = tooltip::place(
             b.edge,
@@ -131,14 +185,17 @@ impl Shared {
                 tracing::warn!(error = %e, "volume panel not drawn");
             }
         }
-        let shown = Shown::enter(&self.gpu, surface, window, (TIP.entrance, scale), self.motion_level());
+        let level = if again { Level::Off } else { self.motion_level() };
+        let shown = Shown::enter(&self.gpu, surface, window, (TIP.entrance, scale), level);
         let _ = self.gpu.commit();
-        if activate {
-            shown.window().activate();
-        } else {
-            shown.window().show();
+        if !again {
+            if activate {
+                shown.window().activate();
+            } else {
+                shown.window().show();
+            }
         }
-        tracing::info!(?menu, with_track, "volume panel opened");
+        tracing::info!(?menu, with_track, apps = mixer.len(), again, "volume panel opened");
         self.volume_panel = Some(VolumePanel {
             shown,
             surface_size: (rect.w, rect.h),
@@ -146,16 +203,24 @@ impl Shared {
             scale,
             with_track,
             menu,
-            dragging: false,
+            bar,
+            anchor,
+            dragging: None,
+            mixer,
+            _sessions: sessions,
         });
     }
 
     /// Draws the panel again with the output's level now (it changed).
     pub(super) fn redraw_volume_panel(&mut self) {
-        let Some((menu, with_track)) = self.volume_panel.as_ref().map(|p| (p.menu, p.with_track)) else {
+        let Some(p) = self.volume_panel.as_ref() else {
             return;
         };
-        let layout = kabuk_ui::node::layout(&self.volume_view(menu, with_track), Point::default(), &self.gpu.text);
+        let layout = kabuk_ui::node::layout(
+            &self.volume_view(p.menu, p.with_track, &p.mixer),
+            Point::default(),
+            &self.gpu.text,
+        );
         let Some(p) = self.volume_panel.as_mut() else { return };
         let (w, h) = p.surface_size;
         if let Some(s) = p.shown.surface_mut() {
@@ -169,26 +234,68 @@ impl Shared {
         let _ = self.gpu.commit();
     }
 
-    /// Sets the level from a press or a drag at `x` (the panel's pixels).
-    fn volume_from(&mut self, x: i32) {
+    /// An app's session changed (Core Audio told): the mixer shows the levels now, and
+    /// is laid out again when an app joined or left it.
+    pub(super) fn mixer_changed(&mut self) {
+        let Some(p) = self.volume_panel.as_ref() else { return };
+        let (menu, with_track, bar, anchor) = (p.menu, p.with_track, p.bar, p.anchor);
+        let now = self.mixer_now(menu, with_track);
+        let programs = |rows: &[MixerRow]| {
+            rows.iter()
+                .map(|r| (r.exe.to_lowercase(), r.pids.clone()))
+                .collect::<Vec<_>>()
+        };
+        if programs(&now) != programs(&p.mixer) {
+            tracing::debug!(apps = now.len(), "volume mixer changed");
+            // A new session is watched too: the watch starts again with the panel's
+            // window kept.
+            if let Some(p) = self.volume_panel.as_mut() {
+                p._sessions = None;
+                p._sessions = self.audio.as_ref().and_then(kabuk_win::audio::Audio::watch_sessions);
+            }
+            self.open_system_menu(bar, menu, with_track, anchor, false);
+        } else if let Some(p) = self.volume_panel.as_mut() {
+            if p.mixer != now {
+                p.mixer = now;
+                self.redraw_volume_panel();
+            }
+        }
+    }
+
+    /// Sets level `which` (the output's [`TRACK`] or an app's) from a press or a drag at
+    /// `x` (the panel's pixels).
+    fn level_from(&mut self, which: u32, x: i32) {
         let Some(p) = self.volume_panel.as_ref() else { return };
         let Some((track, _)) = p
             .layout
             .hits
             .iter()
-            .find(|(_, h)| h.module == volume_panel::HIT && h.value == TRACK)
+            .find(|(_, h)| h.module == volume_panel::HIT && h.value == which)
         else {
             return;
         };
         let percent = volume_panel::percent_at(p.scale.dips(x), *track);
-        if let Some(a) = &self.audio {
-            a.set_percent(percent);
-            self.live.volume = a.volume();
+        if which == TRACK {
+            if let Some(a) = &self.audio {
+                a.set_percent(percent);
+                self.live.volume = a.volume();
+            }
+        } else {
+            let i = usize::try_from(which - FIRST_APP).unwrap_or(usize::MAX);
+            let Some(row) = self.volume_panel.as_mut().and_then(|p| p.mixer.get_mut(i)) else {
+                return;
+            };
+            row.percent = percent;
+            let pids = row.pids.clone();
+            if let Some(a) = &self.audio {
+                a.set_sessions_percent(&pids, percent);
+            }
         }
         self.redraw_volume_panel();
     }
 
     pub(super) fn on_volume_panel(&mut self, m: Msg) -> Option<isize> {
+        let is_level = |h: u32| h == TRACK || (FIRST_APP..FIRST_APP_MUTE).contains(&h);
         match m.id {
             msg::LBUTTONDOWN => {
                 let p = self.volume_panel.as_ref()?;
@@ -198,25 +305,24 @@ impl Shared {
                     y: p.scale.dips(y),
                 };
                 let h = p.layout.hit_test(at).filter(|h| h.module == volume_panel::HIT)?.value;
-                if h == TRACK {
+                if is_level(h) {
                     if let Some(p) = self.volume_panel.as_mut() {
-                        p.dragging = true;
+                        p.dragging = Some(h);
                         p.shown.window().capture_mouse(true);
                     }
-                    self.volume_from(x);
+                    self.level_from(h, x);
                 }
                 Some(0)
             }
             msg::MOUSEMOVE => {
-                if self.volume_panel.as_ref().is_some_and(|p| p.dragging) {
-                    self.volume_from(msg::point(m.lparam).0);
+                if let Some(h) = self.volume_panel.as_ref().and_then(|p| p.dragging) {
+                    self.level_from(h, msg::point(m.lparam).0);
                 }
                 Some(0)
             }
             msg::LBUTTONUP => {
                 let p = self.volume_panel.as_mut()?;
-                if p.dragging {
-                    p.dragging = false;
+                if p.dragging.take().is_some() {
                     p.shown.window().capture_mouse(false);
                     return Some(0);
                 }
@@ -235,7 +341,17 @@ impl Shared {
                         self.redraw_volume_panel();
                         self.render_all(false);
                     }
-                    TRACK => {}
+                    level if is_level(level) => {}
+                    app if app >= FIRST_APP_MUTE => {
+                        let row = p.mixer.get_mut(usize::try_from(app - FIRST_APP_MUTE).ok()?)?;
+                        row.muted = !row.muted;
+                        let pids = row.pids.clone();
+                        tracing::info!(exe = %row.exe, muted = row.muted, "app muted from the mixer");
+                        if let Some(a) = &self.audio {
+                            a.toggle_sessions_mute(&pids);
+                        }
+                        self.redraw_volume_panel();
+                    }
                     output if output >= FIRST_OUTPUT => {
                         let (menu, with_track) = (p.menu, p.with_track);
                         let chosen = self
@@ -278,7 +394,9 @@ impl Shared {
                 Some(0)
             }
             msg::ACTIVATE => {
-                if (m.wparam & 0xFFFF) == msg::WA_INACTIVE && !self.volume_panel.as_ref().is_some_and(|p| p.dragging) {
+                if (m.wparam & 0xFFFF) == msg::WA_INACTIVE
+                    && !self.volume_panel.as_ref().is_some_and(|p| p.dragging.is_some())
+                {
                     self.close_volume_panel();
                 }
                 None

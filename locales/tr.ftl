@@ -85,6 +85,7 @@ launcher-shutdown = Bilgisayarı kapat
 launcher-settings = Kabuk ayarları
 power-sign-out = Oturumu kapat
 vol-mixer = Ses karıştırıcısını aç
+vol-apps = Ses düzeyi karıştırıcı
 vol-settings = Ses ayarları
 vol-troubleshoot = Ses sorunlarını gider
 clock-adjust = Tarih ve saati ayarla

@@ -1,6 +1,7 @@
 //! The default output device's volume through Core Audio, with change notifications
 //! posted to a window (no polling), the active output devices and which one is the
-//! default. Call [`crate::system::com_init`] first.
+//! default, and the apps' sessions on it with their own levels (Windows' volume mixer).
+//! Call [`crate::system::com_init`] first.
 
 use windows::core::{implement, PCWSTR};
 use windows::Win32::Foundation::PROPERTYKEY;
@@ -8,8 +9,11 @@ use windows::Win32::Media::Audio::Endpoints::{
     IAudioEndpointVolume, IAudioEndpointVolumeCallback, IAudioEndpointVolumeCallback_Impl,
 };
 use windows::Win32::Media::Audio::{
-    eConsole, eRender, EDataFlow, ERole, IMMDeviceEnumerator, IMMNotificationClient, IMMNotificationClient_Impl,
-    MMDeviceEnumerator, AUDIO_VOLUME_NOTIFICATION_DATA, DEVICE_STATE,
+    eConsole, eRender, AudioSessionDisconnectReason, AudioSessionState, AudioSessionStateActive,
+    AudioSessionStateExpired, EDataFlow, ERole, IAudioSessionControl, IAudioSessionControl2, IAudioSessionEvents,
+    IAudioSessionEvents_Impl, IAudioSessionManager2, IAudioSessionNotification, IAudioSessionNotification_Impl,
+    IMMDeviceEnumerator, IMMNotificationClient, IMMNotificationClient_Impl, ISimpleAudioVolume, MMDeviceEnumerator,
+    AUDIO_VOLUME_NOTIFICATION_DATA, DEVICE_STATE,
 };
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
 
@@ -17,7 +21,8 @@ use crate::msgloop::{post_message, Msg};
 use crate::sync::io_error;
 use crate::window::Hwnd;
 
-/// Where change notifications go. `wparam` is [`VOLUME_CHANGED`] or [`DEVICE_CHANGED`].
+/// Where change notifications go. `wparam` is [`VOLUME_CHANGED`], [`DEVICE_CHANGED`] or
+/// [`SESSIONS_CHANGED`].
 #[derive(Clone, Copy, Debug)]
 pub struct Notify {
     pub window: Hwnd,
@@ -277,6 +282,236 @@ impl Audio {
     }
 }
 
+/// An app's audio session on the default output, as a row of Windows' volume mixer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Session {
+    pub pid: u32,
+    /// The program's file, when its process could be read.
+    pub exe: Option<String>,
+    /// The name the app gave its session (often empty, or an `@resource` reference).
+    pub name: String,
+    pub percent: u32,
+    pub muted: bool,
+    /// Playing now (an inactive session played earlier and may again).
+    pub active: bool,
+}
+
+/// One session's controls, by its process.
+struct SessionControl {
+    pid: u32,
+    control: IAudioSessionControl2,
+    volume: ISimpleAudioVolume,
+}
+
+impl Audio {
+    /// The default output's session manager.
+    fn session_manager(&self) -> Option<IAudioSessionManager2> {
+        // SAFETY: plain COM calls on the enumerator and the device it gives.
+        unsafe {
+            self.enumerator
+                .GetDefaultAudioEndpoint(eRender, eConsole)
+                .and_then(|d| d.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None))
+                .ok()
+        }
+    }
+
+    /// The apps' sessions (not expired, not Windows' system sounds), with their controls.
+    fn session_controls(&self) -> Vec<SessionControl> {
+        use windows::core::Interface;
+        let Some(manager) = self.session_manager() else {
+            return Vec::new();
+        };
+        // SAFETY: plain COM calls on the sessions the manager lists.
+        unsafe {
+            let Ok(all) = manager.GetSessionEnumerator() else {
+                return Vec::new();
+            };
+            (0..all.GetCount().unwrap_or(0))
+                .filter_map(|i| {
+                    let control: IAudioSessionControl2 = all.GetSession(i).ok()?.cast().ok()?;
+                    // S_OK (0) is the system sounds' session, S_FALSE any other.
+                    if control.IsSystemSoundsSession().0 == 0 || control.GetState().ok()? == AudioSessionStateExpired {
+                        return None;
+                    }
+                    let pid = control.GetProcessId().ok().filter(|p| *p != 0)?;
+                    let volume: ISimpleAudioVolume = control.cast().ok()?;
+                    Some(SessionControl { pid, control, volume })
+                })
+                .collect()
+        }
+    }
+
+    /// The apps playing (or that played) through the default output, in Windows' order.
+    pub fn sessions(&self) -> Vec<Session> {
+        use windows::Win32::System::Com::CoTaskMemFree;
+        self.session_controls()
+            .into_iter()
+            .map(|s| {
+                // SAFETY: plain COM getters; the name Core Audio allocated is freed once.
+                unsafe {
+                    let name = s
+                        .control
+                        .GetDisplayName()
+                        .map(|p| {
+                            let n = p.to_string().unwrap_or_default();
+                            CoTaskMemFree(Some(p.0 as *const _));
+                            n
+                        })
+                        .unwrap_or_default();
+                    Session {
+                        pid: s.pid,
+                        exe: crate::process::Process::query(s.pid).ok().and_then(|p| p.image_path()),
+                        name,
+                        percent: (s.volume.GetMasterVolume().unwrap_or(0.0) * 100.0)
+                            .round()
+                            .clamp(0.0, 100.0) as u32,
+                        muted: s.volume.GetMute().map(|m| m.as_bool()).unwrap_or(false),
+                        active: s.control.GetState().ok() == Some(AudioSessionStateActive),
+                    }
+                }
+            })
+            .collect()
+    }
+
+    /// Sets the sessions of processes `pids` to `percent` (clamped to 0-100).
+    pub fn set_sessions_percent(&self, pids: &[u32], percent: u32) {
+        let level = percent.min(100) as f32 / 100.0;
+        for s in self.session_controls().into_iter().filter(|s| pids.contains(&s.pid)) {
+            // SAFETY: plain COM setter; no event context GUID.
+            let _ = unsafe { s.volume.SetMasterVolume(level, std::ptr::null()) };
+        }
+    }
+
+    /// Mutes the sessions of processes `pids`, or unmutes them when all are muted.
+    pub fn toggle_sessions_mute(&self, pids: &[u32]) {
+        let mine: Vec<SessionControl> = self
+            .session_controls()
+            .into_iter()
+            .filter(|s| pids.contains(&s.pid))
+            .collect();
+        // SAFETY: plain COM getters and setters; no event context GUID.
+        unsafe {
+            let all_muted = mine
+                .iter()
+                .all(|s| s.volume.GetMute().map(|m| m.as_bool()).unwrap_or(false));
+            for s in &mine {
+                let _ = s.volume.SetMute(!all_muted, std::ptr::null());
+            }
+        }
+    }
+
+    /// Watches the apps' sessions while it lives: a session that starts or stops
+    /// playing, changes its level, ends, or a new one, posts [`SESSIONS_CHANGED`].
+    pub fn watch_sessions(&self) -> Option<SessionWatch> {
+        let manager = self.session_manager()?;
+        let notification: IAudioSessionNotification = SessionsCallback { notify: self.notify }.into();
+        // SAFETY: (whole block) the callbacks stay alive in the watch until they are
+        // unregistered in its Drop. Core Audio lists the sessions before it tells of new
+        // ones (its documentation asks for the enumerator first).
+        unsafe {
+            let _ = manager.GetSessionEnumerator();
+            let registered = manager.RegisterSessionNotification(&notification).is_ok();
+            let events = self
+                .session_controls()
+                .into_iter()
+                .filter_map(|s| {
+                    let callback: IAudioSessionEvents = SessionEventsCallback { notify: self.notify }.into();
+                    s.control.RegisterAudioSessionNotification(&callback).ok()?;
+                    Some((s.control, callback))
+                })
+                .collect();
+            Some(SessionWatch {
+                manager,
+                notification: registered.then_some(notification),
+                events,
+            })
+        }
+    }
+}
+
+/// A new app's session appeared, or one changed (see [`Audio::watch_sessions`]).
+pub const SESSIONS_CHANGED: usize = 2;
+
+#[implement(IAudioSessionNotification)]
+struct SessionsCallback {
+    notify: Notify,
+}
+
+impl IAudioSessionNotification_Impl for SessionsCallback_Impl {
+    fn OnSessionCreated(&self, _: windows::core::Ref<IAudioSessionControl>) -> windows::core::Result<()> {
+        self.notify.post(SESSIONS_CHANGED);
+        Ok(())
+    }
+}
+
+#[implement(IAudioSessionEvents)]
+struct SessionEventsCallback {
+    notify: Notify,
+}
+
+impl IAudioSessionEvents_Impl for SessionEventsCallback_Impl {
+    fn OnDisplayNameChanged(&self, _: &PCWSTR, _: *const windows::core::GUID) -> windows::core::Result<()> {
+        Ok(())
+    }
+    fn OnIconPathChanged(&self, _: &PCWSTR, _: *const windows::core::GUID) -> windows::core::Result<()> {
+        Ok(())
+    }
+    fn OnSimpleVolumeChanged(
+        &self,
+        _: f32,
+        _: windows::core::BOOL,
+        _: *const windows::core::GUID,
+    ) -> windows::core::Result<()> {
+        self.notify.post(SESSIONS_CHANGED);
+        Ok(())
+    }
+    fn OnChannelVolumeChanged(
+        &self,
+        _: u32,
+        _: *const f32,
+        _: u32,
+        _: *const windows::core::GUID,
+    ) -> windows::core::Result<()> {
+        Ok(())
+    }
+    fn OnGroupingParamChanged(
+        &self,
+        _: *const windows::core::GUID,
+        _: *const windows::core::GUID,
+    ) -> windows::core::Result<()> {
+        Ok(())
+    }
+    fn OnStateChanged(&self, _: AudioSessionState) -> windows::core::Result<()> {
+        self.notify.post(SESSIONS_CHANGED);
+        Ok(())
+    }
+    fn OnSessionDisconnected(&self, _: AudioSessionDisconnectReason) -> windows::core::Result<()> {
+        self.notify.post(SESSIONS_CHANGED);
+        Ok(())
+    }
+}
+
+/// The registrations of [`Audio::watch_sessions`]; dropping it ends them.
+pub struct SessionWatch {
+    manager: IAudioSessionManager2,
+    notification: Option<IAudioSessionNotification>,
+    events: Vec<(IAudioSessionControl2, IAudioSessionEvents)>,
+}
+
+impl Drop for SessionWatch {
+    fn drop(&mut self) {
+        // SAFETY: unregisters the callbacks registered in `watch_sessions`.
+        unsafe {
+            for (control, callback) in &self.events {
+                let _ = control.UnregisterAudioSessionNotification(callback);
+            }
+            if let Some(n) = &self.notification {
+                let _ = self.manager.UnregisterSessionNotification(n);
+            }
+        }
+    }
+}
+
 impl Drop for Audio {
     fn drop(&mut self) {
         self.detach();
@@ -318,6 +553,31 @@ mod tests {
                 audio.outputs().into_iter().find(|o| o.default).map(|o| o.id),
                 Some(current.id.clone())
             );
+        }
+    }
+
+    /// The apps' sessions are read (Windows' system sounds left out); a session set to
+    /// its own level keeps it (nothing changes for the user), and the watch registers
+    /// and lets go.
+    #[test]
+    fn the_apps_sessions_are_listed_and_set() {
+        crate::system::com_init();
+        let notify = Notify {
+            window: Hwnd(0),
+            message: 0,
+        };
+        let audio = Audio::new(notify).expect("device enumerator");
+        let sessions = audio.sessions();
+        assert!(sessions.iter().all(|s| s.pid != 0 && s.percent <= 100), "{sessions:?}");
+        if let Some(s) = sessions.first() {
+            audio.set_sessions_percent(&[s.pid], s.percent);
+            let again = audio.sessions().into_iter().find(|x| x.pid == s.pid).map(|x| x.percent);
+            assert_eq!(again, Some(s.percent));
+        }
+        if audio.volume().is_some() {
+            let watch = audio.watch_sessions();
+            assert!(watch.is_some(), "no session manager on the default output");
+            drop(watch);
         }
     }
 

@@ -1296,6 +1296,11 @@ impl Shared {
                 Some(0)
             }
             MSG_AUDIO => {
+                if m.wparam == audio::SESSIONS_CHANGED {
+                    // An app's level or session: the mixer only, no OSD.
+                    self.mixer_changed();
+                    return Some(0);
+                }
                 if m.wparam == audio::DEVICE_CHANGED {
                     if let Some(a) = self.audio.as_mut() {
                         a.reconnect();
