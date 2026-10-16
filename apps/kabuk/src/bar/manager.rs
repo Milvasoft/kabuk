@@ -1801,6 +1801,7 @@ impl Shared {
         // Auto-hiding (D70), it reserves nothing and waits off its edge as the bar does.
         let autohide = self.config().bar.autohide;
         let (appbar, strip) = if autohide {
+            self.record_work_area(&monitor);
             (None, appbar::strip(edge, mon, thickness))
         } else if self.record_work_area(&monitor) {
             match AppBar::register(&window, MSG_APPBAR) {
@@ -2806,6 +2807,8 @@ impl Shared {
         let window = Window::shell_surface(BAR_CLASS, "Kabuk", first, proc)?;
 
         let (appbar, rect) = if autohide {
+            // It reserves its strip while shown (D73): the work area is recorded first.
+            self.record_work_area(&monitor);
             (None, appbar::strip(edge, mon, thickness))
         } else if self.record_work_area(&monitor) {
             match AppBar::register(&window, MSG_APPBAR) {
@@ -2890,7 +2893,66 @@ impl Shared {
             since: std::time::Instant::now(),
         });
         tracing::debug!(?who, show, "auto-hiding bar slides");
+        self.reserve(who, show);
         self.step_bar_slides();
+    }
+
+    /// While auto-hiding `who` is shown it reserves its strip, as a bar that keeps its
+    /// place does, so the windows make room instead of lying under it (asked for by the
+    /// user: it came over the windows' tops; DECISIONS D73); sliding off it gives the room
+    /// back. Nothing is reserved when the work area could not be recorded first.
+    fn reserve(&mut self, who: Peeker, on: bool) {
+        let monitor = match who {
+            Peeker::Bar(i) => self.bars.get(i).map(|b| b.monitor.clone()),
+            Peeker::Dock => self.dock.as_ref().map(|d| d.monitor.clone()),
+        };
+        let Some(monitor) = monitor else { return };
+        if on && !self.record_work_area(&monitor) {
+            return;
+        }
+        let mon = px_rect(monitor.rect);
+        match who {
+            Peeker::Bar(i) => {
+                let Some(bar) = self.bars.get_mut(i) else { return };
+                if !on {
+                    if bar.appbar.take().is_some() {
+                        tracing::info!(device = %bar.monitor.device, "auto-hiding bar gives its room back");
+                    }
+                    return;
+                }
+                if bar.appbar.is_some() {
+                    return;
+                }
+                match AppBar::register(&bar.window, MSG_APPBAR) {
+                    Ok(a) => {
+                        bar.rect = a.place(bar.edge, mon, bar.thickness);
+                        bar.appbar = Some(a);
+                        tracing::info!(device = %bar.monitor.device, rect = ?bar.rect, "auto-hiding bar makes room");
+                    }
+                    Err(e) => tracing::warn!(error = %e, "auto-hiding bar made no room"),
+                }
+            }
+            Peeker::Dock => {
+                let Some(d) = self.dock.as_mut() else { return };
+                if !on {
+                    if d.appbar.take().is_some() {
+                        tracing::info!("auto-hiding dock gives its room back");
+                    }
+                    return;
+                }
+                if d.appbar.is_some() {
+                    return;
+                }
+                match AppBar::register(&d.window, MSG_APPBAR) {
+                    Ok(a) => {
+                        d.strip = a.place(d.edge, mon, d.thickness);
+                        d.appbar = Some(a);
+                        tracing::info!(strip = ?d.strip, "auto-hiding dock makes room");
+                    }
+                    Err(e) => tracing::warn!(error = %e, "auto-hiding dock made no room"),
+                }
+            }
+        }
     }
 
     /// The mouse is on auto-hiding `who`: shown (or coming in), it stays; hidden, it

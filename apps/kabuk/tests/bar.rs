@@ -84,14 +84,24 @@ fn primary_window_of(class: &str, pid: u32) -> kabuk_win::window::Hwnd {
         .unwrap_or_else(|| panic!("no {class} on Monitor 1 (main)"))
 }
 
+/// The work area of Monitor 1 (main) now.
+fn primary_work_area() -> Rect {
+    kabuk_win::shell::monitors()
+        .into_iter()
+        .find(|m| m.primary)
+        .unwrap()
+        .work_area
+}
+
 /// SPEC §2.1, found by the user: `bar.autohide` did nothing. An auto-hiding bar reserves
 /// no space and waits off its edge with a sliver left on screen; the mouse resting on it
 /// brings it in, and some time after the mouse leaves it slides off again. DECISIONS
 /// D70, found by the user: it came over the windows whenever the mouse passed the edge
-/// (on its way to a window's top), and slid off while its own panel was open. Run in the
-/// test machine: the mouse is moved.
+/// (on its way to a window's top), and slid off while its own panel was open. D73, asked
+/// for by the user: shown, it pushes the windows down (reserves its strip), and gives the
+/// room back when it slides off. Run in the test machine: the mouse is moved.
 #[test]
-fn an_auto_hiding_bar_reserves_nothing_and_slides_in_when_the_mouse_rests() {
+fn an_auto_hiding_bar_makes_room_while_shown_and_slides_in_when_the_mouse_rests() {
     use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_VOLUME_PANEL};
     let before = work_areas();
     let sandbox = Sandbox::new();
@@ -147,6 +157,13 @@ fn an_auto_hiding_bar_reserves_nothing_and_slides_in_when_the_mouse_rests() {
         sandbox.last_log_line(&["auto-hiding"]).unwrap_or_default()
     );
     assert_eq!(sandbox.log_lines("mouse rested at the edge"), 1);
+    // Shown, it makes room: the windows' area starts under it.
+    assert!(
+        wait_until(SETTLE, || primary_work_area().top >= bar.window_rect().unwrap().bottom).is_some(),
+        "the shown bar did not push the windows: {:?} under {:?}",
+        primary_work_area(),
+        bar.window_rect()
+    );
     // Its panel open, the mouse gone from it: it stays while the panel is open.
     let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
         .into_iter()
@@ -168,12 +185,17 @@ fn an_auto_hiding_bar_reserves_nothing_and_slides_in_when_the_mouse_rests() {
     assert!(kabuk_win::input::set_cursor_pos(away.0, away.1));
     std::thread::sleep(Duration::from_millis(1500));
     assert_eq!(top(), primary.rect.top, "it slid off with its panel open");
-    // The panel closed: it slides off.
+    // The panel closed: it slides off and gives the room back.
     post(0);
     assert!(
         wait_until(SETTLE, || top() == hidden).is_some(),
         "not hidden again: {}",
         top()
+    );
+    assert!(
+        wait_until(SETTLE, || work_areas() == before).is_some(),
+        "the room was not given back: {:?}",
+        work_areas()
     );
     assert_eq!(sandbox.restore().0, 0);
     assert_eq!(work_areas(), before);
@@ -181,8 +203,8 @@ fn an_auto_hiding_bar_reserves_nothing_and_slides_in_when_the_mouse_rests() {
 
 /// DECISIONS D70, found by the user: with auto-hide, Rıhtım's dock did not hide. It
 /// reserves nothing, waits off its edge with a sliver at the monitor's edge, comes in
-/// when the mouse rests there and slides off once it leaves. Run in the test machine:
-/// the mouse is moved.
+/// when the mouse rests there and slides off once it leaves. D73: shown, it pushes the
+/// windows up, and gives the room back. Run in the test machine: the mouse is moved.
 #[test]
 fn rihtims_dock_auto_hides_with_the_bar() {
     let before = work_areas();
@@ -231,11 +253,22 @@ fn rihtims_dock_auto_hides_with_the_bar() {
         rect(),
         sandbox.last_log_line(&["auto-hiding"]).unwrap_or_default()
     );
+    let full = before.iter().find(|(d, _)| *d == primary.device).unwrap().1;
+    assert!(
+        wait_until(SETTLE, || primary_work_area().bottom < full.bottom).is_some(),
+        "the shown dock did not push the windows: {:?}",
+        primary_work_area()
+    );
     assert!(kabuk_win::input::set_cursor_pos(away.0, away.1));
     assert!(
         wait_until(SETTLE, || rect() == hidden).is_some(),
         "not hidden again: {:?}",
         rect()
+    );
+    assert!(
+        wait_until(SETTLE, || work_areas() == before).is_some(),
+        "the room was not given back: {:?}",
+        work_areas()
     );
     assert_eq!(sandbox.restore().0, 0);
     assert_eq!(work_areas(), before);
