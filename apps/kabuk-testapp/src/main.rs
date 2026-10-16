@@ -25,6 +25,9 @@
 //!   --fullscreen           borderless window covering the primary monitor, above the
 //!                          others as a game is (so a maximised window of the user's in
 //!                          front does not decide the tests)
+//!   --overlay              a small see-through window that clicks pass through, above
+//!                          the others in the middle of the primary monitor, as a graphics
+//!                          driver's or a voice chat's overlay over a game
 //!   --splash               small borderless popup, like a splash screen
 //!   --dialog               also open an owned dialog-like window
 //!   --tool                 tool window (WS_EX_TOOLWINDOW)
@@ -52,6 +55,8 @@ const CLASS: &str = "KabukTestWindow";
 const DEFAULT_TITLE: &str = "Kabuk test window";
 const DEFAULT_SIZE: (i32, i32) = (640, 480);
 const SPLASH_SIZE: (i32, i32) = (400, 240);
+/// How opaque the overlay is (it shows, and clicks still pass through).
+const OVERLAY_ALPHA: u8 = 160;
 const DIALOG_SIZE: (i32, i32) = (360, 200);
 const TIMER_HANG: usize = 1;
 const TIMER_RESIZE: usize = 2;
@@ -83,6 +88,7 @@ struct Options {
     tray_log: Option<String>,
     tray_menu_at_corner: bool,
     fullscreen: bool,
+    overlay: bool,
     splash: bool,
     dialog: bool,
     tool: bool,
@@ -132,6 +138,7 @@ fn parse() -> Result<Options, String> {
             "--tray-log" => o.tray_log = Some(value()?),
             "--tray-menu-at-corner" => o.tray_menu_at_corner = true,
             "--fullscreen" => o.fullscreen = true,
+            "--overlay" => o.overlay = true,
             "--splash" => o.splash = true,
             "--dialog" => o.dialog = true,
             "--tool" => o.tool = true,
@@ -185,6 +192,12 @@ fn run(o: &Options) {
             ex_style |= WS_EX_TOPMOST;
             (x, y) = (0, 0);
             (w, h) = (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
+        } else if o.overlay {
+            style = WS_POPUP;
+            ex_style |= WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT;
+            (w, h) = o.size.unwrap_or(SPLASH_SIZE);
+            x = (GetSystemMetrics(SM_CXSCREEN) - w) / 2;
+            y = (GetSystemMetrics(SM_CYSCREEN) - h) / 2;
         } else if o.splash {
             style = WS_POPUP | WS_BORDER;
             (w, h) = o.size.unwrap_or(SPLASH_SIZE);
@@ -214,6 +227,9 @@ fn run(o: &Options) {
             None,
         )
         .expect("create window");
+        if o.overlay {
+            let _ = SetLayeredWindowAttributes(hwnd, windows::Win32::Foundation::COLORREF(0), OVERLAY_ALPHA, LWA_ALPHA);
+        }
         if o.maximized {
             let _ = ShowWindow(hwnd, SW_SHOWMAXIMIZED);
         } else if o.minimized {

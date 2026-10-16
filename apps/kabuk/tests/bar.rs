@@ -2846,3 +2846,132 @@ fn floating_groups_leave_the_desktop_behind_them() {
         "Devre filled its strip: {change:?}"
     );
 }
+
+/// The bar of Monitor 1 (main) of shell `pid`, and a sender of the shell's
+/// ABN_FULLSCREENAPP to it, as Explorer sends it (`true`: a program went full screen).
+fn main_bar_and_notify(pid: u32) -> (kabuk_win::window::Hwnd, impl Fn(bool)) {
+    use kabuk::bar::manager::MSG_APPBAR;
+    const ABN_FULLSCREENAPP: usize = 2;
+    let primary = kabuk_win::shell::monitors().into_iter().find(|m| m.primary).unwrap();
+    let main_bar = shell_windows("Kabuk.Bar", pid)
+        .into_iter()
+        .find(|w| {
+            w.window_rect().is_some_and(|r| {
+                let (cx, cy) = ((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+                primary.rect.left <= cx && cx < primary.rect.right && primary.rect.top <= cy && cy < primary.rect.bottom
+            })
+        })
+        .expect("primary bar");
+    let notify = move |entering: bool| {
+        kabuk_win::msgloop::post_message(
+            main_bar,
+            kabuk_win::msgloop::Msg {
+                id: MSG_APPBAR,
+                wparam: ABN_FULLSCREENAPP,
+                lparam: isize::from(entering),
+            },
+        )
+        .unwrap();
+    };
+    (main_bar, notify)
+}
+
+/// DECISIONS D72, found on another computer: game mode failed there. A game in exclusive
+/// full screen changes the resolution, and Windows tells every window the display
+/// changed: the bars are not made again while the full-screen program is in front (new
+/// bar windows over it could take it out of its full screen); they are once it is gone.
+/// The display change is announced to the bars as Windows does (the test machine has one
+/// resolution only).
+#[test]
+fn a_display_change_under_a_full_screen_game_waits_for_it() {
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("bars built") == 1).is_some());
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let (main_bar, notify) = main_bar_and_notify(pid);
+    let game = TestWindow::open(&["--fullscreen", "--title", &title("exclusive")]);
+    assert!(wait_until(SETTLE, || game.hwnd.is_visible()).is_some());
+    notify(true);
+    assert!(
+        wait_until(SETTLE, || !main_bar.is_visible()).is_some(),
+        "the bar stayed over the game"
+    );
+    for bar in shell_windows("Kabuk.Bar", pid) {
+        kabuk_win::msgloop::post_message(
+            bar,
+            kabuk_win::msgloop::Msg {
+                id: kabuk_win::msgloop::msg::DISPLAYCHANGE,
+                wparam: 32,
+                lparam: 0,
+            },
+        )
+        .unwrap();
+    }
+    assert!(wait_until(SETTLE, || sandbox
+        .log_lines("display changed under a full-screen program")
+        == 1)
+    .is_some());
+    std::thread::sleep(kabuk::bar::manager::DISPLAY_DEBOUNCE * 2);
+    assert_eq!(
+        sandbox.log_lines("bars built"),
+        1,
+        "the bars were made again under the game"
+    );
+    assert!(!main_bar.is_visible(), "a bar came up over the game");
+    // The game ends: the bars are made again for the change.
+    game.close();
+    notify(false);
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("bars built") >= 2).is_some(),
+        "the bars were not made again after the game"
+    );
+    assert_eq!(
+        sandbox.log_lines("full-screen program gone; bars made again for the display change"),
+        1
+    );
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}
+
+/// DECISIONS D72: an overlay over a full-screen game (a graphics driver's, Game Bar's, a
+/// voice chat's), a window clicks pass through, is not the program in front: the game
+/// still sends the bar away.
+#[test]
+fn an_overlay_over_a_full_screen_game_does_not_keep_the_bar() {
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("bars built") == 1).is_some());
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let (main_bar, notify) = main_bar_and_notify(pid);
+    let game = TestWindow::open(&["--fullscreen", "--title", &title("game")]);
+    assert!(wait_until(SETTLE, || game.hwnd.is_visible()).is_some());
+    notify(true);
+    assert!(
+        wait_until(SETTLE, || !main_bar.is_visible()).is_some(),
+        "the bar stayed over the game"
+    );
+    // An overlay comes up over the game (found: the next check took it for the program
+    // in front and brought the bar back over the game).
+    let checks = sandbox.log_lines("full-screen check");
+    let overlay = TestWindow::open(&["--overlay", "--title", &title("overlay")]);
+    assert!(wait_until(SETTLE, || overlay.hwnd.is_visible()).is_some());
+    notify(true);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("full-screen check") > checks).is_some());
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(
+        !main_bar.is_visible() && sandbox.log_lines("bar back after a full-screen program") == 0,
+        "the bar came back over the game for an overlay: {:?}",
+        sandbox.last_log_line(&["full-screen check"])
+    );
+    overlay.close();
+    game.close();
+    notify(false);
+    assert!(
+        wait_until(SETTLE, || main_bar.is_visible()).is_some(),
+        "the bar did not come back"
+    );
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}

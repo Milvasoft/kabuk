@@ -13,7 +13,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     PostMessageW, SetForegroundWindow, SetWindowPos, ShowWindowAsync, GA_ROOT, GWL_EXSTYLE, GWL_STYLE, GW_OWNER,
     HWND_MESSAGE, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE,
     SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOWNA, WINDOW_LONG_PTR_INDEX, WM_CLOSE, WS_CAPTION, WS_CHILD,
-    WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP, WS_THICKFRAME,
+    WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP, WS_THICKFRAME,
 };
 
 /// The settings app's window class (`webview`) for Kabuk instance `instance`, known
@@ -670,8 +670,9 @@ pub fn front_windows(skip_pid: u32) -> Vec<(Hwnd, kabuk_core::state::Rect, bool)
 
 /// The outer rectangles of the visible top-level windows that hold a program's content,
 /// front first, for full-screen detection. Tool windows (tooltips, overlays' popups),
-/// windows that never activate, the desktop, the taskbars and `skip_pid`'s windows (Kabuk's
-/// own) are left out.
+/// windows that never activate, windows clicks pass through (the overlays of graphics
+/// drivers, Game Bar and voice chats over a game; DECISIONS D72), the desktop, the
+/// taskbars and `skip_pid`'s windows (Kabuk's own) are left out.
 pub fn front_window_rects(skip_pid: u32) -> Vec<kabuk_core::state::Rect> {
     front_candidates(skip_pid)
         .into_iter()
@@ -686,7 +687,7 @@ fn front_candidates(skip_pid: u32) -> Vec<Hwnd> {
         .filter(|w| w.is_visible() && !w.is_minimized() && !w.is_cloaked())
         .filter(|w| {
             let ex = w.long(GWL_EXSTYLE);
-            ex & WS_EX_TOOLWINDOW.0 == 0 && ex & WS_EX_NOACTIVATE.0 == 0
+            ex & WS_EX_TOOLWINDOW.0 == 0 && ex & WS_EX_NOACTIVATE.0 == 0 && ex & WS_EX_TRANSPARENT.0 == 0
         })
         .filter(|w| w.pid() != Some(skip_pid))
         .filter(|w| !SHELL_CLASSES.contains(&w.class_name().as_str()))

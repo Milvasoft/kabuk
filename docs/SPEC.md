@@ -80,7 +80,7 @@ Target platform: Windows 11 22H2 and later. Windows 10 22H2 is supported on a be
 
 ### 2.4 Game mode
 
-- When a full-screen application (game, video player, presentation) opens, **within 1 second** on that monitor: the bar is hidden, tiling pauses (windows stay in place, new windows are not tiled), notifications are muted.
+- When a full-screen application (game, video player, presentation) opens, **within 1 second** on that monitor: the bar is hidden, tiling pauses (windows stay in place, new windows are not tiled), notifications are muted. A game at a resolution of its own counts (the monitor is taken as it is now), an overlay that clicks pass through does not hide it, and the bars are not made again under it when the resolution changes (DECISIONS D72).
 - Other monitors work normally (can be changed in settings).
 - When the application closes, the previous layout returns exactly; muted notifications are shown as a single summary.
 - Each behaviour can be turned off separately: automatic detection, hide the bar, pause tiling, mute notifications, keep other monitors normal.

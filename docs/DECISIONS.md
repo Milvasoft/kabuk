@@ -8,6 +8,13 @@ No open decisions (the user decided D39, D43, D44 and the still pictures' drift 
 
 ## Decided and proposed
 
+### D72 · Game mode on other computers: the monitor as it is now, overlays, and display changes — Decided by the user (2026-10-16)
+Reported by the user: game mode misbehaved on another computer and not on theirs; they asked for detailed tests. Three causes were found and fixed, each with a test in the test machine that failed before:
+- **Overlays.** A window that clicks pass through (a graphics driver's overlay, Game Bar, a voice chat's) coming up over a full-screen game was taken for the program in front, and the bar came back over the game. Such windows (`WS_EX_TRANSPARENT`) are left out of the check, as tool windows already were.
+- **The monitor as it is now.** A game in exclusive full screen at a resolution of its own changes the monitor's size, while each bar kept the size it was made with, so the game was not seen as full screen. The check takes each monitor's rectangle from Windows at that moment (`kabuk_core::fullscreen::rect_now`).
+- **Display changes under a game.** Windows announces the resolution change, and the bars were made again under the game: new topmost bar windows and a changed work area could take a game out of its exclusive full screen. While a full-screen program is in front the bars wait, and are made again once it is gone.
+The test machine offers one resolution only, so the display change is announced to the bars there as Windows does, and the rectangle now is covered by a unit test.
+
 ### D71 · Devre fills its groups, not a strip — Decided by the user (2026-10-16)
 Found by the user: in Devre a black band lay behind the bar. With a solid background every look fills the bar strip behind everything (D28; the design page's `.screen.has-wall .bar { background-color: var(--desk) }`), and behind Devre's floating, outlined groups that strip looked like a black band across the screen. Now, with a solid background, Devre draws no strip: each group is filled instead, with the colour the user chose (D57) or else the desk colour, so its words keep the contrast they were checked against, and the traces between the groups run over the wallpaper (`bar::style::Style::group_fill`). With the background off or blurred nothing changes (off fills nothing; the blur tints the whole bar window, as in every look). The other looks keep their strip. A test in the test machine reads the desktop above the bar: with the background off Ada and Devre leave it as it was, and with a solid one Devre darkens far less of it than Ada's strip.
 

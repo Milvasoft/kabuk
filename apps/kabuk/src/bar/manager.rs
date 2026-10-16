@@ -586,6 +586,9 @@ struct Shared {
     tooltip: Option<motion_host::Shown>,
     /// The auto-hiding bar (or dock) the mouse rests at, until [`REVEAL_DELAY`] passes.
     reveal: Option<Peeker>,
+    /// A display change came during a full-screen program: the bars are made again once
+    /// it is gone (D72).
+    rebuild_after_game: bool,
     /// Watches the clicked tray icon's program for its menu, for `TRAY_MENU_WAIT`.
     tray_menu: Option<kabuk_win::events::MenuWatch>,
     /// Last, so it goes after the bars: their AppBar messages pass through it.
@@ -828,6 +831,7 @@ impl BarManager {
                 hover: None,
                 tooltip: None,
                 reveal: None,
+                rebuild_after_game: false,
                 tray_menu: None,
                 tray_host: None,
             })
@@ -1248,10 +1252,7 @@ impl Shared {
                         self.kill(timer::CONFIG);
                         self.reload_config();
                     }
-                    timer::REBUILD => {
-                        self.kill(timer::REBUILD);
-                        self.rebuild();
-                    }
+                    timer::REBUILD => self.rebuild_when_free(),
                     timer::MODE => {
                         self.refresh_look();
                         self.schedule_mode_flip();
@@ -1503,16 +1504,28 @@ impl Shared {
         let me = std::process::id();
         let windows = kabuk_win::window::front_windows(me);
         let front: Vec<(kabuk_core::state::Rect, bool)> = windows.iter().map(|(_, r, m)| (*r, *m)).collect();
+        // Each monitor's rectangle now: a game in exclusive full screen may have changed
+        // its resolution, and the bars keep the one they were made with until they are
+        // made again (found on another computer: the game was not seen as full screen;
+        // DECISIONS D72).
+        let live = shell::monitors();
+        let now_rect = |b: &Bar| {
+            kabuk_core::fullscreen::rect_now(
+                &b.monitor.device,
+                live.iter().map(|m| (m.device.as_str(), m.rect)),
+                b.monitor.rect,
+            )
+        };
         let full: Vec<bool> = self
             .bars
             .iter()
-            .map(|b| g.detect && kabuk_core::fullscreen::is_fullscreen_front(front.iter().copied(), b.monitor.rect))
+            .map(|b| g.detect && kabuk_core::fullscreen::is_fullscreen_front(front.iter().copied(), now_rect(b)))
             .collect();
         // Which window turned a monitor's game mode on, for the log (found by the user:
         // the shortcuts stopped, and nothing said which window looked full screen).
         for (b, is_full) in self.bars.iter().zip(&full) {
             if *is_full && !self.game_devices.contains(&b.monitor.device) {
-                let w = kabuk_core::fullscreen::front_on(front.iter().map(|(r, _)| *r), b.monitor.rect)
+                let w = kabuk_core::fullscreen::front_on(front.iter().map(|(r, _)| *r), now_rect(b))
                     .and_then(|i| windows.get(i));
                 if let Some((h, r, _)) = w {
                     let exe = h
@@ -1556,6 +1569,25 @@ impl Shared {
                 self.notices_game_mode(now);
                 self.apply_animated();
             }
+            if !now && std::mem::take(&mut self.rebuild_after_game) {
+                tracing::info!("full-screen program gone; bars made again for the display change");
+                self.schedule_rebuild();
+            }
+        }
+    }
+
+    /// A display change settled: the bars are made again, unless a full-screen program
+    /// is in front (a game that changed the resolution): new bar windows coming up over it
+    /// could take it out of its exclusive full screen, so they are made once it is gone
+    /// (DECISIONS D72).
+    fn rebuild_when_free(&mut self) {
+        self.kill(timer::REBUILD);
+        self.step_aside_for_fullscreen();
+        if self.game_devices.is_empty() {
+            self.rebuild_after_game = false;
+            self.rebuild();
+        } else if !std::mem::replace(&mut self.rebuild_after_game, true) {
+            tracing::info!("display changed under a full-screen program; bars made again after it");
         }
     }
 

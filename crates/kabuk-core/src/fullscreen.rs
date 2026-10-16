@@ -47,6 +47,14 @@ pub fn front_on(windows: impl IntoIterator<Item = Rect>, monitor: Rect) -> Optio
     windows.into_iter().position(|w| on_monitor(&w))
 }
 
+/// Monitor `device`'s rectangle now: the one Windows gives for it among `live` (device,
+/// rectangle), else the one it had when its bar was made (`made`). A game in exclusive
+/// full screen changes the resolution, and the bar keeps the old size until it is made
+/// again (found on another computer: such a game was not seen as full screen; D72).
+pub fn rect_now<'a>(device: &str, live: impl IntoIterator<Item = (&'a str, Rect)>, made: Rect) -> Rect {
+    live.into_iter().find(|(d, _)| *d == device).map_or(made, |(_, r)| r)
+}
+
 /// The parts of `area` that `cut` leaves: up to four rectangles.
 fn subtract(area: Rect, cut: &Rect) -> Vec<Rect> {
     if !intersects(&area, cut) {
@@ -257,5 +265,29 @@ mod tests {
             [r(1000, 0, 2560, 1440), r(0, 40, 1500, 900), r(0, 800, 1200, 1440)],
             area
         ));
+    }
+
+    /// D72: a game at 1920 x 1080 on a 2560 x 1440 monitor covers it as Windows gives it
+    /// now, not as the bar was made; a monitor Windows no longer lists keeps its old size.
+    #[test]
+    fn a_monitors_rectangle_is_the_one_windows_gives_now() {
+        let made = Rect {
+            left: 0,
+            top: 0,
+            right: 2560,
+            bottom: 1440,
+        };
+        let now = Rect {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1080,
+        };
+        let live = [("\\\\.\\DISPLAY2", M1), ("\\\\.\\DISPLAY1", now)];
+        assert_eq!(rect_now("\\\\.\\DISPLAY1", live, made), now);
+        assert_eq!(rect_now("\\\\.\\DISPLAY3", live, made), made);
+        // The game at its own resolution is full screen on the monitor as it is now.
+        assert!(is_fullscreen([now], rect_now("\\\\.\\DISPLAY1", live, made)));
+        assert!(!is_fullscreen([now], made));
     }
 }
