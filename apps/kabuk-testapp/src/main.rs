@@ -20,6 +20,8 @@
 //!                          callback message to <path> as "<wparam> <lparam>"; after a
 //!                          click asks the tray where its icon is and appends
 //!                          "rect <left> <top> <right> <bottom>"
+//!   --tray-menu-at-corner  with --tray-log, opens its menu at the screen's corner (0, 0)
+//!                          after a click, as Explorer's Bluetooth icon does under Kabuk
 //!   --fullscreen           borderless window covering the primary monitor, above the
 //!                          others as a game is (so a maximised window of the user's in
 //!                          front does not decide the tests)
@@ -79,6 +81,7 @@ struct Options {
     resize_self_ms: Option<u32>,
     cloak_after_ms: Option<u32>,
     tray_log: Option<String>,
+    tray_menu_at_corner: bool,
     fullscreen: bool,
     splash: bool,
     dialog: bool,
@@ -87,6 +90,22 @@ struct Options {
 }
 
 static OPTIONS: OnceLock<Options> = OnceLock::new();
+
+/// Opens a popup menu at screen point (x, y), as a tray icon's program does: in front,
+/// then the menu until it is chosen from or closed (`CLOSE_MENU`). `hwnd` is this
+/// program's window, on this thread.
+fn open_menu(hwnd: HWND, x: i32, y: i32) {
+    // SAFETY: the menu is created, shown and destroyed here; `item` outlives the append.
+    unsafe {
+        if let Ok(menu) = CreatePopupMenu() {
+            let item = HSTRING::from("Test item");
+            let _ = AppendMenuW(menu, MF_STRING, 1, PCWSTR(item.as_ptr()));
+            let _ = SetForegroundWindow(hwnd);
+            let _ = TrackPopupMenu(menu, TPM_RIGHTBUTTON, x, y, None, hwnd, None);
+            let _ = DestroyMenu(menu);
+        }
+    }
+}
 
 fn parse_size(text: &str) -> Option<(i32, i32)> {
     let (w, h) = text.split_once(['x', 'X'])?;
@@ -111,6 +130,7 @@ fn parse() -> Result<Options, String> {
             "--resize-self" => o.resize_self_ms = Some(value()?.parse().map_err(|_| "bad --resize-self")?),
             "--cloak-after" => o.cloak_after_ms = Some(value()?.parse().map_err(|_| "bad --cloak-after")?),
             "--tray-log" => o.tray_log = Some(value()?),
+            "--tray-menu-at-corner" => o.tray_menu_at_corner = true,
             "--fullscreen" => o.fullscreen = true,
             "--splash" => o.splash = true,
             "--dialog" => o.dialog = true,
@@ -355,17 +375,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 return LRESULT(0);
             }
             OPEN_MENU => {
-                // As a tray icon's program does: in front, then the menu until it is
-                // chosen from or closed.
-                if let Ok(menu) = CreatePopupMenu() {
-                    let item = HSTRING::from("Test item");
-                    let _ = AppendMenuW(menu, MF_STRING, 1, PCWSTR(item.as_ptr()));
-                    let mut r = windows::Win32::Foundation::RECT::default();
-                    let _ = GetWindowRect(hwnd, &mut r);
-                    let _ = SetForegroundWindow(hwnd);
-                    let _ = TrackPopupMenu(menu, TPM_RIGHTBUTTON, r.left + 20, r.top + 20, None, hwnd, None);
-                    let _ = DestroyMenu(menu);
-                }
+                let mut r = windows::Win32::Foundation::RECT::default();
+                let _ = GetWindowRect(hwnd, &mut r);
+                open_menu(hwnd, r.left + 20, r.top + 20);
                 return LRESULT(0);
             }
             CLOSE_MENU => {
@@ -408,6 +420,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                             };
                             if let Ok(r) = Shell_NotifyIconGetRect(&id) {
                                 let _ = writeln!(f, "rect {} {} {} {}", r.left, r.top, r.right, r.bottom);
+                            }
+                            drop(f);
+                            if o.tray_menu_at_corner {
+                                open_menu(hwnd, 0, 0);
                             }
                         }
                     }

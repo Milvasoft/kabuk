@@ -423,3 +423,39 @@ fn explorers_volume_icon_is_not_drawn_beside_kabuks_own() {
     let drawn: Vec<&str> = t.visible().map(|i| i.tip.as_str()).collect();
     assert_eq!(drawn, ["Bluetooth Devices"]);
 }
+
+fn rect(left: i32, top: i32, right: i32, bottom: i32) -> crate::state::Rect {
+    crate::state::Rect {
+        left,
+        top,
+        right,
+        bottom,
+    }
+}
+
+/// Found by the user: the Bluetooth menu opened at (0, 0), far from its icon in the
+/// overflow panel at (2376, 97). It moves to hang from the click, under the bar.
+#[test]
+fn a_menu_far_from_the_click_moves_beside_the_icon() {
+    // Monitor 1 (main), 2560 × 1440, the bar's 64 px kept out of the work area.
+    let work = rect(0, 64, 2560, 1440);
+    let menu = rect(0, 0, 305, 258);
+    assert_eq!(menu_place(menu, (2376, 97), work), Some((2071, 97)));
+    // A click on the bar itself: the menu goes below the bar, not over it.
+    assert_eq!(menu_place(menu, (2412, 32), work), Some((2107, 64)));
+    // Near the left edge the menu stays on the screen.
+    assert_eq!(menu_place(rect(2000, 900, 2305, 1158), (100, 32), work), Some((0, 64)));
+    // Monitor 2, left of the main one: the menu goes there too.
+    let second = rect(-2560, 64, 0, 1440);
+    assert_eq!(menu_place(menu, (-200, 32), second), Some((-505, 64)));
+}
+
+#[test]
+fn a_menu_opened_by_the_click_is_left_alone() {
+    let work = rect(0, 64, 2560, 1440);
+    // At the click (Chrome's), and hanging from it the other way round.
+    assert_eq!(menu_place(rect(1800, 32, 2105, 290), (1800, 32), work), None);
+    assert_eq!(menu_place(rect(2071, 64, 2376, 322), (2376, 97), work), None);
+    // Within its own size of the click: where its program meant it.
+    assert_eq!(menu_place(rect(2000, 64, 2305, 322), (2412, 32), work), None);
+}

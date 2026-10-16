@@ -2,6 +2,8 @@
 //! DECISIONS D19), and what a click on one sends back to its program. Pure: the bytes
 //! come from the `WM_COPYDATA` Kabuk's tray window receives.
 
+use crate::state::Rect;
+
 /// `SHELLTRAYDATA.dwSignature`.
 pub const TRAY_SIGNATURE: u32 = 0x3475_3423;
 
@@ -359,6 +361,28 @@ impl Tray {
     pub fn shown_index(&self, q: &RectQuery) -> Option<usize> {
         self.visible().position(|i| q.is_about(i))
     }
+}
+
+/// Where a program's menu goes when it opened far from the click on its tray icon: the
+/// top-left corner to move it to, or `None` to leave it. Found by the user: the Bluetooth
+/// icon (Explorer's own) asks Explorer's hidden taskbar where it is, gets (0, 0), and its
+/// menu opened at the screen's corner; Kabuk cannot change that answer without running
+/// code in Explorer, so it moves the menu. A menu reaching within its own size of the
+/// click, on the click's monitor (`work` is that monitor's work area), is where its
+/// program meant it. A moved menu hangs from the click, its right edge
+/// there (as tray menus open), kept inside the work area: below the bar, never under it.
+pub fn menu_place(menu: Rect, click: (i32, i32), work: Rect) -> Option<(i32, i32)> {
+    let (w, h) = (menu.right - menu.left, menu.bottom - menu.top);
+    let off = |at: i32, lo: i32, hi: i32| (lo - at).max(at - hi).max(0);
+    let near = off(click.0, menu.left, menu.right) <= w && off(click.1, menu.top, menu.bottom) <= h;
+    let same_monitor = work.left <= menu.left && menu.right <= work.right;
+    if near && same_monitor {
+        return None;
+    }
+    let fit = |at: i32, lo: i32, hi: i32, size: i32| at.min(hi - size).max(lo);
+    let x = fit(click.0 - w, work.left, work.right, w);
+    let y = fit(click.1, work.top, work.bottom, h);
+    Some((x, y))
 }
 
 #[cfg(test)]

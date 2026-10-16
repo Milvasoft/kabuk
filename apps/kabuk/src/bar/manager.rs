@@ -183,6 +183,8 @@ mod timer {
     pub const GREETING: usize = 31;
     /// The edited app grid's icons wiggle: the next frame.
     pub const APP_GRID_WIGGLE: usize = 32;
+    /// A tray click's program had its time to open its menu: the menu watch ends.
+    pub const TRAY_MENU: usize = 33;
 }
 
 /// An auto-hiding bar (SPEC §2.1): how much of it stays on screen for the mouse to reach
@@ -335,6 +337,11 @@ pub const MSG_TRAY_BEHIND: u32 = msg::APP + 7;
 /// Programs are asked to register again this long after the tray fell behind, once for a
 /// burst of shows.
 const TRAY_ASK_AGAIN: Duration = Duration::from_millis(500);
+/// How long after a tray click Kabuk watches for the program's menu, to move it beside
+/// the icon when it opened far away (`kabuk_core::tray::menu_place`). A program opens it
+/// while handling the click; kept short, so a menu the user opens later in the program's
+/// own window is never moved.
+const TRAY_MENU_WAIT: Duration = Duration::from_secs(1);
 /// After asking programs to register their tray icons, Kabuk does not ask again for this
 /// long: their registrations make Explorer show its taskbar, which would put Kabuk's tray
 /// behind and ask again, every few seconds.
@@ -562,6 +569,8 @@ struct Shared {
     /// icon's key: programs re-adding icons move the others along the bar.
     hover: Option<(usize, IconKey)>,
     tooltip: Option<motion_host::Shown>,
+    /// Watches the clicked tray icon's program for its menu, for `TRAY_MENU_WAIT`.
+    tray_menu: Option<kabuk_win::events::MenuWatch>,
     /// Last, so it goes after the bars: their AppBar messages pass through it.
     tray_host: Option<TrayHost>,
 }
@@ -801,6 +810,7 @@ impl BarManager {
                 tray_asked: None,
                 hover: None,
                 tooltip: None,
+                tray_menu: None,
                 tray_host: None,
             })
         });
@@ -1235,6 +1245,10 @@ impl Shared {
                         self.kill(timer::TOOLTIP);
                         self.show_tooltip();
                     }
+                    timer::TRAY_MENU => {
+                        self.kill(timer::TRAY_MENU);
+                        self.tray_menu = None;
+                    }
                     timer::TOAST => self.hide_toast(),
                     timer::IDLE => self.schedule_idle(),
                     timer::OSD => self.hide_osd(),
@@ -1435,7 +1449,13 @@ impl Shared {
                 let owner = m.wparam as u64;
                 let found = self.tray.visible().position(|icon| icon.hwnd == owner);
                 if let Some(i) = found {
-                    self.tray_click(i, click, 0, 0);
+                    // At the icon's centre on the primary bar, where a real click lands.
+                    let at = self.bars.iter().position(|b| b.primary).and_then(|b| {
+                        let r = self.hit_rect(b, view::hit::TRAY, u32::try_from(i).ok()?)?;
+                        Some((r.x + r.w / 2, r.y + r.h / 2))
+                    });
+                    let (x, y) = at.unwrap_or_default();
+                    self.tray_click(i, click, x, y);
                 }
                 Some(0)
             }
@@ -2463,6 +2483,9 @@ impl Shared {
         }
         if let Some(pid) = owner.pid() {
             kabuk_win::process::allow_foreground(pid);
+            if click != Click::Double {
+                self.watch_tray_menu(pid, x, y);
+            }
         }
         for (wparam, lparam) in click_messages(&icon, click, x, y) {
             let m = Msg {
@@ -2473,6 +2496,42 @@ impl Shared {
             if let Err(e) = kabuk_win::msgloop::post_message(owner, m) {
                 tracing::debug!(error = %e, "tray click not delivered");
             }
+        }
+    }
+
+    /// Found by the user: the Bluetooth icon (Explorer's own) asks Explorer's hidden
+    /// taskbar where it is and opened its menu at the screen's corner. For a moment after
+    /// a click, the program's first menu is moved beside the click (screen point x, y)
+    /// when it opened far from it; submenus then open beside it by themselves.
+    fn watch_tray_menu(&mut self, pid: u32, x: i32, y: i32) {
+        // One watch per thread: the last one ends before the next starts.
+        self.tray_menu = None;
+        let Some(work) = kabuk_win::shell::monitors()
+            .into_iter()
+            .find(|m| m.rect.left <= x && x < m.rect.right && m.rect.top <= y && y < m.rect.bottom)
+            .map(|m| m.work_area)
+        else {
+            return;
+        };
+        let mut first = true;
+        let watch = kabuk_win::events::MenuWatch::start(pid, move |menu| {
+            if !std::mem::take(&mut first) {
+                return;
+            }
+            let Some(r) = menu.window_rect() else { return };
+            if let Some((to_x, to_y)) = kabuk_core::tray::menu_place(r, (x, y), work) {
+                let moved = menu.move_to_async(to_x, to_y);
+                tracing::info!(pid, ?r, to_x, to_y, moved, "tray menu moved beside its icon");
+            }
+        });
+        match watch {
+            Ok(w) => {
+                self.tray_menu = Some(w);
+                if let Some(c) = &self.control {
+                    c.set_timer(timer::TRAY_MENU, TRAY_MENU_WAIT);
+                }
+            }
+            Err(e) => tracing::debug!(error = %e, "tray menu not watched"),
         }
     }
 

@@ -563,6 +563,111 @@ fn a_program_asking_where_its_icon_is_gets_its_place_on_the_bar() {
     assert!(wait_until(SETTLE, || before.is_back()).is_some(), "desktop not back");
 }
 
+/// Found by the user: the Bluetooth icon (Explorer's own) asks Explorer's hidden taskbar
+/// where it is, gets (0, 0), and opened its menu at the screen's corner. A program whose
+/// menu opens far from the click on its icon gets it moved there: under the bar, its
+/// right edge at the click.
+#[test]
+fn a_tray_menu_opened_at_the_screens_corner_moves_beside_its_icon() {
+    use kabuk::bar::manager::MSG_TEST_TRAY_WHERE;
+    /// The test app's own message: close its popup menu.
+    const CLOSE_MENU: u32 = 0x8000 + 5;
+    let before = Desktop::now();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n[bar]\ntray_shown = 12\n").unwrap();
+    let _shell = sandbox.kabuk_with(&[TAKE_EXPLORER, "--no-wm"]);
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("tray window up") == 1).is_some());
+    let log = sandbox.dir.path().join("tray-clicks.txt");
+    let app = TestWindow::open(&[
+        "--title",
+        &title("corner-menu"),
+        "--tray-log",
+        log.to_str().unwrap(),
+        "--tray-menu-at-corner",
+    ]);
+    let control = kabuk_win::window::find_message_window(CONTROL_CLASS, "").expect("bar control window");
+    let mut point = 0isize;
+    assert!(
+        wait_until(SETTLE, || {
+            point = kabuk_win::msgloop::send_message(
+                control,
+                Msg {
+                    id: MSG_TEST_TRAY_WHERE,
+                    wparam: app.hwnd.0 as usize,
+                    lparam: 0,
+                },
+                Duration::from_secs(1),
+            )
+            .unwrap_or(0);
+            point != 0
+        })
+        .is_some(),
+        "our icon is not on the bar:\n{}",
+        story(&sandbox)
+    );
+    let pid = sandbox.state().kabuk_pid.unwrap();
+    let primary = kabuk_win::shell::monitors().into_iter().find(|m| m.primary).unwrap();
+    let bar = kabuk_win::window::windows_of_class("Kabuk.Bar")
+        .into_iter()
+        .filter(|w| w.pid() == Some(pid))
+        .find_map(|w| w.window_rect().filter(|r| primary.rect.contains(r)))
+        .expect("primary bar");
+    let centre_x = bar.left + (point & 0xFFFF) as i16 as i32;
+
+    post_message(
+        control,
+        Msg {
+            id: MSG_TEST_TRAY_CLICK,
+            wparam: app.hwnd.0 as usize,
+            lparam: 0,
+        },
+    )
+    .unwrap();
+    let app_pid = app.hwnd.pid();
+    let menu = || {
+        kabuk_win::window::windows_of_class("#32768")
+            .into_iter()
+            .filter(|m| m.is_visible() && m.pid() == app_pid)
+            .find_map(kabuk_win::window::Hwnd::window_rect)
+    };
+    assert!(
+        wait_until(SETTLE, || menu().is_some()).is_some(),
+        "the program's menu did not open"
+    );
+    let work = primary.work_area;
+    let moved = || menu().is_some_and(|r| r.top >= work.top);
+    assert!(
+        wait_until(SETTLE, moved).is_some(),
+        "the menu stayed at {:?}, far from its icon at x {centre_x}:\n{}",
+        menu(),
+        story(&sandbox)
+    );
+    let r = menu().expect("the menu closed by itself");
+    assert_eq!(
+        (r.right, r.top),
+        (centre_x, work.top),
+        "not hanging from the click under the bar"
+    );
+    assert_eq!(sandbox.log_lines("tray menu moved beside its icon"), 1);
+
+    post_message(
+        app.hwnd,
+        Msg {
+            id: CLOSE_MENU,
+            wparam: 0,
+            lparam: 0,
+        },
+    )
+    .unwrap();
+    assert!(
+        wait_until(SETTLE, || menu().is_none()).is_some(),
+        "the menu did not close"
+    );
+    app.close();
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || before.is_back()).is_some(), "desktop not back");
+}
+
 /// DECISIONS D26 (asked for by the user): with `tray_shown = 0` every icon is in the
 /// overflow panel, a click there reaches the program, and raising `tray_shown` in the
 /// file brings icons back to the bar.

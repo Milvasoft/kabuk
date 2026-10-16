@@ -1,6 +1,6 @@
-//! The focused window and its title, from out-of-context WinEvents (no code runs in
-//! other processes: CONTRIBUTING.md rule 4). Events arrive on the installing thread's
-//! message loop.
+//! The focused window and its title, and one process's popup menus, from out-of-context
+//! WinEvents (no code runs in other processes: CONTRIBUTING.md rule 4). Events arrive on
+//! the installing thread's message loop.
 //!
 //! Title changes are watched only for the focused window's process: a system-wide
 //! name-change hook would wake Kabuk for every title change of every window (busy
@@ -12,7 +12,7 @@ use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
 use windows::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, GetWindowThreadProcessId, CHILDID_SELF, EVENT_OBJECT_NAMECHANGE, EVENT_SYSTEM_FOREGROUND,
-    OBJID_WINDOW, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
+    EVENT_SYSTEM_MENUPOPUPSTART, OBJID_WINDOW, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
 };
 
 use crate::window::Hwnd;
@@ -124,6 +124,65 @@ impl ForegroundWatch {
             *w.borrow_mut() = Some(watch);
         });
         Ok(ForegroundWatch { foreground_hook })
+    }
+}
+
+type MenuSink = Box<dyn FnMut(Hwnd)>;
+
+thread_local! {
+    static MENU_SINK: RefCell<Option<MenuSink>> = const { RefCell::new(None) };
+}
+
+/// Calls the sink with each popup menu one process opens (`EVENT_SYSTEM_MENUPOPUPSTART`),
+/// until dropped: set up for a tray icon's program just before a click reaches it. One
+/// per thread.
+pub struct MenuWatch {
+    hook: HWINEVENTHOOK,
+}
+
+unsafe extern "system" fn on_menu(_: HWINEVENTHOOK, _: u32, hwnd: HWND, _: i32, _: i32, _: u32, _: u32) {
+    crate::msgloop::contain((), || {
+        MENU_SINK.with(|s| {
+            let Ok(mut s) = s.try_borrow_mut() else { return };
+            if let Some(sink) = s.as_mut() {
+                sink(Hwnd::from_raw(hwnd));
+            }
+        });
+    });
+}
+
+impl MenuWatch {
+    pub fn start(pid: u32, sink: impl FnMut(Hwnd) + 'static) -> std::io::Result<MenuWatch> {
+        // SAFETY: out-of-context hook limited to one process (no DLL injection); the
+        // callback only touches this thread's MENU_SINK. Unhooked in Drop.
+        let hook = unsafe {
+            SetWinEventHook(
+                EVENT_SYSTEM_MENUPOPUPSTART,
+                EVENT_SYSTEM_MENUPOPUPSTART,
+                None,
+                Some(on_menu),
+                pid,
+                0,
+                FLAGS,
+            )
+        };
+        if hook.is_invalid() {
+            return Err(std::io::Error::other("SetWinEventHook failed"));
+        }
+        MENU_SINK.with(|s| *s.borrow_mut() = Some(Box::new(sink)));
+        Ok(MenuWatch { hook })
+    }
+}
+
+impl Drop for MenuWatch {
+    fn drop(&mut self) {
+        // SAFETY: unhooks the hook installed in `start`.
+        let _ = unsafe { UnhookWinEvent(self.hook) };
+        MENU_SINK.with(|s| {
+            if let Ok(mut s) = s.try_borrow_mut() {
+                *s = None;
+            }
+        });
     }
 }
 

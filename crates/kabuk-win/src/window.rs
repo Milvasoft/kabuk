@@ -11,9 +11,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, FindWindowExW, GetAncestor, GetClassNameW, GetWindow, GetWindowLongPtrW, GetWindowRect,
     GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, IsZoomed,
     PostMessageW, SetForegroundWindow, SetWindowPos, ShowWindowAsync, GA_ROOT, GWL_EXSTYLE, GWL_STYLE, GW_OWNER,
-    HWND_MESSAGE, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOZORDER, SW_HIDE, SW_MAXIMIZE,
-    SW_MINIMIZE, SW_RESTORE, SW_SHOWNA, WINDOW_LONG_PTR_INDEX, WM_CLOSE, WS_CAPTION, WS_CHILD, WS_EX_APPWINDOW,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP, WS_THICKFRAME,
+    HWND_MESSAGE, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE,
+    SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOWNA, WINDOW_LONG_PTR_INDEX, WM_CLOSE, WS_CAPTION, WS_CHILD,
+    WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP, WS_THICKFRAME,
 };
 
 /// The settings app's window class (`webview`) for Kabuk instance `instance`, known
@@ -392,6 +392,26 @@ impl Hwnd {
                     target.right - target.left,
                     target.bottom - target.top,
                     SWP_NOACTIVATE | SWP_NOZORDER | SWP_ASYNCWINDOWPOS | SWP_NOOWNERZORDER,
+                )
+            }
+            .is_ok()
+        })
+    }
+
+    /// Moves the window's top-left corner to (x, y), physical pixels, keeping its size,
+    /// without activating it (another program's popup menu, for one).
+    pub fn move_to_async(self, x: i32, y: i32) -> bool {
+        crate::dpi::physical(|| {
+            // SAFETY: plain call on any window; the async flag queues it to the window's thread.
+            unsafe {
+                SetWindowPos(
+                    self.raw(),
+                    None,
+                    x,
+                    y,
+                    0,
+                    0,
+                    SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER | SWP_ASYNCWINDOWPOS | SWP_NOOWNERZORDER,
                 )
             }
             .is_ok()
