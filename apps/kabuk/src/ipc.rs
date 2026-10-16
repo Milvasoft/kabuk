@@ -179,7 +179,7 @@ fn query(kind: QueryKind, t: &Targets) -> Value {
                             "uid": i.uid,
                             "guid": guid,
                             "version": i.version,
-                            "shown": !i.hidden && i.icon != 0,
+                            "shown": i.drawn(),
                             "pid": owner.pid(),
                             "exe": path.as_deref().and_then(|p| p.rsplit(['\\', '/']).next()),
                             "window_class": owner.class_name(),

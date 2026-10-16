@@ -156,6 +156,20 @@ pub struct Icon {
     pub version: u32,
 }
 
+/// Explorer's own icons the bar draws itself, held but not drawn: the volume icon,
+/// {7820AE73-23E3-4229-82C1-E41CB67D5B9C} (its flyout belongs to the hidden taskbar, so a
+/// click on it did nothing).
+const DRAWN_BY_KABUK: [IconKey; 1] = [IconKey::Guid([
+    0x73, 0xae, 0x20, 0x78, 0xe3, 0x23, 0x29, 0x42, 0x82, 0xc1, 0xe4, 0x1c, 0xb6, 0x7d, 0x5b, 0x9c,
+])];
+
+impl Icon {
+    /// Drawn on the bar: not hidden, with a picture, and not one the bar draws itself.
+    pub fn drawn(&self) -> bool {
+        !self.hidden && self.icon != 0 && !DRAWN_BY_KABUK.contains(&self.key)
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Tray {
     /// In registration order.
@@ -214,9 +228,9 @@ impl Tray {
         &self.icons
     }
 
-    /// Icons to draw: not hidden and with a picture.
+    /// Icons to draw: not hidden, with a picture, and not one the bar draws itself.
     pub fn visible(&self) -> impl Iterator<Item = &Icon> {
-        self.icons.iter().filter(|i| !i.hidden && i.icon != 0)
+        self.icons.iter().filter(|i| i.drawn())
     }
 
     pub fn len(&self) -> usize {

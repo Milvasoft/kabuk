@@ -4,7 +4,8 @@
 //! that disappears, data that is too short or has the wrong signature, an old (smaller)
 //! structure without a GUID, click messages for the old and the version-4 conventions;
 //! a question about where an icon is (the corner and the size, by GUID or by window, a
-//! GUID nobody registered, a hidden icon, bad data, negative coordinates).
+//! GUID nobody registered, a hidden icon, bad data, negative coordinates); Explorer's
+//! volume icon, held but not drawn.
 
 use super::*;
 
@@ -393,4 +394,32 @@ fn the_answer_is_the_top_left_corner_then_the_size() {
     // Negative coordinates (Monitor 2 left of the primary) survive the packing.
     let n = top_left.answer(-2000, -30, 0, 0);
     assert_eq!(((n & 0xFFFF) as u16 as i16, (n >> 16) as u16 as i16), (-2000, -30));
+}
+
+/// Found by the user: "why are there 2 volume icons? Clicking the 2nd does nothing". The
+/// second was Explorer's own volume icon (its tip the output device and level), whose
+/// flyout belongs to the hidden taskbar. Kabuk's bar draws the volume itself, so Explorer's
+/// copy is held but not drawn; Explorer's other icons (Bluetooth, eject) still are.
+#[test]
+fn explorers_volume_icon_is_not_drawn_beside_kabuks_own() {
+    let mut t = Tray::default();
+    // The bytes as Explorer sends them, {7820AE73-23E3-4229-82C1-E41CB67D5B9C}.
+    let volume = [
+        0x73, 0xae, 0x20, 0x78, 0xe3, 0x23, 0x29, 0x42, 0x82, 0xc1, 0xe4, 0x1c, 0xb6, 0x7d, 0x5b, 0x9c,
+    ];
+    let bluetooth = [
+        0x06, 0x8f, 0xa6, 0x6d, 0xf1, 0x00, 0x6e, 0x4e, 0x81, 0x58, 0x7f, 0x1f, 0xfd, 0x4f, 0x9d, 0xb9,
+    ];
+    for (uid, guid, tip) in [(100, volume, "Odyssey G50SF: 48%"), (0, bluetooth, "Bluetooth Devices")] {
+        t.apply(&parsed(Data {
+            uid,
+            flags: NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_GUID,
+            guid,
+            tip,
+            ..Data::default()
+        }));
+    }
+    assert_eq!(t.len(), 2, "both held");
+    let drawn: Vec<&str> = t.visible().map(|i| i.tip.as_str()).collect();
+    assert_eq!(drawn, ["Bluetooth Devices"]);
 }
