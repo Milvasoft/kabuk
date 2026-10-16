@@ -8,7 +8,7 @@
 //! hung window (message loop blocked), an owned dialog and a splash screen, a gap change
 //! in the file, the frame reset on a clean exit, the action time budget, swap / float /
 //! close on the focused window, the bar showing the window manager's workspaces, a window
-//! minimised before the shell started.
+//! minimised before the shell started, a window that gets its title only after showing.
 //!
 //! Run with: `cargo test -p kabuk --features integration -- --test-threads=1`
 
@@ -839,6 +839,22 @@ fn a_window_minimised_before_the_shell_started_joins_the_layout_when_restored() 
     early.hwnd.restore_async();
     assert!(wait_until(SETTLE, || sandbox.log_lines("window restored") == 1).is_some());
     assert!(wait_until(SETTLE, || fills(&early)).is_some(), "{:?}", frame(&early));
+    assert_eq!(sandbox.restore().0, 0);
+}
+
+/// Found by a friend of the user (Unity, Electron apps): a window with no title when it
+/// showed was ignored for good. It is taken on once it gets one.
+#[test]
+fn a_window_that_gets_its_title_later_is_managed() {
+    let sandbox = Sandbox::new();
+    let _wm = Wm::start(&sandbox, &config(""));
+    let late = open("late-title", &["--title-after", "800"]);
+    let managed = format!("managing window hwnd={}", late.hwnd.0);
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines(&managed) == 1).is_some(),
+        "the window was not taken on after its title came"
+    );
+    assert!(wait_until(SETTLE, || fills(&late)).is_some(), "{:?}", frame(&late));
     assert_eq!(sandbox.restore().0, 0);
 }
 

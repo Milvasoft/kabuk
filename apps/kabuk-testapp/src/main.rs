@@ -11,6 +11,7 @@
 //!   --hidden               create without showing
 //!   --maximized            show maximised
 //!   --minimized            show minimised (without activating)
+//!   --title-after <ms>     open without a title and take --title after this long
 //!   --refuse-move          ignore every move and resize request
 //!   --hang-after <ms>      stop pumping messages after this long (a hung window)
 //!   --resize-self <ms>     change its own size on this interval
@@ -49,6 +50,7 @@ const DIALOG_SIZE: (i32, i32) = (360, 200);
 const TIMER_HANG: usize = 1;
 const TIMER_RESIZE: usize = 2;
 const TIMER_CLOAK: usize = 3;
+const TIMER_TITLE: usize = 4;
 /// The tray icon's callback message and id.
 const TRAY_CALLBACK: u32 = WM_APP + 1;
 const FAKE_DRAG: u32 = WM_APP + 2;
@@ -65,6 +67,7 @@ struct Options {
     hidden: bool,
     maximized: bool,
     minimized: bool,
+    title_after_ms: Option<u32>,
     refuse_move: bool,
     hang_after_ms: Option<u32>,
     resize_self_ms: Option<u32>,
@@ -96,6 +99,7 @@ fn parse() -> Result<Options, String> {
             "--hidden" => o.hidden = true,
             "--maximized" => o.maximized = true,
             "--minimized" => o.minimized = true,
+            "--title-after" => o.title_after_ms = Some(value()?.parse().map_err(|_| "bad --title-after")?),
             "--refuse-move" => o.refuse_move = true,
             "--hang-after" => o.hang_after_ms = Some(value()?.parse().map_err(|_| "bad --hang-after")?),
             "--resize-self" => o.resize_self_ms = Some(value()?.parse().map_err(|_| "bad --resize-self")?),
@@ -164,7 +168,11 @@ fn run(o: &Options) {
         if o.tool {
             ex_style |= WS_EX_TOOLWINDOW;
         }
-        let title = HSTRING::from(o.title.as_deref().unwrap_or(DEFAULT_TITLE));
+        let title = if o.title_after_ms.is_some() {
+            HSTRING::new()
+        } else {
+            HSTRING::from(o.title.as_deref().unwrap_or(DEFAULT_TITLE))
+        };
         let hwnd = CreateWindowExW(
             ex_style,
             &class,
@@ -221,6 +229,9 @@ fn run(o: &Options) {
         }
         if let Some(ms) = o.cloak_after_ms {
             SetTimer(Some(hwnd), TIMER_CLOAK, ms, None);
+        }
+        if let Some(ms) = o.title_after_ms {
+            SetTimer(Some(hwnd), TIMER_TITLE, ms, None);
         }
         if let Some(ms) = o.resize_self_ms {
             SetTimer(Some(hwnd), TIMER_RESIZE, ms, None);
@@ -292,6 +303,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     (&cloak as *const windows::core::BOOL).cast(),
                     std::mem::size_of::<windows::core::BOOL>() as u32,
                 );
+                return LRESULT(0);
+            }
+            WM_TIMER if wparam.0 == TIMER_TITLE => {
+                let _ = KillTimer(Some(hwnd), TIMER_TITLE);
+                let _ = SetWindowTextW(hwnd, &HSTRING::from(o.title.as_deref().unwrap_or(DEFAULT_TITLE)));
                 return LRESULT(0);
             }
             WM_TIMER if wparam.0 == TIMER_HANG => {

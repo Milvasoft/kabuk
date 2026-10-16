@@ -1577,6 +1577,12 @@ impl Wm {
                     self.consider(h);
                 }
             }
+            // Known windows change titles all the time; only one not taken on is asked again.
+            WindowEvent::Renamed(h) => {
+                if !self.desk.contains(h.0) && h.is_visible() {
+                    self.consider(h);
+                }
+            }
             WindowEvent::Hidden(h) => {
                 // Hide events of windows Kabuk hid (on inactive workspaces) are expected.
                 if self.desk.visible_windows().contains(&h.0) && !h.is_visible() {

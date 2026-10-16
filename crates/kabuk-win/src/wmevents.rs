@@ -7,9 +7,10 @@ use std::cell::RefCell;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CHILDID_SELF, EVENT_OBJECT_CLOAKED, EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE, EVENT_OBJECT_SHOW,
-    EVENT_OBJECT_UNCLOAKED, EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MINIMIZEEND, EVENT_SYSTEM_MINIMIZESTART,
-    EVENT_SYSTEM_MOVESIZEEND, EVENT_SYSTEM_MOVESIZESTART, OBJID_WINDOW, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
+    CHILDID_SELF, EVENT_OBJECT_CLOAKED, EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE, EVENT_OBJECT_NAMECHANGE,
+    EVENT_OBJECT_SHOW, EVENT_OBJECT_UNCLOAKED, EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MINIMIZEEND,
+    EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MOVESIZEEND, EVENT_SYSTEM_MOVESIZESTART, OBJID_WINDOW,
+    WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
 };
 
 use crate::window::Hwnd;
@@ -26,14 +27,18 @@ pub enum WindowEvent {
     MinimizeEnd(Hwnd),
     MoveSizeStart(Hwnd),
     MoveSizeEnd(Hwnd),
+    /// Its title changed: a window ignored for having none when it showed (Unity, some
+    /// Electron apps) is looked at again.
+    Renamed(Hwnd),
 }
 
 /// The event ranges hooked (each `SetWinEventHook` takes a contiguous range).
-const RANGES: [(u32, u32); 5] = [
+const RANGES: [(u32, u32); 6] = [
     (EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND),
     (EVENT_SYSTEM_MOVESIZESTART, EVENT_SYSTEM_MOVESIZEEND),
     (EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND),
     (EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE),
+    (EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_NAMECHANGE),
     (EVENT_OBJECT_CLOAKED, EVENT_OBJECT_UNCLOAKED),
 ];
 
@@ -62,6 +67,7 @@ fn translate(event: u32, hwnd: Hwnd, object: i32, child: i32, top_level: impl Fn
         EVENT_OBJECT_HIDE => WindowEvent::Hidden(hwnd),
         EVENT_OBJECT_CLOAKED => WindowEvent::Cloaked(hwnd),
         EVENT_OBJECT_UNCLOAKED => WindowEvent::Uncloaked(hwnd),
+        EVENT_OBJECT_NAMECHANGE => WindowEvent::Renamed(hwnd),
         _ => return None,
     };
     top_level(hwnd).then_some(e)
@@ -126,7 +132,7 @@ mod tests {
     //! Edge cases: child objects and non-window objects are dropped, a null handle is
     //! dropped, destroy needs no top-level check, unknown events are dropped.
     use super::*;
-    use windows::Win32::UI::WindowsAndMessaging::{EVENT_OBJECT_NAMECHANGE, OBJID_CARET};
+    use windows::Win32::UI::WindowsAndMessaging::{EVENT_OBJECT_LOCATIONCHANGE, OBJID_CARET};
 
     const W: Hwnd = Hwnd(0x40);
 
@@ -148,7 +154,7 @@ mod tests {
             translate(EVENT_OBJECT_DESTROY, W, me, selfid, not_top),
             Some(WindowEvent::Destroyed(W))
         );
-        assert_eq!(translate(EVENT_OBJECT_NAMECHANGE, W, me, selfid, top), None);
+        assert_eq!(translate(EVENT_OBJECT_LOCATIONCHANGE, W, me, selfid, top), None);
         for (event, expected) in [
             (EVENT_SYSTEM_FOREGROUND, WindowEvent::Foreground(W)),
             (EVENT_SYSTEM_MOVESIZESTART, WindowEvent::MoveSizeStart(W)),
@@ -158,6 +164,7 @@ mod tests {
             (EVENT_OBJECT_HIDE, WindowEvent::Hidden(W)),
             (EVENT_OBJECT_CLOAKED, WindowEvent::Cloaked(W)),
             (EVENT_OBJECT_UNCLOAKED, WindowEvent::Uncloaked(W)),
+            (EVENT_OBJECT_NAMECHANGE, WindowEvent::Renamed(W)),
         ] {
             assert_eq!(translate(event, W, me, selfid, top), Some(expected));
         }
