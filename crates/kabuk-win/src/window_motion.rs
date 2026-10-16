@@ -4,10 +4,11 @@
 //! easing from the old places to the new ones; the overlay goes when the move has played.
 //!
 //! The overlay is an ordinary (not topmost) window put above the others, so Kabuk's bars,
-//! notices and other always-on-top windows stay above it. Under the windows it shows a
-//! live thumbnail of Explorer's desktop window (`Progman`): the wallpaper, Kabuk's
-//! animated wallpaper behind the icons and the icons, as they are (the M12 spike,
-//! `examples/desktop_thumbnail_spike.rs`). It runs on a thread of its own, which waits for
+//! notices and other always-on-top windows stay above it. Under the windows it shows
+//! live thumbnails of Explorer's desktop windows (`Progman`, and the `WorkerW`s in front
+//! of it before Windows 11 24H2): the wallpaper, Kabuk's animated wallpaper behind the
+//! icons and the icons, as they are (the M12 spike, `examples/desktop_thumbnail_spike.rs`).
+//! It comes up unseen and shows once they are drawn, so no black frame goes between. It runs on a thread of its own, which waits for
 //! the compositor between frames and sleeps between moves.
 //!
 //! A scene can also play the genie (`kabuk_core::genie`): a window minimised or restored
@@ -247,7 +248,7 @@ extern "system" fn overlay_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
 /// and where each window's is now.
 struct Playing {
     overlay: HWND,
-    desktop: Option<isize>,
+    desktop: Vec<isize>,
     area: Rect,
     thumbs: Vec<(isize, Layer)>,
     started: Instant,
@@ -287,14 +288,23 @@ fn props(r: Rect, area: Rect) -> DWM_THUMBNAIL_PROPERTIES {
     }
 }
 
-/// The desktop's part under `area`, live, over the whole overlay: registered first, so
-/// the windows' thumbnails go above it. `None` without Explorer (the overlay is black).
-fn desktop_thumbnail(overlay: HWND, area: Rect) -> Option<isize> {
-    let progman = crate::desktop::progman()?;
-    let origin = progman.window_rect()?;
+/// The desktop's part under `area`, live, over the whole overlay: each of Explorer's
+/// desktop windows, the backmost first (found on another computer: before 24H2 the
+/// wallpaper is not in `Progman`, and the genie showed black behind it); registered
+/// before the windows', so theirs go above. None without Explorer (the overlay is black).
+fn desktop_thumbnails(overlay: HWND, area: Rect) -> Vec<isize> {
+    crate::desktop::layers()
+        .into_iter()
+        .filter_map(|w| desktop_thumbnail(overlay, w, area))
+        .collect()
+}
+
+/// Desktop window `source`'s part under `area` over the whole overlay.
+fn desktop_thumbnail(overlay: HWND, source: Hwnd, area: Rect) -> Option<isize> {
+    let origin = source.window_rect()?;
     // SAFETY: a thumbnail of Explorer's window onto our overlay, unregistered with it.
     unsafe {
-        let t = register(overlay, progman.raw())?;
+        let t = register(overlay, source.raw())?;
         let props = DWM_THUMBNAIL_PROPERTIES {
             dwFlags: DWM_TNP_RECTDESTINATION | DWM_TNP_RECTSOURCE | DWM_TNP_VISIBLE | DWM_TNP_OPACITY,
             rcDestination: RECT {
@@ -360,7 +370,8 @@ fn overlay(area: Rect) -> Option<HWND> {
             None,
         )
         .ok()?;
-        let _ = SetLayeredWindowAttributes(h, COLORREF(0), u8::MAX, LWA_ALPHA);
+        // Unseen until its thumbnails are drawn ([`begin`]).
+        let _ = SetLayeredWindowAttributes(h, COLORREF(0), 0, LWA_ALPHA);
         Some(h)
     }
 }
@@ -470,9 +481,16 @@ fn begin(scene: Scene, before: Option<Playing>, renderer: Option<&gpu::Renderer>
         ),
         None => {
             let o = overlay(scene.area)?;
-            (o, desktop_thumbnail(o, scene.area), HashMap::new(), None, None)
+            let desktop = desktop_thumbnails(o, scene.area);
+            if desktop.is_empty() {
+                tracing::warn!("no picture of the desktop under the window motion; it shows black");
+            } else {
+                tracing::debug!(layers = desktop.len(), "desktop pictured under the window motion");
+            }
+            (o, desktop, HashMap::new(), None, None)
         }
     };
+    let new_overlay = old.is_none();
     let area = scene.area;
     // The strips are drawn too, until the GPU has the window's picture (a few
     // milliseconds), so the window never shows as a hole meanwhile.
@@ -535,6 +553,13 @@ fn begin(scene: Scene, before: Option<Playing>, renderer: Option<&gpu::Renderer>
             area.bottom - area.top,
             SWP_NOACTIVATE | SWP_SHOWWINDOW,
         );
+        if new_overlay {
+            // Unseen until the compositor has drawn its thumbnails once: shown at once,
+            // its black background went first (found on another computer: the screen
+            // went black for a frame as a window minimised).
+            let _ = DwmFlush();
+            let _ = SetLayeredWindowAttributes(overlay, COLORREF(0), u8::MAX, LWA_ALPHA);
+        }
         Some(Playing {
             overlay,
             desktop,
@@ -845,7 +870,12 @@ mod tests {
             None,
         )
         .expect("overlay");
-        let t = p.desktop.expect("the desktop's thumbnail");
+        assert_eq!(
+            p.desktop.len(),
+            crate::desktop::layers().len(),
+            "a thumbnail of each desktop window"
+        );
+        let t = *p.desktop.first().expect("the desktop's thumbnail");
         // SAFETY: our registered thumbnail.
         let size = unsafe { windows::Win32::Graphics::Dwm::DwmQueryThumbnailSourceSize(t) }.expect("its source");
         // DWM gives the size of the primary monitor here, though the source rectangle is in

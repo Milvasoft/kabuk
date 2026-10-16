@@ -29,10 +29,17 @@ fn find(parent: Option<HWND>, after: Option<HWND>, class: &str) -> Option<HWND> 
         .filter(|h| !h.is_invalid())
 }
 
-/// Explorer's desktop window (the wallpaper and the icons, and Kabuk's animated wallpaper
-/// among them), when Explorer runs.
-pub(crate) fn progman() -> Option<Hwnd> {
-    find(None, None, "Progman").map(Hwnd::from_raw)
+/// Explorer's desktop windows that are shown, from the back to the front: `Progman` and
+/// the top-level `WorkerW`s. On Windows 11 24H2 and later everything is inside
+/// `Progman`; before, and once the wallpaper is split from the icons (D13), the wallpaper
+/// and the icons are in `WorkerW`s in front of it (found on another computer: a picture
+/// of `Progman` alone showed the desktop black behind the genie).
+pub(crate) fn layers() -> Vec<Hwnd> {
+    crate::window::top_level_windows()
+        .into_iter()
+        .rev()
+        .filter(|w| matches!(w.class_name().as_str(), "Progman" | "WorkerW") && w.is_visible())
+        .collect()
 }
 
 /// Where the wallpaper window goes: its parent, and the window it sits right behind.
@@ -115,5 +122,17 @@ mod tests {
         if h.progman {
             assert!(h.behind.is_some_and(|v| v.exists()));
         }
+    }
+
+    /// The desktop's windows are listed back to front, `Progman` the backmost, each shown.
+    #[test]
+    fn the_desktops_layers_start_with_progman() {
+        let layers = layers();
+        assert_eq!(
+            layers.first().map(|w| w.class_name()).as_deref(),
+            Some("Progman"),
+            "{layers:?}"
+        );
+        assert!(layers.iter().all(|w| w.is_visible()));
     }
 }

@@ -8,6 +8,9 @@ No open decisions (the user decided D39, D43, D44 and the still pictures' drift 
 
 ## Decided and proposed
 
+### D74 · The desktop under a window motion, in every desktop structure — Decided by the user (2026-10-16)
+Found on another computer (a video from the user): the desktop went black behind a window minimising or coming back, and the whole screen for a frame as the genie began. A window motion's overlay showed the desktop as a live thumbnail of `Progman` alone; that holds the wallpaper and the icons only on Windows 11 24H2 and later, and before (or once the wallpaper is split from the icons, D13) they are in top-level `WorkerW`s in front of it, so the thumbnail showed black. The overlay now shows a thumbnail of each of Explorer's desktop windows, backmost first (`desktop::layers`), and comes up unseen until the compositor has drawn them once. When no desktop picture can be made, the log says so ("no picture of the desktop under the window motion").
+
 ### D73 · A shown auto-hiding bar pushes the windows — Decided by the user (2026-10-16)
 Asked for by the user with a screenshot of the bar lying over a window's title: with auto-hide on, the bar coming in should push the windows. While an auto-hiding bar (or Rıhtım's dock) is shown or coming in, it reserves its strip as a bar that keeps its place does (an AppBar), so the work area shrinks: the window manager tiles the windows under it and Windows moves maximised windows; when it starts sliding off it gives the room back and they grow again. The work area is recorded before the first reservation, as for any bar (CONTRIBUTING.md rules 3 and 5), so a crash or `kabuk --restore` puts it back; when it cannot be recorded the bar comes in over the windows as before. This replaces D70's "the bar does not reserve space while shown".
 
