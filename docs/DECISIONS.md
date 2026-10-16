@@ -85,7 +85,7 @@ There is no sound layer: Windows' own event sounds stay. `system_theme.sounds` i
 Only `explorer.exe` is themed by code loaded into it (D42). Other programs' classic dialogs and menus stay as Windows draws them; the loader refuses every other process.
 
 ### D39 · Where updates come from — Decided by the user (2026-10-14)
-Kabuk's releases are published on GitHub, `Milvasoft/kabuk` (the user opened the repository on 2026-10-14). About's "Check for updates" asks GitHub's API for the latest release (`kabuk_core::update`, versions compared by `kabuk_core::install::newer`) and, when it is newer, offers a button that opens its release page; only a page of Kabuk's repository is opened. Kabuk downloads and runs nothing by itself: the user runs the new setup, which installs over the running copy and keeps the settings. winget (`Milvasoft.Kabuk`, `packaging/winget`) installs the same setup.
+Kabuk's releases are published on GitHub, `Milvasoft/kabuk` (the user opened the repository on 2026-10-14). About's "Check for updates" asks GitHub's API for the latest release (`kabuk_core::update`, versions compared by `kabuk_core::install::newer`) and, when it is newer, offers a button that opens its release page; only a page of Kabuk's repository is opened. Kabuk downloads and runs nothing by itself: the user runs the new setup, which installs over the running copy and keeps the settings. No winget package (the user dropped it on 2026-10-16).
 
 ### D2 · Default look: Rıhtım — Decided (2026-10-12, changed by the user 2026-10-14)
 **Rıhtım** is shown on first launch (Ada until 2026-10-14). It is a single constant in the code (`DEFAULT_LOOK`); changing it is one line. Tests that depend on a look name it in their configuration.

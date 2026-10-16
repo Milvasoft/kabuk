@@ -317,11 +317,10 @@ Status: all criteria but mixed DPI are met; the user chose to try mixed DPI at t
 
 **Result (2026-10-14)**
 - `kabuk-setup.exe` for end users (`tools/package.ps1` → `dist\kabuk-setup.exe`, ~23 MB, with its SHA-256): one file holding the four programs; it asks before installing, stops a running Kabuk, installs with `kabuk --install` (now also a desktop shortcut and the program folder on the user's `Path`, so `kabuk` works in any new terminal; both taken out again by `--uninstall`), asks about starting at sign-in and starts Kabuk; `/S` installs silently. The C runtime is linked in (`.cargo/config.toml`), so a fresh Windows needs nothing else.
-- winget manifests for `Milvasoft.Kabuk` (`packaging/winget`, schema 1.9, user scope, silent `/S`, `kabuk` command), to submit once the release is on GitHub.
 - The update check (D39): Settings → About asks GitHub for the latest release and offers its page (unit tests; the page test runs it against GitHub through the real bridge).
 - Rıhtım is the default look (D2).
 - Tried: the setup installed silently on the user's account (programs, shortcuts, `Path`, uninstall entry, `kabuk --help` from `Path`, Kabuk running at 23 MB) and was then taken out completely. The clean Hyper-V machine (`tools/vm/try-setup.ps1`) was not signed in, so the fresh-Windows run waits for it.
-- Not done: the compatibility list and the idle CPU run (need the user); the GitHub release itself and the winget submission (the user publishes).
+- Not done: the compatibility list and the idle CPU run (need the user); the GitHub release itself (published as v1.0.0 on 2026-10-15; winget was dropped by the user on 2026-10-16).
 
 ## M15 · The user's requests after daily use (2026-10-14) `[~]`
 

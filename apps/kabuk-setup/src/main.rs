@@ -6,7 +6,7 @@
 //! uninstall entry), then starts Kabuk.
 //!
 //! `/S` (or `--quiet`) installs without asking anything and does not start Kabuk, for
-//! winget and scripts. Exit codes: 0 installed, 1602 cancelled by the user, others failed.
+//! scripts. Exit codes: 0 installed, 1602 cancelled by the user, others failed.
 
 #![windows_subsystem = "windows"]
 
@@ -20,7 +20,7 @@ mod payload {
     include!(concat!(env!("OUT_DIR"), "/payload.rs"));
 }
 
-/// Exit codes: the user said no (Windows Installer's own code, which winget knows), the
+/// Exit codes: the user said no (Windows Installer's own code), the
 /// setup holds no programs, installing failed.
 const CANCELLED: i32 = 1602;
 const EMPTY: i32 = 2;

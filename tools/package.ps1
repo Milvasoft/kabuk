@@ -1,10 +1,9 @@
 # Builds Kabuk's setup: the release programs, then kabuk-setup.exe holding them, into
-# dist\ with its SHA-256 (for the winget manifest and the GitHub release).
+# dist\ with its SHA-256 (for the GitHub release).
 #
 #   powershell -ExecutionPolicy Bypass -File tools/package.ps1
 #
-# Upload dist\kabuk-setup.exe to the GitHub release named v<version>; the winget
-# manifest in packaging\winget points there.
+# Upload dist\kabuk-setup.exe to the GitHub release named v<version>.
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -28,14 +27,6 @@ $setup = Join-Path $dist 'kabuk-setup.exe'
 Copy-Item (Join-Path $root 'target\release\kabuk-setup.exe') $setup -Force
 $hash = (Get-FileHash $setup -Algorithm SHA256).Hash
 Set-Content -Path (Join-Path $dist 'kabuk-setup.exe.sha256') -Value "$hash  kabuk-setup.exe" -Encoding ascii
-
-# The winget manifest names this build's hash.
-$installer = Join-Path $root "packaging\winget\manifests\m\Milvasoft\Kabuk\$version\Milvasoft.Kabuk.installer.yaml"
-if (Test-Path $installer) {
-    $text = [System.IO.File]::ReadAllText($installer)
-    $text = $text -replace 'InstallerSha256: [0-9A-Fa-f]+', "InstallerSha256: $hash"
-    [System.IO.File]::WriteAllText($installer, $text, (New-Object System.Text.UTF8Encoding $false))
-}
 
 $size = [math]::Round((Get-Item $setup).Length / 1MB, 1)
 Write-Host "dist\kabuk-setup.exe  $size MB  SHA256 $hash" -ForegroundColor Green

@@ -10,13 +10,7 @@ Licensed under the PolyForm Noncommercial License 1.0.0 (see `LICENSE.md`): free
 
 Download `kabuk-setup.exe` from the [latest release](https://github.com/Milvasoft/kabuk/releases/latest) and run it. Windows 11 is needed; no administrator rights are asked for. The setup puts Kabuk in `%LOCALAPPDATA%\Programs\Kabuk`, adds "Kabuk" to the desktop and the Start menu (with "Kabuk Settings"), adds the `kabuk` command to your `Path`, asks whether Kabuk should start when you sign in, and starts it.
 
-With winget:
-
-```powershell
-winget install Milvasoft.Kabuk
-```
-
-The setup takes `/S` to install without asking (winget uses it). To remove Kabuk, use "Uninstall" in Windows' "Installed apps", or `kabuk --uninstall`: Windows is put back as it was; your settings stay in `%APPDATA%\kabuk`.
+The setup takes `/S` to install without asking. To remove Kabuk, use "Uninstall" in Windows' "Installed apps", or `kabuk --uninstall`: Windows is put back as it was; your settings stay in `%APPDATA%\kabuk`.
 
 Settings → About → "Check for updates" tells you when a newer version is out; its setup installs over the running one and keeps your settings.
 
@@ -30,7 +24,7 @@ cargo build --release --workspace
 
 The four programs land in `target\release`: `kabuk.exe` (the shell), `kabuk-watchdog.exe` (starts the shell and puts everything back if it crashes), `kabuk-settings.exe` and `kabuk-saver.exe` (the screen saver and the animated wallpapers).
 
-From the folder of the programs, `.\kabuk.exe --install` installs what you built, as the setup does. `powershell -ExecutionPolicy Bypass -File tools/package.ps1` builds the setup itself (`dist\kabuk-setup.exe`) and updates the winget manifest's checksum (`packaging/winget/README.md` has the release steps). `kabuk --startup on` or `off` changes starting at sign-in later.
+From the folder of the programs, `.\kabuk.exe --install` installs what you built, as the setup does. `powershell -ExecutionPolicy Bypass -File tools/package.ps1` builds the setup itself (`dist\kabuk-setup.exe`). `kabuk --startup on` or `off` changes starting at sign-in later.
 
 ## Using
 
