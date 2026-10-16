@@ -1,7 +1,9 @@
 //! The tray's overflow panel on the bar thread (DECISIONS D26): opened from the bar's
 //! overflow button, it shows the tray icons that do not fit on the bar; their clicks reach
 //! the programs as on the bar. It closes when it loses the keyboard (a click elsewhere),
-//! on Esc and after a click on one of its icons (the program's menu opens).
+//! on Esc and after a left click on one of its icons (the program opens). After a right
+//! click it stays while the program shows its menu, and closes once another program
+//! comes to the front (asked for by the user: it closed as the menu opened).
 
 use kabuk_core::tray::Click;
 use kabuk_ui::geom::{Point, Scale};
@@ -23,12 +25,18 @@ pub const MSG_TEST_TRAY_PANEL: u32 = msg::APP + 26;
 /// Integration tests click (`lparam` 0 left, 1 right) the panel icon owned by window
 /// `wparam`, as a click on the panel would.
 pub const MSG_TEST_TRAY_PANEL_CLICK: u32 = msg::APP + 27;
+/// Integration tests: window `wparam` came to the front, as Windows' foreground event
+/// tells the bar (a test cannot put another program's window in front).
+pub const MSG_TEST_FOREGROUND: u32 = msg::APP + 52;
 
 pub(super) struct TrayPanel {
     shown: Shown,
     layout: Layout,
     scale: Scale,
     bar: usize,
+    /// The process of the icon right-clicked last: its menu or windows in front keep the
+    /// panel; another program in front closes it.
+    menu_of: Option<u32>,
 }
 
 impl Shared {
@@ -63,9 +71,13 @@ impl Shared {
         self.close_power_menu();
         self.close_volume_panel();
         let weak = self.me.clone();
-        // Drawn again while open: it does not enter again.
+        // Drawn again while open: it does not enter again, and keeps its menu's program.
+        let mut menu_of = None;
         let (window, again) = match self.tray_panel.take() {
-            Some(p) => (p.shown.into_window(), true),
+            Some(p) => {
+                menu_of = p.menu_of;
+                (p.shown.into_window(), true)
+            }
             None => match Window::input_surface(PANEL_CLASS, "", PxRect::default(), move |m| {
                 let rc = weak.upgrade()?;
                 let mut s = rc.try_borrow_mut().ok()?;
@@ -121,6 +133,7 @@ impl Shared {
             layout,
             scale,
             bar,
+            menu_of,
         });
     }
 
@@ -141,8 +154,32 @@ impl Shared {
         let Some(&(index, _)) = self.hidden_tray().get(i) else {
             return;
         };
-        self.close_tray_panel();
+        if click == Click::Right {
+            // The program's menu opens over the panel, which stays.
+            let owner = self
+                .tray
+                .visible()
+                .nth(index)
+                .and_then(|icon| kabuk_win::window::Hwnd(icon.hwnd).pid());
+            if let Some(p) = self.tray_panel.as_mut() {
+                p.menu_of = owner;
+            }
+            tracing::debug!(owner, "tray panel kept for the menu");
+        } else {
+            self.close_tray_panel();
+        }
         self.tray_click(index, click, x, y);
+    }
+
+    /// Another window came to the front: after a right click the panel stays for the
+    /// program whose menu opened, and closes for any other.
+    pub(super) fn tray_panel_foreground(&mut self, fg: Option<kabuk_win::window::Hwnd>) {
+        let Some(owner) = self.tray_panel.as_ref().and_then(|p| p.menu_of) else {
+            return;
+        };
+        if fg.and_then(|h| h.pid()) != Some(owner) {
+            self.close_tray_panel();
+        }
     }
 
     pub(super) fn on_tray_panel(&mut self, m: Msg) -> Option<isize> {
@@ -155,7 +192,9 @@ impl Shared {
                 return Some(0);
             }
             msg::ACTIVATE => {
-                if (m.wparam & 0xFFFF) == msg::WA_INACTIVE {
+                // Waiting on a right click's menu, the foreground decides instead.
+                let held = self.tray_panel.as_ref().is_some_and(|p| p.menu_of.is_some());
+                if (m.wparam & 0xFFFF) == msg::WA_INACTIVE && !held {
                     self.close_tray_panel();
                 }
                 return None;

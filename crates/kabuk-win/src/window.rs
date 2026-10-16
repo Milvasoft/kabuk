@@ -612,6 +612,15 @@ pub fn windows_of_class(class: &str) -> Vec<Hwnd> {
         .collect()
 }
 
+/// A popup menu is on screen (any program's: a tray icon's menu, a window's menu; Windows
+/// draws them as top-level windows of the class `#32768`).
+pub fn popup_menu_open() -> bool {
+    windows_of_class(MENU_CLASS).into_iter().any(Hwnd::is_visible)
+}
+
+/// The class of Windows' popup menus.
+const MENU_CLASS: &str = "#32768";
+
 /// Finds a message-only window by class and title.
 pub fn find_message_window(class: &str, title: &str) -> Option<Hwnd> {
     let class = HSTRING::from(class);

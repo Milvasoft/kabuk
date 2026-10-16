@@ -270,6 +270,75 @@ fn without_an_announcement_the_shell_takes_over_after_the_fallback() {
 /// hides it; a double click reaches the program as WM_LBUTTONDBLCLK. The double click is a
 /// real mouse message at the icon's place on the bar (the bar's own hit test); the hover
 /// starts from a test message, because the real cursor is not moved.
+/// Found by the user: with a program's tray menu open (Chrome's, a submenu being chosen),
+/// Kabuk found its tray behind Explorer's and asked every program to register again;
+/// putting its icon back, Chrome closed the menu. While a menu is open the asking waits,
+/// and comes once it has closed.
+#[test]
+fn an_open_tray_menu_is_not_closed_by_asking_programs_again() {
+    use kabuk::bar::manager::{CONTROL_CLASS, MSG_TRAY_BEHIND};
+    use kabuk_win::msgloop::{post_message, Msg};
+    /// The test app's own messages: open and close its popup menu.
+    const OPEN_MENU: u32 = 0x8000 + 4;
+    const CLOSE_MENU: u32 = 0x8000 + 5;
+    let before = Desktop::now();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    let _shell = sandbox.kabuk_with(&[TAKE_EXPLORER, "--no-wm"]);
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("tray window up") == 1).is_some());
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
+    let app = TestWindow::open(&["--title", &title("tray-menu")]);
+    let post = |to: kabuk_win::window::Hwnd, id: u32| {
+        post_message(
+            to,
+            Msg {
+                id,
+                wparam: 0,
+                lparam: 0,
+            },
+        )
+        .unwrap();
+    };
+    post(app.hwnd, OPEN_MENU);
+    assert!(
+        wait_until(SETTLE, kabuk_win::window::popup_menu_open).is_some(),
+        "the menu did not open"
+    );
+    let behind = || sandbox.log_lines("tray was behind Explorer's");
+    let waited = || sandbox.log_lines("a menu is open, programs asked later");
+    let asked = sandbox.log_lines("programs asked to register again");
+    post(control, MSG_TRAY_BEHIND);
+    assert!(
+        wait_until(SETTLE, || waited() >= 1).is_some(),
+        "the asking did not wait"
+    );
+    assert_eq!(
+        sandbox.log_lines("programs asked to register again"),
+        asked,
+        "asked while the menu was open"
+    );
+    assert!(kabuk_win::window::popup_menu_open(), "the menu was closed");
+    // Closed: the asking comes (or is skipped as too soon after the last one).
+    let seen = behind();
+    post(app.hwnd, CLOSE_MENU);
+    assert!(wait_until(SETTLE, || !kabuk_win::window::popup_menu_open()).is_some());
+    assert!(
+        wait_until(SETTLE, || behind() > seen
+            && sandbox
+                .last_log_line(&["tray was behind"])
+                .is_some_and(|l| !l.contains("a menu is open")))
+        .is_some(),
+        "not asked once the menu closed"
+    );
+    drop(app);
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || before.is_back()).is_some(), "desktop not back");
+}
+
 #[test]
 fn a_tray_icon_shows_its_tooltip_and_takes_double_clicks() {
     use kabuk::bar::manager::{MSG_TEST_TRAY_HOVER, MSG_TEST_TRAY_WHERE};
@@ -485,7 +554,7 @@ fn a_program_asking_where_its_icon_is_gets_its_place_on_the_bar() {
 /// file brings icons back to the bar.
 #[test]
 fn icons_beyond_tray_shown_are_clicked_from_the_overflow_panel() {
-    use kabuk::bar::manager::{MSG_TEST_TRAY_PANEL, MSG_TEST_TRAY_PANEL_CLICK};
+    use kabuk::bar::manager::{MSG_TEST_FOREGROUND, MSG_TEST_TRAY_PANEL, MSG_TEST_TRAY_PANEL_CLICK};
     let before = Desktop::now();
     let sandbox = Sandbox::new();
     std::fs::write(sandbox.config_file(), "schema = 1\n[bar]\ntray_shown = 0\n").unwrap();
@@ -542,9 +611,30 @@ fn icons_beyond_tray_shown_are_clicked_from_the_overflow_panel() {
         got(),
         calls_of(&sandbox, app.hwnd.0)
     );
+    // Asked for by the user: a right click keeps the panel while the program's menu is up,
+    // the program itself in front included.
+    post(MSG_TEST_FOREGROUND, app.hwnd.0 as usize, 0);
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(
+        sandbox.log_lines("tray panel closed"),
+        0,
+        "the panel closed for its menu"
+    );
+    // Another program in front (a click elsewhere): it closes.
+    let other = TestWindow::open(&["--title", &title("tray-panel-other")]);
+    post(MSG_TEST_FOREGROUND, other.hwnd.0 as usize, 0);
     assert!(
         wait_until(SETTLE, || sandbox.log_lines("tray panel closed") >= 1).is_some(),
-        "the panel stays after a click"
+        "the panel stayed with another program in front"
+    );
+    drop(other);
+    // A left click opens the program: the panel closes.
+    post(MSG_TEST_TRAY_PANEL, 1, 0);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("tray panel opened") >= 2).is_some());
+    post(MSG_TEST_TRAY_PANEL_CLICK, app.hwnd.0 as usize, 0);
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("tray panel closed") >= 2).is_some(),
+        "the panel stays after a left click"
     );
 
     // Live: up to 12 on the bar again.

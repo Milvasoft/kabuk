@@ -34,6 +34,8 @@
 //! a move by (dx, dy), `EVENT_SYSTEM_MOVESIZEEND`. No mouse input is involved.
 //! `FAKE_RESIZE` (`WM_APP + 3`, wparam = left edge's move, lparam = right edge's move)
 //! reports a resize by those edges the same way.
+//! `OPEN_MENU` (`WM_APP + 4`) opens a popup menu at the window's corner, as a program's
+//! tray icon menu (`TrackPopupMenu`), and `CLOSE_MENU` (`WM_APP + 5`) closes it.
 
 use std::io::Write;
 use std::sync::OnceLock;
@@ -57,6 +59,8 @@ const TIMER_TITLE: usize = 4;
 const TRAY_CALLBACK: u32 = WM_APP + 1;
 const FAKE_DRAG: u32 = WM_APP + 2;
 const FAKE_RESIZE: u32 = WM_APP + 3;
+const OPEN_MENU: u32 = WM_APP + 4;
+const CLOSE_MENU: u32 = WM_APP + 5;
 const TRAY_ID: u32 = 1;
 /// Sizes the self-resizing window alternates between.
 const RESIZE_STEPS: [(i32, i32); 2] = [(500, 400), (700, 520)];
@@ -348,6 +352,24 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     );
                 }
                 NotifyWinEvent(EVENT_SYSTEM_MOVESIZEEND, hwnd, OBJID_WINDOW.0, CHILDID_SELF as i32);
+                return LRESULT(0);
+            }
+            OPEN_MENU => {
+                // As a tray icon's program does: in front, then the menu until it is
+                // chosen from or closed.
+                if let Ok(menu) = CreatePopupMenu() {
+                    let item = HSTRING::from("Test item");
+                    let _ = AppendMenuW(menu, MF_STRING, 1, PCWSTR(item.as_ptr()));
+                    let mut r = windows::Win32::Foundation::RECT::default();
+                    let _ = GetWindowRect(hwnd, &mut r);
+                    let _ = SetForegroundWindow(hwnd);
+                    let _ = TrackPopupMenu(menu, TPM_RIGHTBUTTON, r.left + 20, r.top + 20, None, hwnd, None);
+                    let _ = DestroyMenu(menu);
+                }
+                return LRESULT(0);
+            }
+            CLOSE_MENU => {
+                let _ = EndMenu();
                 return LRESULT(0);
             }
             FAKE_RESIZE => {

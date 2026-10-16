@@ -118,7 +118,7 @@ pub use idle_host::{MSG_INPUT, MSG_TEST_DIM};
 pub const MSG_TEST_SWIPE: u32 = msg::APP + 51;
 #[path = "tray_panel_host.rs"]
 mod tray_panel_host;
-pub use tray_panel_host::{MSG_TEST_TRAY_PANEL, MSG_TEST_TRAY_PANEL_CLICK};
+pub use tray_panel_host::{MSG_TEST_FOREGROUND, MSG_TEST_TRAY_PANEL, MSG_TEST_TRAY_PANEL_CLICK};
 
 const BAR_CLASS: &str = kabuk_core::hang::BAR_CLASS;
 const DOCK_CLASS: &str = "Kabuk.Dock";
@@ -329,8 +329,9 @@ pub const MSG_APPBAR: u32 = msg::APP + 3;
 const MSG_WM: u32 = msg::APP + 4;
 /// Tray calls are waiting in the queue.
 const MSG_TRAY: u32 = msg::APP + 5;
-/// Kabuk's tray window had fallen behind Explorer's (the taskbar was shown again).
-const MSG_TRAY_BEHIND: u32 = msg::APP + 7;
+/// Kabuk's tray window had fallen behind Explorer's (the taskbar was shown again); tests
+/// post it too.
+pub const MSG_TRAY_BEHIND: u32 = msg::APP + 7;
 /// Programs are asked to register again this long after the tray fell behind, once for a
 /// burst of shows.
 const TRAY_ASK_AGAIN: Duration = Duration::from_millis(500);
@@ -884,6 +885,7 @@ impl BarManager {
                         }
                     }
                     s.live.title = fg.and_then(|h| Title::split(&h.title()));
+                    s.tray_panel_foreground(fg);
                     s.step_aside_for_fullscreen();
                     s.refresh_apps();
                     s.render_all(false);
@@ -1254,7 +1256,15 @@ impl Shared {
                     timer::TRAY_AGAIN => {
                         self.kill(timer::TRAY_AGAIN);
                         let now = std::time::Instant::now();
-                        if !ask_again(self.tray_asked, now) {
+                        if kabuk_win::window::popup_menu_open() {
+                            // Found by the user: asked to register again, programs put their
+                            // icons back and closed the tray menu open on screen (Chrome's,
+                            // while a submenu was being chosen). Asked once it has closed.
+                            tracing::info!("tray was behind Explorer's; a menu is open, programs asked later");
+                            if let Some(c) = &self.control {
+                                c.set_timer(timer::TRAY_AGAIN, TRAY_ASK_AGAIN);
+                            }
+                        } else if !ask_again(self.tray_asked, now) {
                             tracing::debug!("tray was behind Explorer's right after asking; not asking again");
                         } else if let Some(t) = &self.tray_host {
                             tracing::info!("tray was behind Explorer's; programs asked to register again");
@@ -1366,6 +1376,11 @@ impl Shared {
             MSG_TEST_TRAY_PANEL_CLICK => {
                 let click = if m.lparam == 0 { Click::Left } else { Click::Right };
                 self.test_panel_click(m.wparam as u64, click);
+                Some(0)
+            }
+            #[cfg(feature = "integration")]
+            MSG_TEST_FOREGROUND => {
+                self.tray_panel_foreground(Some(kabuk_win::window::Hwnd(m.wparam as u64)));
                 Some(0)
             }
             #[cfg(feature = "integration")]
