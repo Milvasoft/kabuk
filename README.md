@@ -2,7 +2,7 @@
 
 A desktop shell for Windows built from scratch: a bar on every monitor, dynamic tiling and floating windows, a launcher, notifications, animated and created wallpapers, a screen saver and a settings app. OLED-friendly, Turkish and English, does not break games. The Windows taskbar is hidden and Explorer is left untouched; when Kabuk exits, Windows returns to its previous state.
 
-Licensed under the PolyForm Noncommercial License 1.0.0 (see `LICENSE.md`): free for personal and other non-commercial use; commercial use is not permitted.
+Open source under the Apache License 2.0 (see `LICENSE`).
 
 > Status: version 1.0.2. `docs/PLAN.md` has each milestone's results and what is left.
 
@@ -50,7 +50,7 @@ Formatting, clippy with warnings as errors, every unit test, the Windows integra
 | File | Contents |
 | --- | --- |
 | `docs/CONTRIBUTING.md` | Working rules: safety, code style, what "done" means |
-| `LICENSE.md` | License (PolyForm Noncommercial 1.0.0) |
+| `LICENSE` | License (Apache 2.0) |
 | `docs/SPEC.md` | Product definition and acceptance criteria |
 | `docs/ARCHITECTURE.md` | Technical design |
 | `docs/PLAN.md` | Milestones, their results and "done" criteria |

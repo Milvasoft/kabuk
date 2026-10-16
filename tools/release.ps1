@@ -16,7 +16,7 @@ $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
 $programs = @('kabuk.exe', 'kabuk-watchdog.exe', 'kabuk-settings.exe', 'kabuk-saver.exe')
-$extras = @('README.md', 'LICENSE.md')
+$extras = @('README.md', 'LICENSE')
 
 if (-not $SkipChecks) {
     & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'check.ps1')

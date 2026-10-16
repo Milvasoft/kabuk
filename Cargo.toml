@@ -7,7 +7,7 @@ members = ["crates/*", "apps/*"]
 version = "1.0.2"
 edition = "2021"
 rust-version = "1.85"
-license-file = "LICENSE.md"
+license-file = "LICENSE"
 repository = "https://github.com/Milvasoft/kabuk"
 publish = false
 
