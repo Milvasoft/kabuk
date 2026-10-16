@@ -231,10 +231,12 @@ impl Shared {
                     .windows
                     .iter()
                     .map(|w| WindowEntry {
-                        picture: Hwnd(w.hwnd)
-                            .pid()
-                            .and_then(|pid| self.apps.exes.get(&pid))
-                            .map(|(_, icon)| icon.clone()),
+                        picture: self.apps.framed.get(&w.hwnd).cloned().or_else(|| {
+                            Hwnd(w.hwnd)
+                                .pid()
+                                .and_then(|pid| self.apps.exes.get(&pid))
+                                .map(|(_, icon)| icon.clone())
+                        }),
                         hwnd: w.hwnd,
                         title: Hwnd(w.hwnd).title(),
                         workspace: w.workspace,

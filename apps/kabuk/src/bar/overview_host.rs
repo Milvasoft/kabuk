@@ -378,9 +378,12 @@ impl Shared {
     /// A program's icon for window `hwnd`, at the overview's size.
     fn window_picture(&mut self, hwnd: u64, scale: Scale) -> Option<u64> {
         let pid = Hwnd(hwnd).pid()?;
-        let icon = match self.apps.exes.get(&pid) {
-            Some((_, icon)) => icon.clone(),
-            None => kabuk_win::process::Process::open(pid).ok()?.image_path()?,
+        // A window of Windows' frame host shows the packaged app it frames.
+        let framed = self.apps.framed.get(&hwnd).cloned();
+        let icon = match (framed, self.apps.exes.get(&pid)) {
+            (Some(app), _) => app,
+            (None, Some((_, icon))) => icon.clone(),
+            (None, None) => kabuk_win::process::Process::open(pid).ok()?.image_path()?,
         };
         let side = u32::try_from(scale.px(STYLE.icon)).unwrap_or(1).max(1) * super::apps_host::OVERSAMPLE;
         let key = apps::image_key(&format!("{icon}@{side}"));

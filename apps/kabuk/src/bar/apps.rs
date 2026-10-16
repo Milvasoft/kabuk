@@ -3,6 +3,22 @@
 //! another order, pinned and unpinned. Kabuk keeps its own pins (first read from the
 //! Windows taskbar's); Windows' own are never changed. Pure.
 
+/// How the shell names a packaged app by its app id.
+pub const APPS_FOLDER: &str = r"shell:AppsFolder\";
+/// The program Windows draws packaged apps' windows in (Settings, Calculator, …).
+const FRAME_HOST: &str = "ApplicationFrameHost.exe";
+
+/// The packaged app a window of Windows' frame host shows, as the shell names it (the
+/// program it stands for on the bar, and its picture), from the window's own app id, as
+/// Windows' taskbar tells them apart (found by the user: Settings showed the frame
+/// host's blank icon). `None` for every other program's window.
+pub fn framed_app(exe: &str, window_app_id: Option<&str>) -> Option<String> {
+    let name = exe.rsplit(['\\', '/']).next().unwrap_or(exe);
+    let id = window_app_id.filter(|id| !id.trim().is_empty())?;
+    name.eq_ignore_ascii_case(FRAME_HOST)
+        .then(|| format!("{APPS_FOLDER}{id}"))
+}
+
 /// A pinned app.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Pin {
@@ -418,6 +434,31 @@ mod tests {
     //! program, two windows of one program (case of the path differs), the focused
     //! window's app, the order kept when windows close, picture keys.
     use super::*;
+
+    /// Edge cases: Settings and Calculator in the frame host (each its own app), the frame
+    /// host's window without an app id, another program with an app id, a bare file name,
+    /// letter case.
+    #[test]
+    fn the_frame_hosts_windows_stand_for_the_apps_they_frame() {
+        const HOST: &str = r"C:\Windows\System32\ApplicationFrameHost.exe";
+        const SETTINGS: &str = "windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.immersivecontrolpanel";
+        assert_eq!(
+            framed_app(HOST, Some(SETTINGS)),
+            Some(format!("{APPS_FOLDER}{SETTINGS}"))
+        );
+        let calc = "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App";
+        assert_eq!(framed_app(HOST, Some(calc)), Some(format!("{APPS_FOLDER}{calc}")));
+        assert_eq!(framed_app(HOST, None), None);
+        assert_eq!(framed_app(HOST, Some(" ")), None);
+        assert_eq!(
+            framed_app(r"C:\Program Files\Google\Chrome\Application\chrome.exe", Some("Chrome")),
+            None
+        );
+        assert_eq!(
+            framed_app("applicationframehost.EXE", Some(calc)),
+            Some(format!("{APPS_FOLDER}{calc}"))
+        );
+    }
 
     const CODE: &str = r"C:\Apps\Code\Code.exe";
     const CHROME: &str = r"C:\Program Files\Google\Chrome\chrome.exe";

@@ -11,7 +11,7 @@ use kabuk_win::window::Hwnd;
 use super::dock::DockApp;
 use super::view::AppIcon;
 use super::Shared;
-use crate::bar::apps::{self, App, Pin, Running};
+use crate::bar::apps::{self, App, Pin, Running, APPS_FOLDER};
 use crate::wm;
 
 /// Kabuk's own pins in the state folder (D45).
@@ -32,8 +32,6 @@ const PIN_FOLDER: [&str; 5] = [
 /// App icons are loaded at this many times their drawn size and scaled down when drawn,
 /// so they stay smooth (the shell's own small sizes look coarse, reported by the user).
 pub(super) const OVERSAMPLE: u32 = 2;
-/// How the shell names a packaged app by its app id.
-const APPS_FOLDER: &str = r"shell:AppsFolder\";
 /// Integration tests click the app owning window `wparam`, as a click on its icon would;
 /// `lparam` 1: as if that window were in front.
 pub const MSG_TEST_APP_CLICK: u32 = kabuk_win::msgloop::msg::APP + 28;
@@ -54,6 +52,8 @@ pub(super) struct AppsState {
     pub(super) exes: HashMap<u32, (String, String)>,
     /// Each managed window's app id, read once.
     ids: HashMap<u64, Option<String>>,
+    /// The frame host's windows and the packaged apps they show ([`apps::framed_app`]).
+    pub(super) framed: HashMap<u64, String>,
     /// The pictures' side in pixels (bar or dock size at the monitor's scale, oversampled).
     side: u32,
     /// Each app's name by its program (or pin), for a look listing the apps as tasks.
@@ -304,6 +304,14 @@ impl Shared {
                 .entry(hwnd)
                 .or_insert_with(|| kabuk_win::shellitems::window_app_id(Hwnd(hwnd)))
                 .clone();
+            // A window of Windows' frame host is the packaged app it shows.
+            let (exe, icon) = match apps::framed_app(&exe, app_id.as_deref()) {
+                Some(app) => {
+                    self.apps.framed.insert(hwnd, app.clone());
+                    (app.clone(), app)
+                }
+                None => (exe, icon),
+            };
             running.push(Running {
                 hwnd,
                 exe,
@@ -312,6 +320,7 @@ impl Shared {
             });
         }
         self.apps.ids.retain(|h, _| running.iter().any(|r| r.hwnd == *h));
+        self.apps.framed.retain(|h, _| running.iter().any(|r| r.hwnd == *h));
         apps::remember_order(&mut self.apps.order, &running);
         let focused = kabuk_win::events::foreground().map(|h| h.0);
         let list = apps::apps(&self.apps.pins, &running, &self.apps.order, focused);
