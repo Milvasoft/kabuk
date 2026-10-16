@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use kabuk_core::install::{uninstall_values, Roots, Value, NAME, PROGRAMS};
 use windows::core::{Interface, HSTRING};
+use windows::Win32::Foundation::ERROR_SHARING_VIOLATION;
 use windows::Win32::System::Com::{CoCreateInstance, IPersistFile, CLSCTX_INPROC_SERVER};
 use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
 
@@ -23,11 +24,31 @@ pub fn copy_programs(from: &Path, roots: &Roots) -> std::io::Result<u64> {
     for p in PROGRAMS {
         let target = to.join(p);
         if !same {
-            std::fs::copy(from.join(p), &target)?;
+            replace(&from.join(p), &target)?;
         }
         size += std::fs::metadata(&target)?.len();
     }
     Ok(size)
+}
+
+/// Copies `from` over `target`. A program still running from `target` (Kabuk's settings
+/// left open; found by the user: the setup stopped with exit code 13) cannot be written
+/// but can be renamed: it is moved aside, keeps running from there, and its old file
+/// goes at the next installation.
+fn replace(from: &Path, target: &Path) -> std::io::Result<()> {
+    let mut aside = target.as_os_str().to_owned();
+    aside.push(".old");
+    let aside = PathBuf::from(aside);
+    let _ = std::fs::remove_file(&aside);
+    match std::fs::copy(from, target) {
+        Ok(_) => Ok(()),
+        Err(e) if e.raw_os_error() == Some(ERROR_SHARING_VIOLATION.0 as i32) => {
+            tracing::info!(program = %target.display(), "running; its old file moved aside");
+            std::fs::rename(target, &aside)?;
+            std::fs::copy(from, target).map(|_| ())
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// A shortcut at `link` to `target`. COM must be initialised on this thread.
@@ -233,6 +254,50 @@ mod tests {
 
     fn roots(dir: &Path) -> Roots {
         Roots::for_test(dir)
+    }
+
+    /// Found by the user: with Kabuk's settings left open, the setup stopped with
+    /// "kabuk --install: exit code: 13" (the running program's file cannot be written).
+    /// A program held as a running one is (read and delete shared) is replaced, the
+    /// running one keeps its old file, and that file goes at the next installation.
+    #[test]
+    fn a_program_still_running_is_replaced() {
+        use std::io::Read;
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows::Win32::Storage::FileSystem::{FILE_SHARE_DELETE, FILE_SHARE_READ};
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("build");
+        std::fs::create_dir_all(&src).unwrap();
+        let r = roots(dir.path());
+        for p in PROGRAMS {
+            std::fs::write(src.join(p), b"old").unwrap();
+        }
+        copy_programs(&src, &r).unwrap();
+        for p in PROGRAMS {
+            std::fs::write(src.join(p), b"new").unwrap();
+        }
+        let settings = r.program_dir().join(kabuk_core::install::SETTINGS);
+        // As Windows holds a running program's file.
+        let mut running = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_DELETE.0)
+            .open(&settings)
+            .unwrap();
+        copy_programs(&src, &r).expect("installed over a running program");
+        for p in PROGRAMS {
+            assert_eq!(std::fs::read(r.program_dir().join(p)).unwrap(), b"new", "{p}");
+        }
+        let mut was = Vec::new();
+        running.read_to_end(&mut was).unwrap();
+        assert_eq!(was, b"old", "the running program lost its file");
+        drop(running);
+        copy_programs(&src, &r).unwrap();
+        let left: Vec<_> = std::fs::read_dir(r.program_dir())
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.file_name()))
+            .filter(|n| !PROGRAMS.iter().any(|p| n.to_str() == Some(*p)))
+            .collect();
+        assert!(left.is_empty(), "left behind: {left:?}");
     }
 
     #[test]
