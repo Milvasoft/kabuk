@@ -427,7 +427,7 @@ impl Style {
     /// colour, so the text keeps the contrast it was checked against (all looks but Ada,
     /// whose capsules carry their own surface).
     pub fn bar_background(&self) -> Option<Paint> {
-        if !self.solid {
+        if !self.solid || self.group_fill().is_some() {
             return None;
         }
         if self.bar_color.is_some() {
@@ -444,6 +444,24 @@ impl Style {
                 radius: 0.0,
             })
         })
+    }
+
+    /// What fills Devre's groups when the bar's background is solid: the colour the user
+    /// chose (D57), else the desk colour; no strip lies behind them (found by the user:
+    /// the strip behind its floating groups looked like a black band across the screen;
+    /// DECISIONS D71). `None` for the other looks and backgrounds.
+    pub fn group_fill(&self) -> Option<Role> {
+        (self.look == Look::Devre && self.solid).then_some(if self.bar_color.is_some() {
+            Role::BarFill
+        } else {
+            Role::Desk
+        })
+    }
+
+    /// The bar strip is filled behind everything: a solid background, unless the groups
+    /// carry the fill themselves ([`Style::group_fill`]).
+    pub fn strip(&self) -> bool {
+        self.solid && self.group_fill().is_none()
     }
 
     pub fn of(look: Look) -> Style {
@@ -1052,7 +1070,8 @@ mod tests {
     }
 
     /// `.screen.has-wall:where(:not([data-dir="a"])) .bar { background-color: var(--desk) }`,
-    /// overridden by the looks that paint their own bar.
+    /// overridden by the looks that paint their own bar. Devre is left out by the user's
+    /// wish (D71; see `devres_groups_carry_the_fill_instead_of_a_strip`).
     #[test]
     fn bars_without_their_own_background_sit_on_the_desk_over_a_wallpaper() {
         let desk = Some(Paint {
@@ -1060,7 +1079,7 @@ mod tests {
             border: None,
             radius: 0.0,
         });
-        for look in [Look::Cizgi, Look::Devre, Look::Konsol] {
+        for look in [Look::Cizgi, Look::Konsol] {
             assert_eq!(Style::of(look).with_wallpaper(true).bar_background(), desk, "{look:?}");
             assert_eq!(Style::of(look).with_wallpaper(false).bar_background(), None, "{look:?}");
         }
@@ -1072,6 +1091,30 @@ mod tests {
             assert_eq!(s.with_wallpaper(true).bar_background(), s.bar_paint, "{look:?}");
             assert_eq!(s.with_wallpaper(false).bar_background(), s.bar_paint, "{look:?}");
         }
+    }
+
+    /// DECISIONS D71, found by the user: the strip behind Devre's floating groups looked
+    /// like a black band across the screen. With a solid background Devre draws no strip,
+    /// over a wallpaper or not, with a chosen colour or not; its groups carry the fill
+    /// themselves, so their words keep the contrast they were checked against. Ada keeps
+    /// its strip, and other backgrounds fill nothing.
+    #[test]
+    fn devres_groups_carry_the_fill_instead_of_a_strip() {
+        let solid = Style::of(Look::Devre).with_solid(true);
+        for wall in [true, false] {
+            let s = solid.with_wallpaper(wall);
+            assert_eq!(s.bar_background(), None, "{wall}");
+            assert!(!s.strip(), "{wall}");
+            assert_eq!(s.group_fill(), Some(Role::Desk), "{wall}");
+        }
+        let chosen = solid.with_bar_color(Some([30, 20, 51]));
+        assert_eq!(chosen.bar_background(), None);
+        assert_eq!(chosen.group_fill(), Some(Role::BarFill));
+        assert_eq!(solid.with_solid(false).group_fill(), None);
+        assert!(!solid.with_solid(false).strip());
+        let ada = Style::of(Look::Ada).with_solid(true);
+        assert_eq!(ada.group_fill(), None);
+        assert!(ada.strip());
     }
 
     /// Found by the user: with the blur or no background, Etkinlik's black strip (and the
@@ -1092,10 +1135,11 @@ mod tests {
     }
 
     /// DECISIONS D57: a colour the user chose fills the whole strip in every look, with
-    /// or without a wallpaper; a look's slab keeps its corners and border.
+    /// or without a wallpaper; a look's slab keeps its corners and border. Devre fills its
+    /// groups with it instead (D71).
     #[test]
     fn a_chosen_bar_colour_fills_the_strip_in_every_look() {
-        for look in Look::ALL {
+        for look in Look::ALL.into_iter().filter(|l| *l != Look::Devre) {
             let s = Style::of(look).with_bar_color(Some([30, 20, 51]));
             for wall in [true, false] {
                 let p = s.with_wallpaper(wall).bar_background().expect("painted");

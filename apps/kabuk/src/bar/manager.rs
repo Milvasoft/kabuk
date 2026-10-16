@@ -3314,7 +3314,8 @@ impl Shared {
             0
         });
         let background = self.config().bar.background;
-        let strip = background == BarBackground::Solid && wallpaper_behind_bars(self.config());
+        // Devre's groups carry the solid fill themselves (D71).
+        let strip = style.strip() && wallpaper_behind_bars(self.config());
         let mut lost = false;
         let mut drew = false;
         let blends = self.motion_level() != kabuk_ui::motion::Level::Off;

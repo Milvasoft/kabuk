@@ -8,6 +8,9 @@ No open decisions (the user decided D39, D43, D44 and the still pictures' drift 
 
 ## Decided and proposed
 
+### D71 · Devre fills its groups, not a strip — Decided by the user (2026-10-16)
+Found by the user: in Devre a black band lay behind the bar. With a solid background every look fills the bar strip behind everything (D28; the design page's `.screen.has-wall .bar { background-color: var(--desk) }`), and behind Devre's floating, outlined groups that strip looked like a black band across the screen. Now, with a solid background, Devre draws no strip: each group is filled instead, with the colour the user chose (D57) or else the desk colour, so its words keep the contrast they were checked against, and the traces between the groups run over the wallpaper (`bar::style::Style::group_fill`). With the background off or blurred nothing changes (off fills nothing; the blur tints the whole bar window, as in every look). The other looks keep their strip. A test in the test machine reads the desktop above the bar: with the background off Ada and Devre leave it as it was, and with a solid one Devre darkens far less of it than Ada's strip.
+
 ### D70 · Auto-hide that waits for the mouse, keeps its panels, and hides the dock — Decided by the user (2026-10-16)
 The user found auto-hide poor: the bar came down over the windows whenever the mouse touched the top edge (on its way to a window's tabs or title), and in Rıhtım the dock at the bottom did not hide at all; they asked for it to be made as good as it can be. Now, with `bar.autohide`:
 - **The mouse has to rest at the edge.** Touching the sliver starts a 250 ms wait (`REVEAL_DELAY`); the bar comes in only if the mouse is still there (Windows' "mouse left" ends the wait). A shown bar stays as long as the mouse is on it, as before.

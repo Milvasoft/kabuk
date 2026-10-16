@@ -205,7 +205,8 @@ fn group(children: Vec<Node>, s: &Style, vertical: bool, thickness: f32) -> Node
             radius,
         }),
         Group::Outline { radius, border } => Some(Paint {
-            fill: Role::Clear,
+            // With a solid background the group carries the fill, not a strip (D71).
+            fill: s.group_fill().unwrap_or(Role::Clear),
             border: Some((Role::Trace, border)),
             radius,
         }),

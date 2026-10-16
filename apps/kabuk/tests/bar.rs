@@ -2805,3 +2805,44 @@ fn an_animated_wallpaper_runs_while_chosen_and_ends_with_kabuk() {
     );
     assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
 }
+
+/// Found by the user: in Devre a black band lay behind the bar's groups (DECISIONS D71).
+/// With the background off, the looks whose groups float (Ada, Devre) leave the desktop
+/// as it was around their groups; with a solid one Ada fills its strip, while Devre fills
+/// only its groups, so far less of the desktop goes dark.
+#[test]
+fn floating_groups_leave_the_desktop_behind_them() {
+    let primary = kabuk_win::shell::monitors().into_iter().find(|m| m.primary).unwrap();
+    let rows = kabuk_win::msgloop::PxRect {
+        x: primary.rect.left,
+        y: primary.rect.top,
+        w: primary.rect.right - primary.rect.left,
+        h: 3,
+    };
+    let look_at = || kabuk_win::dpi::physical(|| kabuk_win::screen::capture(rows)).expect("screen");
+    let mut change = std::collections::HashMap::new();
+    for look in ["ada", "devre"] {
+        for background in ["off", "solid"] {
+            let before = work_areas();
+            let desktop = look_at();
+            let sandbox = Sandbox::new();
+            std::fs::write(
+                sandbox.config_file(),
+                format!("schema = 1\n[appearance]\nlook = \"{look}\"\n[bar]\nposition = \"top\"\nbackground = \"{background}\"\n"),
+            )
+            .unwrap();
+            let _shell = sandbox.shell_with_bar(&[]);
+            assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("bar drawn") >= 1).is_some());
+            std::thread::sleep(Duration::from_millis(800));
+            change.insert((look, background), kabuk_win::screen::difference(&desktop, &look_at()));
+            assert_eq!(sandbox.restore().0, 0);
+            assert!(wait_until(SETTLE, || restored(&before)).is_some());
+        }
+    }
+    let c = |look, background| change[&(look, background)];
+    assert!(c("ada", "off") < 1.0 && c("devre", "off") < 1.0, "{change:?}");
+    assert!(
+        c("devre", "solid") < c("ada", "solid") * 0.75,
+        "Devre filled its strip: {change:?}"
+    );
+}
