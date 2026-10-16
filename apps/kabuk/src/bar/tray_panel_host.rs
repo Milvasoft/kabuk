@@ -1,9 +1,10 @@
 //! The tray's overflow panel on the bar thread (DECISIONS D26): opened from the bar's
 //! overflow button, it shows the tray icons that do not fit on the bar; their clicks reach
-//! the programs as on the bar. It closes when it loses the keyboard (a click elsewhere),
-//! on Esc and after a left click on one of its icons (the program opens). After a right
-//! click it stays while the program shows its menu, and closes once another program
-//! comes to the front (asked for by the user: it closed as the menu opened).
+//! the programs as on the bar. It closes when it loses the keyboard (a click elsewhere)
+//! and on Esc. After a click on one of its icons it stays while that program shows its
+//! menu or its windows, and closes once another program, the desktop or a taskbar comes
+//! to the front, or the bar is clicked (asked for by the user: it closed as the menu
+//! opened, and as the program opened).
 
 use kabuk_core::tray::Click;
 use kabuk_ui::geom::{Point, Scale};
@@ -34,9 +35,16 @@ pub(super) struct TrayPanel {
     layout: Layout,
     scale: Scale,
     bar: usize,
-    /// The process of the icon right-clicked last: its menu or windows in front keep the
-    /// panel; another program in front closes it.
-    menu_of: Option<u32>,
+    /// The process of the icon clicked last: its menu or windows in front keep the panel;
+    /// anything else in front closes it.
+    held_for: Option<u32>,
+}
+
+/// Whether the panel held for process `owner` stays with the window of process `fg_pid`
+/// in front: the program's own menus and windows keep it; another program, or the
+/// desktop and the taskbars (Explorer's, though Explorer may own the icon), close it.
+fn keeps_panel(owner: u32, fg_pid: Option<u32>, fg_shell: bool) -> bool {
+    fg_pid == Some(owner) && !fg_shell
 }
 
 impl Shared {
@@ -71,11 +79,11 @@ impl Shared {
         self.close_power_menu();
         self.close_volume_panel();
         let weak = self.me.clone();
-        // Drawn again while open: it does not enter again, and keeps its menu's program.
-        let mut menu_of = None;
+        // Drawn again while open: it does not enter again, and keeps the program it is held for.
+        let mut held_for = None;
         let (window, again) = match self.tray_panel.take() {
             Some(p) => {
-                menu_of = p.menu_of;
+                held_for = p.held_for;
                 (p.shown.into_window(), true)
             }
             None => match Window::input_surface(PANEL_CLASS, "", PxRect::default(), move |m| {
@@ -133,7 +141,7 @@ impl Shared {
             layout,
             scale,
             bar,
-            menu_of,
+            held_for,
         });
     }
 
@@ -154,30 +162,26 @@ impl Shared {
         let Some(&(index, _)) = self.hidden_tray().get(i) else {
             return;
         };
-        if click == Click::Right {
-            // The program's menu opens over the panel, which stays.
-            let owner = self
-                .tray
-                .visible()
-                .nth(index)
-                .and_then(|icon| kabuk_win::window::Hwnd(icon.hwnd).pid());
-            if let Some(p) = self.tray_panel.as_mut() {
-                p.menu_of = owner;
-            }
-            tracing::debug!(owner, "tray panel kept for the menu");
-        } else {
-            self.close_tray_panel();
+        // The program's menu or window opens over the panel, which stays.
+        let owner = self
+            .tray
+            .visible()
+            .nth(index)
+            .and_then(|icon| kabuk_win::window::Hwnd(icon.hwnd).pid());
+        if let Some(p) = self.tray_panel.as_mut() {
+            p.held_for = owner;
         }
+        tracing::debug!(owner, ?click, "tray panel kept for the program");
         self.tray_click(index, click, x, y);
     }
 
-    /// Another window came to the front: after a right click the panel stays for the
-    /// program whose menu opened, and closes for any other.
+    /// Another window came to the front: after a click on one of its icons the panel
+    /// stays for that program, and closes for anything else (`keeps_panel`).
     pub(super) fn tray_panel_foreground(&mut self, fg: Option<kabuk_win::window::Hwnd>) {
-        let Some(owner) = self.tray_panel.as_ref().and_then(|p| p.menu_of) else {
+        let Some(owner) = self.tray_panel.as_ref().and_then(|p| p.held_for) else {
             return;
         };
-        if fg.and_then(|h| h.pid()) != Some(owner) {
+        if !keeps_panel(owner, fg.and_then(|h| h.pid()), fg.is_some_and(|h| h.is_shell())) {
             self.close_tray_panel();
         }
     }
@@ -192,8 +196,8 @@ impl Shared {
                 return Some(0);
             }
             msg::ACTIVATE => {
-                // Waiting on a right click's menu, the foreground decides instead.
-                let held = self.tray_panel.as_ref().is_some_and(|p| p.menu_of.is_some());
+                // Held for a clicked icon's program, the foreground decides instead.
+                let held = self.tray_panel.as_ref().is_some_and(|p| p.held_for.is_some());
                 if (m.wparam & 0xFFFF) == msg::WA_INACTIVE && !held {
                     self.close_tray_panel();
                 }
@@ -224,5 +228,23 @@ impl Shared {
         if let Some(i) = found {
             self.panel_click(i, click, 0, 0);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::keeps_panel;
+
+    /// Asked for by the user: after a click on a panel icon, left or right, the panel
+    /// stays until a click elsewhere.
+    #[test]
+    fn the_panel_stays_for_its_program_and_closes_for_anything_else() {
+        // The program's own menu or window in front.
+        assert!(keeps_panel(42, Some(42), false));
+        // Another program, or nothing, in front.
+        assert!(!keeps_panel(42, Some(7), false));
+        assert!(!keeps_panel(42, None, false));
+        // The desktop clicked, though Explorer owns the icon (Bluetooth, eject).
+        assert!(!keeps_panel(42, Some(42), true));
     }
 }

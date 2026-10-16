@@ -2993,6 +2993,11 @@ impl Shared {
         self.hide_tooltip();
         let hit = self.hit(index, x, y);
         tracing::debug!(?button, x, y, ?hit, "bar click");
+        // A click on the bar is a click elsewhere for the tray panel (its own button
+        // toggles it below).
+        if !matches!(hit, Some((view::hit::TRAY_MORE, _))) {
+            self.close_tray_panel();
+        }
         if let Some((view::hit::TRAY, i)) = hit {
             let (sx, sy) = (self.bars[index].rect.x + x, self.bars[index].rect.y + y);
             self.tray_click(usize::try_from(i).unwrap_or(usize::MAX), button, sx, sy);

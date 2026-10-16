@@ -29,6 +29,7 @@ const SETTLE: Duration = Duration::from_secs(5);
 const TEST_ICON_ID: isize = 1;
 const WM_CONTEXTMENU: isize = 0x007B;
 const WM_RBUTTONUP: isize = 0x0205;
+const NIN_SELECT: isize = 0x0400;
 
 struct Desktop {
     work_areas: Vec<Rect>,
@@ -747,13 +748,65 @@ fn icons_beyond_tray_shown_are_clicked_from_the_overflow_panel() {
         "the panel stayed with another program in front"
     );
     drop(other);
-    // A left click opens the program: the panel closes.
+    // Asked for by the user: a left click keeps the panel as well, the program's window
+    // in front included.
     post(MSG_TEST_TRAY_PANEL, 1, 0);
     assert!(wait_until(SETTLE, || sandbox.log_lines("tray panel opened") >= 2).is_some());
     post(MSG_TEST_TRAY_PANEL_CLICK, app.hwnd.0 as usize, 0);
+    let select = (TEST_ICON_ID << 16) | NIN_SELECT;
+    assert!(
+        wait_until(SETTLE, || got().lines().any(|l| l.ends_with(&format!(" {select}")))).is_some(),
+        "no NIN_SELECT from the panel: {:?}",
+        got()
+    );
+    post(MSG_TEST_FOREGROUND, app.hwnd.0 as usize, 0);
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(
+        sandbox.log_lines("tray panel closed"),
+        1,
+        "the panel closed after a left click"
+    );
+    // The desktop in front (a click on it): it closes, though Explorer may own the icon.
+    let desktop = kabuk_win::window::windows_of_class("Progman")
+        .into_iter()
+        .next()
+        .expect("Explorer's desktop window");
+    post(MSG_TEST_FOREGROUND, desktop.0 as usize, 0);
     assert!(
         wait_until(SETTLE, || sandbox.log_lines("tray panel closed") >= 2).is_some(),
-        "the panel stays after a left click"
+        "the panel stayed with the desktop in front"
+    );
+    // A click on the bar, away from its icons: it closes too.
+    post(MSG_TEST_TRAY_PANEL, 1, 0);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("tray panel opened") >= 3).is_some());
+    post(MSG_TEST_TRAY_PANEL_CLICK, app.hwnd.0 as usize, 0);
+    let pid = sandbox.state().kabuk_pid;
+    let primary_rect = kabuk_win::shell::monitors()
+        .into_iter()
+        .find(|m| m.primary)
+        .unwrap()
+        .rect;
+    let (bar, rect) = kabuk_win::window::windows_of_class("Kabuk.Bar")
+        .into_iter()
+        .filter(|w| w.pid() == pid)
+        .find_map(|w| w.window_rect().filter(|r| primary_rect.contains(r)).map(|r| (w, r)))
+        .expect("primary bar");
+    // Between the clock and the tray: nothing there.
+    let (x, y) = ((rect.right - rect.left) * 3 / 4, (rect.bottom - rect.top) / 2);
+    let at = (y << 16) | (x & 0xFFFF);
+    post_message(
+        bar,
+        Msg {
+            id: WM_RBUTTONUP as u32,
+            wparam: 0,
+            lparam: at as isize,
+        },
+    )
+    .unwrap();
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("tray panel closed") >= 3).is_some(),
+        "the panel stayed after a click on the bar: {:?}",
+        sandbox.last_log_line(&["bar click"])
     );
 
     // Live: up to 12 on the bar again.

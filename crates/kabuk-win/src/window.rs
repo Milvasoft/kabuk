@@ -339,6 +339,11 @@ impl Hwnd {
         }
     }
 
+    /// The desktop or a taskbar (Explorer's or Kabuk's tray window).
+    pub fn is_shell(self) -> bool {
+        SHELL_CLASSES.contains(&self.class_name().as_str())
+    }
+
     /// The whole window rectangle (with the invisible resize borders), physical pixels.
     pub fn window_rect(self) -> Option<kabuk_core::state::Rect> {
         use windows::Win32::Foundation::RECT;
@@ -650,7 +655,8 @@ pub fn find_message_window(class: &str, title: &str) -> Option<Hwnd> {
     found.ok().filter(|h| !h.is_invalid()).map(Hwnd::from_raw)
 }
 
-/// The desktop and the taskbars: always there, never a program's content.
+/// The desktop and the taskbars: always there, never a program's content
+/// ([`Hwnd::is_shell`]).
 pub(crate) const SHELL_CLASSES: [&str; 4] = ["Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"];
 
 /// As [`front_window_rects`], with whether each window is maximised (a maximised window
