@@ -511,6 +511,48 @@ impl Desk {
         self.sync(&before, &reflow, None)
     }
 
+    /// Takes on a window that is minimised now (found so when Kabuk starts): it is known
+    /// (listed on the bar) without a place in the layout, and when restored it joins its
+    /// workspace as `unpark` brings any minimised window back. Nothing moves now.
+    /// Returns false when it is already known or there are no monitors.
+    pub fn add_parked(&mut self, w: NewWindow) -> bool {
+        if self.contains(w.id) || self.monitors.is_empty() {
+            return false;
+        }
+        let m = w
+            .monitor
+            .and_then(|k| self.monitor(k))
+            .unwrap_or_else(|| self.monitor_at(w.at));
+        let target = w.workspace.and_then(index).map_or(self.monitors[m].active, |i| {
+            i.min(self.monitors[m].workspaces.len() - 1)
+        });
+        let mut entry = Entry {
+            id: w.id,
+            floating: w.floating,
+            tiled_rect: None,
+            float_rect: w.at,
+            home: None,
+            min: w.min,
+            by_layout: false,
+            group: None,
+            tab_hidden: false,
+        };
+        adopt(&mut entry, self.monitors[m].workspaces[target].floats(&self.settings));
+        let index = self.monitors[m].workspaces[target].entries.len();
+        let monitor = self.monitors[m].info.key.clone();
+        self.parked.insert(
+            w.id,
+            Parked {
+                monitor,
+                workspace: target,
+                index,
+                entry,
+                scratch: false,
+            },
+        );
+        true
+    }
+
     /// The window was minimised: it leaves the layout and its place is remembered.
     pub fn park(&mut self, id: WindowId) -> Vec<Effect> {
         if let Some(i) = self.scratch_index(id) {

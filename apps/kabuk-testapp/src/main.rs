@@ -10,6 +10,7 @@
 //!   --min-size <W>x<H>     minimum size enforced through WM_GETMINMAXINFO
 //!   --hidden               create without showing
 //!   --maximized            show maximised
+//!   --minimized            show minimised (without activating)
 //!   --refuse-move          ignore every move and resize request
 //!   --hang-after <ms>      stop pumping messages after this long (a hung window)
 //!   --resize-self <ms>     change its own size on this interval
@@ -63,6 +64,7 @@ struct Options {
     min_size: Option<(i32, i32)>,
     hidden: bool,
     maximized: bool,
+    minimized: bool,
     refuse_move: bool,
     hang_after_ms: Option<u32>,
     resize_self_ms: Option<u32>,
@@ -93,6 +95,7 @@ fn parse() -> Result<Options, String> {
             "--min-size" => o.min_size = Some(parse_size(&value()?).ok_or("bad --min-size")?),
             "--hidden" => o.hidden = true,
             "--maximized" => o.maximized = true,
+            "--minimized" => o.minimized = true,
             "--refuse-move" => o.refuse_move = true,
             "--hang-after" => o.hang_after_ms = Some(value()?.parse().map_err(|_| "bad --hang-after")?),
             "--resize-self" => o.resize_self_ms = Some(value()?.parse().map_err(|_| "bad --resize-self")?),
@@ -179,6 +182,8 @@ fn run(o: &Options) {
         .expect("create window");
         if o.maximized {
             let _ = ShowWindow(hwnd, SW_SHOWMAXIMIZED);
+        } else if o.minimized {
+            let _ = ShowWindow(hwnd, SW_SHOWMINNOACTIVE);
         } else if !o.hidden {
             let _ = ShowWindow(hwnd, SW_SHOWNA);
         }

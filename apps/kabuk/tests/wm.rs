@@ -7,7 +7,8 @@
 //! `--restore` with windows on several workspaces, a minimum size that does not fit, a
 //! hung window (message loop blocked), an owned dialog and a splash screen, a gap change
 //! in the file, the frame reset on a clean exit, the action time budget, swap / float /
-//! close on the focused window, the bar showing the window manager's workspaces.
+//! close on the focused window, the bar showing the window manager's workspaces, a window
+//! minimised before the shell started.
 //!
 //! Run with: `cargo test -p kabuk --features integration -- --test-threads=1`
 
@@ -807,6 +808,37 @@ fn a_minimised_window_comes_back_to_its_place() {
         "{:?} vs {places:?}",
         windows.iter().map(frame).collect::<Vec<_>>()
     );
+    assert_eq!(sandbox.restore().0, 0);
+}
+
+/// Found by a friend of the user: apps minimised when Kabuk started were missing from the
+/// bar. Found minimised, a window is taken on as minimised; restored, it joins the layout.
+#[test]
+fn a_window_minimised_before_the_shell_started_joins_the_layout_when_restored() {
+    let sandbox = Sandbox::new();
+    let early = open("early-min", &["--minimized"]);
+    assert!(
+        wait_until(SETTLE, || early.hwnd.is_minimized()).is_some(),
+        "test window not minimised"
+    );
+    let _wm = Wm::start(&sandbox, &config(""));
+    let managed = format!("managing window hwnd={}", early.hwnd.0);
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines(&managed) == 1).is_some(),
+        "the minimised window was not taken on"
+    );
+    assert!(
+        sandbox
+            .last_log_line(&[&managed])
+            .is_some_and(|l| l.contains("minimised=true")),
+        "{:?}",
+        sandbox.last_log_line(&[&managed])
+    );
+    // Nothing moved it: still minimised until the user restores it.
+    assert!(early.hwnd.is_minimized());
+    early.hwnd.restore_async();
+    assert!(wait_until(SETTLE, || sandbox.log_lines("window restored") == 1).is_some());
+    assert!(wait_until(SETTLE, || fills(&early)).is_some(), "{:?}", frame(&early));
     assert_eq!(sandbox.restore().0, 0);
 }
 

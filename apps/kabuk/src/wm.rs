@@ -1388,7 +1388,15 @@ impl Wm {
             }
         }
         let facts = hwnd.facts();
-        let floating = match policy::classify(&facts) {
+        // A window minimised now (open before Kabuk started, or started minimised) is taken
+        // on as minimised: on the bar at once, in the layout once restored. Found by a
+        // friend of the user: such apps were missing from the bar until restored.
+        let minimised = facts.minimized;
+        let judged = policy::WindowFacts {
+            minimized: false,
+            ..facts.clone()
+        };
+        let floating = match policy::classify(&judged) {
             Verdict::Ignore => return,
             Verdict::Float => true,
             Verdict::Tile => false,
@@ -1404,7 +1412,17 @@ impl Wm {
             self.show_dropdown();
             return;
         }
-        let Some(opened_at) = hwnd.frame_rect().map(rect_of) else {
+        // A minimised window sits off screen: its place is where Windows will restore it.
+        let frame = if minimised {
+            let monitors = kabuk_win::shell::monitors();
+            let primary = monitors.iter().find(|m| m.primary);
+            hwnd.restored_place()
+                .zip(primary)
+                .map(|((normal, _), p)| kabuk_core::genie::workspace_to_screen(normal, p.rect, p.work_area))
+        } else {
+            hwnd.frame_rect()
+        };
+        let Some(opened_at) = frame.map(rect_of) else {
             return;
         };
         let exe = hwnd
@@ -1472,12 +1490,13 @@ impl Wm {
             class = %facts.class,
             exe = %exe,
             floating,
+            minimised,
             no_grab = rule.no_grab,
             rules = ?rule.matched,
             "managing window"
         );
         let id = hwnd.0;
-        let effects = self.desk.add(NewWindow {
+        let new = NewWindow {
             id: hwnd.0,
             at: placed_at.unwrap_or(opened_at),
             monitor: rule.monitor.and(target).map(|m| m.device.as_str()),
@@ -1485,7 +1504,15 @@ impl Wm {
             floating,
             min,
             place: placed_at.is_some(),
-        });
+        };
+        if minimised {
+            // Nothing on screen changes; restoring it brings it into the layout.
+            if self.desk.add_parked(new) {
+                self.publish();
+            }
+            return;
+        }
+        let effects = self.desk.add(new);
         self.apply(effects);
         self.style_window(id);
         self.genie_window(id);

@@ -6,6 +6,7 @@
 //! to while shown and hidden, shown on the other monitor, its monitor unplugged, a window
 //! closing on it, moved out of it), tabbed groups (joining, switching tabs, a member
 //! closing, minimised, floated or moved away, the group broken up, a floating workspace),
+//! a window found minimised (known at once, joining the layout when restored),
 //! random operation sequences.
 
 use proptest::prelude::*;
@@ -886,6 +887,41 @@ fn a_minimised_window_leaves_the_layout_and_comes_back_to_its_place() {
     d.park(8);
     d.remove(8);
     assert!(!d.is_parked(8) && !d.contains(8));
+}
+
+/// Found by a friend of the user: apps minimised before Kabuk started were missing from
+/// the bar. Taken on as minimised: known (listed) at once, nothing moves, and restored
+/// they join the layout as any minimised window does.
+#[test]
+fn a_window_found_minimised_is_known_and_joins_the_layout_when_restored() {
+    let mut d = desk(false);
+    d.add(new(1));
+    d.add(new(2));
+    let before: Vec<Rect> = [1, 2].iter().map(|id| d.rect_of(*id).unwrap()).collect();
+    assert!(d.add_parked(new(3)));
+    assert!(d.contains(3) && d.is_parked(3) && !d.visible_windows().contains(&3));
+    // Listed with its workspace, and the others kept their places.
+    assert!(d
+        .placements()
+        .iter()
+        .any(|(id, m, w)| (*id, m.as_str(), *w) == (3, M1, 1)));
+    let after: Vec<Rect> = [1, 2].iter().map(|id| d.rect_of(*id).unwrap()).collect();
+    assert_eq!(before, after);
+    // Restored: it takes its place in the layout, last.
+    let e = d.unpark(3);
+    assert_eq!(placed(&e), vec![1, 2, 3]);
+    assert!(!d.is_parked(3) && d.visible_windows().contains(&3));
+    // Known already, or no monitors: refused.
+    assert!(!d.add_parked(new(3)));
+    let mut none = Desk::new(d.settings, Vec::new());
+    assert!(!none.add_parked(new(9)));
+    // A rule's workspace is kept: restored, it goes back to the active one, as minimised
+    // windows of hidden workspaces do.
+    assert!(d.add_parked(NewWindow {
+        workspace: Some(5),
+        ..new(4)
+    }));
+    assert_eq!(d.placements().iter().find(|p| p.0 == 4).map(|p| p.2), Some(5));
 }
 
 /// Found by the user: Win+arrow did nothing, or moved another window, right after a
