@@ -289,6 +289,10 @@ impl Shared {
                     let icon = process
                         .app_user_model_id()
                         .map_or_else(|| exe.clone(), |id| format!("{APPS_FOLDER}{id}"));
+                    // A new process: its picture is read again (found by the user: one read
+                    // while Visual Studio was putting a program's package back stayed blank
+                    // for as long as the shell ran).
+                    self.gpu.images.forget([self.picture_key(&icon)]);
                     self.apps.exes.insert(pid, (exe.clone(), icon.clone()));
                     (exe, icon)
                 }
@@ -348,7 +352,10 @@ impl Shared {
             let px = kabuk_win::icon::shell_item_icon_pixels(&app.icon, side)
                 .or_else(|| kabuk_win::icon::file_icon_pixels(Path::new(&app.icon), side));
             match px {
-                Some(px) => self.gpu.images.set(key, side, px),
+                Some(px) => {
+                    self.gpu.images.set(key, side, px);
+                    tracing::debug!(icon = %app.icon, "app icon loaded");
+                }
                 None => tracing::debug!(icon = %app.icon, "app icon unavailable"),
             }
         }

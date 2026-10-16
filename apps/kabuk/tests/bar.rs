@@ -773,6 +773,39 @@ fn a_full_screen_program_sends_its_monitors_bar_away() {
     assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
 }
 
+/// Found by the user: a program being developed (Fenpo, redeployed by Visual Studio)
+/// showed a blank icon on the bar for as long as the shell ran, the picture loaded while
+/// its package was being put back. A program started again gets its picture anew.
+#[test]
+fn a_program_started_again_gets_its_icon_anew() {
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    let _shell = sandbox.shell_with_bar_and_wm();
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let loaded = || sandbox.log_lines("app icon loaded icon=");
+    let exe = testapp_exe().display().to_string();
+    let of_testapp = || {
+        sandbox
+            .last_log_line(&["app icon loaded"])
+            .is_some_and(|l| l.contains(&exe))
+    };
+    let first = TestWindow::open(&["--title", &title("icon-again-1")]);
+    assert!(wait_until(SETTLE, &of_testapp).is_some(), "its icon loaded");
+    let after_first = loaded();
+    drop(first);
+    let second = TestWindow::open(&["--title", &title("icon-again-2")]);
+    let managed = format!("managing window hwnd={}", second.hwnd.0);
+    assert!(wait_until(SETTLE, || sandbox.log_lines(&managed) == 1).is_some());
+    assert!(
+        wait_until(SETTLE, || loaded() > after_first && of_testapp()).is_some(),
+        "the new process's icon was not loaded again"
+    );
+    drop(second);
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
+}
+
 /// DECISIONS D25: a click on an app's icon shows its window; a click while that window
 /// is in front minimizes it, as on Windows' taskbar (asked for by the user).
 #[test]

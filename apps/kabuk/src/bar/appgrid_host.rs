@@ -1223,6 +1223,7 @@ impl Shared {
 
     /// A press and release in the middle of where `module` `place` is drawn on the page
     /// on screen now (its slide included), as the mouse would send them.
+    #[cfg(feature = "integration")]
     fn test_app_grid_press(&mut self, module: &str, place: usize) {
         let Some(o) = self.app_grid.open.as_ref() else { return };
         let frame = view::Frame {
