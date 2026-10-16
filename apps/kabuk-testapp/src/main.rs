@@ -22,6 +22,8 @@
 //!                          "rect <left> <top> <right> <bottom>"
 //!   --tray-menu-at-corner  with --tray-log, opens its menu at the screen's corner (0, 0)
 //!                          after a click, as Explorer's Bluetooth icon does under Kabuk
+//!   --fullscreen-after <ms> open as an ordinary window and go full screen (borderless,
+//!                          covering the primary monitor) after this long, as a game does
 //!   --fullscreen           borderless window covering the primary monitor, above the
 //!                          others as a game is (so a maximised window of the user's in
 //!                          front does not decide the tests)
@@ -31,6 +33,7 @@
 //!   --splash               small borderless popup, like a splash screen
 //!   --dialog               also open an owned dialog-like window
 //!   --tool                 tool window (WS_EX_TOOLWINDOW)
+//!   --app-window           asks for a taskbar button (WS_EX_APPWINDOW), as many games do
 //!   --dpi-unaware          create the window DPI unaware (scaled by Windows), like
 //!                          older programs
 //!
@@ -62,6 +65,7 @@ const TIMER_HANG: usize = 1;
 const TIMER_RESIZE: usize = 2;
 const TIMER_CLOAK: usize = 3;
 const TIMER_TITLE: usize = 4;
+const TIMER_FULLSCREEN: usize = 5;
 /// The tray icon's callback message and id.
 const TRAY_CALLBACK: u32 = WM_APP + 1;
 const FAKE_DRAG: u32 = WM_APP + 2;
@@ -88,10 +92,12 @@ struct Options {
     tray_log: Option<String>,
     tray_menu_at_corner: bool,
     fullscreen: bool,
+    fullscreen_after_ms: Option<u32>,
     overlay: bool,
     splash: bool,
     dialog: bool,
     tool: bool,
+    app_window: bool,
     dpi_unaware: bool,
 }
 
@@ -138,10 +144,14 @@ fn parse() -> Result<Options, String> {
             "--tray-log" => o.tray_log = Some(value()?),
             "--tray-menu-at-corner" => o.tray_menu_at_corner = true,
             "--fullscreen" => o.fullscreen = true,
+            "--fullscreen-after" => {
+                o.fullscreen_after_ms = Some(value()?.parse().map_err(|_| "bad --fullscreen-after")?)
+            }
             "--overlay" => o.overlay = true,
             "--splash" => o.splash = true,
             "--dialog" => o.dialog = true,
             "--tool" => o.tool = true,
+            "--app-window" => o.app_window = true,
             "--dpi-unaware" => o.dpi_unaware = true,
             _ => return Err(format!("unknown argument {a}")),
         }
@@ -206,6 +216,9 @@ fn run(o: &Options) {
         }
         if o.tool {
             ex_style |= WS_EX_TOOLWINDOW;
+        }
+        if o.app_window {
+            ex_style |= WS_EX_APPWINDOW;
         }
         let title = if o.title_after_ms.is_some() {
             HSTRING::new()
@@ -274,6 +287,9 @@ fn run(o: &Options) {
         }
         if let Some(ms) = o.title_after_ms {
             SetTimer(Some(hwnd), TIMER_TITLE, ms, None);
+        }
+        if let Some(ms) = o.fullscreen_after_ms {
+            SetTimer(Some(hwnd), TIMER_FULLSCREEN, ms, None);
         }
         if let Some(ms) = o.resize_self_ms {
             SetTimer(Some(hwnd), TIMER_RESIZE, ms, None);
@@ -350,6 +366,21 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             WM_TIMER if wparam.0 == TIMER_TITLE => {
                 let _ = KillTimer(Some(hwnd), TIMER_TITLE);
                 let _ = SetWindowTextW(hwnd, &HSTRING::from(o.title.as_deref().unwrap_or(DEFAULT_TITLE)));
+                return LRESULT(0);
+            }
+            WM_TIMER if wparam.0 == TIMER_FULLSCREEN => {
+                // As a game going full screen: borderless, over the whole primary monitor.
+                let _ = KillTimer(Some(hwnd), TIMER_FULLSCREEN);
+                SetWindowLongPtrW(hwnd, GWL_STYLE, (WS_POPUP | WS_VISIBLE).0 as isize);
+                let _ = SetWindowPos(
+                    hwnd,
+                    Some(HWND_TOP),
+                    0,
+                    0,
+                    GetSystemMetrics(SM_CXSCREEN),
+                    GetSystemMetrics(SM_CYSCREEN),
+                    SWP_FRAMECHANGED | SWP_NOACTIVATE,
+                );
                 return LRESULT(0);
             }
             WM_TIMER if wparam.0 == TIMER_HANG => {

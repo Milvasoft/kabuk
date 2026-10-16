@@ -336,7 +336,49 @@ impl Hwnd {
             owned: owner.is_some(),
             owner_visible: owner.is_some_and(Hwnd::is_visible),
             elevated: self.pid().is_some_and(crate::process::runs_elevated),
+            full_screen: !has(style, WS_CAPTION.0) && self.covers_its_monitor(),
         }
+    }
+
+    /// The rectangle of the monitor the window is on, as Windows gives it now (a game in
+    /// exclusive full screen may have changed its resolution), physical pixels.
+    pub fn monitor_rect(self) -> Option<kabuk_core::state::Rect> {
+        use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONULL};
+        crate::dpi::physical(|| {
+            // SAFETY: plain query; an invalid window yields a null monitor.
+            let m = unsafe { MonitorFromWindow(self.raw(), MONITOR_DEFAULTTONULL) };
+            if m.is_invalid() {
+                return None;
+            }
+            let mut info = MONITORINFO {
+                cbSize: u32::try_from(std::mem::size_of::<MONITORINFO>()).ok()?,
+                ..Default::default()
+            };
+            // SAFETY: `info` is a valid MONITORINFO with its size set.
+            unsafe { GetMonitorInfoW(m, &mut info) }.ok().ok()?;
+            let r = info.rcMonitor;
+            Some(kabuk_core::state::Rect {
+                left: r.left,
+                top: r.top,
+                right: r.right,
+                bottom: r.bottom,
+            })
+        })
+    }
+
+    /// The window covers the whole monitor it is on (borders hanging over its edges
+    /// included).
+    pub fn covers_its_monitor(self) -> bool {
+        match (self.window_rect(), self.monitor_rect()) {
+            (Some(w), Some(m)) => w.left <= m.left && w.top <= m.top && w.right >= m.right && w.bottom >= m.bottom,
+            _ => false,
+        }
+    }
+
+    /// A full-screen program's window: no caption, covering its whole monitor (a game, a
+    /// video, a presentation; DECISIONS D72).
+    pub fn is_full_screen(self) -> bool {
+        self.long(GWL_STYLE) & WS_CAPTION.0 != WS_CAPTION.0 && self.covers_its_monitor()
     }
 
     /// The desktop or a taskbar (Explorer's or Kabuk's tray window).

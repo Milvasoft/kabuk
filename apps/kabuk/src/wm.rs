@@ -1686,6 +1686,13 @@ impl Wm {
                     if (h.is_maximized() && self.unmaximizing != Some(id)) || h.is_minimized() {
                         continue;
                     }
+                    // A window that went full screen (a game switching to it) is never
+                    // moved: found on another computer, a game placed under the bar left
+                    // its full screen and dropped to the desktop again and again (D72).
+                    if h.is_full_screen() {
+                        tracing::debug!(hwnd = id, "full-screen window left in place");
+                        continue;
+                    }
                     if h.place_frame_async(state_rect(r)) {
                         self.checks.retain(|(w, _, _)| *w != id);
                         self.checks.push((id, r, 0));

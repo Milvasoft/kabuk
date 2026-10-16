@@ -29,6 +29,9 @@ pub struct WindowFacts {
     pub owner_visible: bool,
     /// Runs with higher rights than Kabuk, so Kabuk cannot move it (UIPI).
     pub elevated: bool,
+    /// Covers the whole monitor it is on, as Windows gives the monitor now, with no
+    /// caption: a full-screen program (a game, a video, a presentation).
+    pub full_screen: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,6 +75,12 @@ pub fn classify(f: &WindowFacts) -> Verdict {
         return Verdict::Ignore;
     }
     if !f.has_title && !f.app_window {
+        return Verdict::Ignore;
+    }
+    // A full-screen program is left alone (found on another computer: a game kept
+    // dropping to the desktop; DECISIONS D72). Moving it, or changing its frame, takes it
+    // out of its full screen.
+    if f.full_screen {
         return Verdict::Ignore;
     }
     // A splash screen: a borderless popup that is neither resizable nor asks for a
@@ -176,7 +185,8 @@ mod tests {
     //! Edge cases: an ordinary window, each reason to ignore one (hidden, cloaked,
     //! minimised, child, shell class, tool window, no title, splash screen), the exceptions
     //! (`WS_EX_APPWINDOW` keeps a tool or untitled window), and each reason to float one
-    //! (elevated, dialog class, owned, fixed size); an owned window whose owner is hidden.
+    //! (elevated, dialog class, owned, fixed size); an owned window whose owner is hidden;
+    //! a full-screen program.
     use super::*;
 
     /// A plain resizable application window (`WS_OVERLAPPEDWINDOW`).
@@ -189,6 +199,36 @@ mod tests {
             resizable: true,
             ..WindowFacts::default()
         }
+    }
+
+    /// D72: a window covering its monitor without a caption (a game, a full-screen video)
+    /// is not managed, a game launcher asking for a taskbar button included; a maximised
+    /// window keeps its caption and is managed.
+    #[test]
+    fn full_screen_programs_are_left_alone() {
+        let game = WindowFacts {
+            popup: true,
+            caption: false,
+            resizable: false,
+            app_window: true,
+            full_screen: true,
+            ..app()
+        };
+        assert_eq!(classify(&game), Verdict::Ignore);
+        let custom_frame = WindowFacts {
+            popup: true,
+            caption: false,
+            full_screen: true,
+            ..app()
+        };
+        assert_eq!(classify(&custom_frame), Verdict::Ignore);
+        assert_eq!(
+            classify(&WindowFacts {
+                full_screen: false,
+                ..game
+            }),
+            Verdict::Float
+        );
     }
 
     #[test]

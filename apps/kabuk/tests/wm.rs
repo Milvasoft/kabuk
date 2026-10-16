@@ -1602,3 +1602,47 @@ fn the_overview_shows_every_workspace_and_a_click_goes_there() {
     };
     assert!(wait_until(Duration::from_secs(5), restored).is_some());
 }
+
+/// DECISIONS D72, found on another computer: with Kabuk running a game kept dropping to
+/// the desktop. A window that goes full screen after the window manager took it in (a
+/// game switching to full screen) is never moved again: placing it in its tile or under
+/// the bar took the game out of its full screen. Here another window opening beside it
+/// makes the layout flow again; no bar runs, so no game mode pauses the tiling.
+#[test]
+fn a_window_that_went_full_screen_is_never_moved() {
+    let sandbox = Sandbox::new();
+    let _wm = Wm::start(&sandbox, &config(""));
+    let game = open("game", &["--fullscreen-after", "800"]);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("managing window") == 1).is_some());
+    let primary = kabuk_win::shell::monitors().into_iter().find(|m| m.primary).unwrap();
+    let full = || kabuk_win::dpi::physical(|| game.hwnd.window_rect()) == Some(primary.rect);
+    assert!(wait_until(SETTLE, full).is_some(), "the window did not go full screen");
+    let _other = open("beside", &[]);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("managing window") == 2).is_some());
+    std::thread::sleep(Duration::from_millis(800));
+    assert!(
+        full(),
+        "the full-screen window was moved: {:?}",
+        kabuk_win::dpi::physical(|| game.hwnd.window_rect())
+    );
+    assert!(sandbox.log_lines("full-screen window left in place") >= 1);
+}
+
+/// D72: a program that opens full screen (a game, a video) is not taken in at all: no
+/// frame, border or transition of Kabuk's is put on it, and it is never moved.
+#[test]
+fn a_program_opening_full_screen_is_left_alone() {
+    let sandbox = Sandbox::new();
+    let _wm = Wm::start(&sandbox, &config(""));
+    // As many games, it asks for a taskbar button.
+    let game = open("opens-full", &["--fullscreen", "--app-window"]);
+    let normal = open("normal", &[]);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("managing window") == 1).is_some());
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(
+        sandbox.log_lines(&format!("managing window hwnd={}", game.hwnd.0)),
+        0,
+        "the game was taken in"
+    );
+    assert_eq!(sandbox.log_lines(&format!("managing window hwnd={}", normal.hwnd.0)), 1);
+}
