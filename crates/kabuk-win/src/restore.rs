@@ -146,7 +146,8 @@ pub enum FileOutcome {
 
 /// Reads the state file, undoes everything in it and saves it with no changes and no
 /// shell pid. A corrupt file is renamed to `state.json.corrupt` so it is kept for
-/// diagnosis but no longer blocks the next start.
+/// diagnosis but no longer blocks the next start; the copy of its lasting records, if
+/// readable, is undone in its place.
 pub fn restore_file(path: &Path) -> FileOutcome {
     match StateFile::open(path) {
         Ok(mut file) => {
@@ -174,6 +175,14 @@ pub fn restore_file(path: &Path) -> FileOutcome {
             undo_without_state();
             let aside = path.with_extension("json.corrupt");
             let moved_to = std::fs::rename(path, &aside).ok().map(|()| aside);
+            // Windows stopped before it wrote the file out (a power cut leaves zeros):
+            // the user's settings recorded before are in their copy, undone as a file.
+            if let Ok(Some(lasting)) = StateFile::read_lasting(path).map(|l| l.filter(State::has_changes)) {
+                if StateFile::fresh(path).update(|s| *s = lasting).is_ok() {
+                    tracing::warn!("the lasting records are undone from their copy");
+                    return restore_file(path);
+                }
+            }
             FileOutcome::Unreadable { moved_to }
         }
     }
@@ -182,8 +191,9 @@ pub fn restore_file(path: &Path) -> FileOutcome {
 #[cfg(test)]
 mod tests {
     //! Desktop-safe cases only (real hidden windows are covered by the integration
-    //! tests): missing file, corrupt file moved aside, a recorded window that is gone,
-    //! a recorded handle reused by another process, pid cleared after restore.
+    //! tests): missing file, corrupt file moved aside, a corrupt file undone from the
+    //! lasting copy, a recorded window that is gone, a recorded handle reused by another
+    //! process, pid cleared after restore.
     use super::*;
     use kabuk_core::state::HiddenWindow;
 
@@ -209,6 +219,43 @@ mod tests {
         );
         assert!(!path.exists());
         assert_eq!(std::fs::read_to_string(aside).unwrap(), "{ broken");
+    }
+
+    /// Windows stopped (a power cut) before it wrote the state file out: the corrupt
+    /// file is still moved aside, and the user's settings recorded before are undone
+    /// from their copy (`state.lasting.json`), then forgotten.
+    #[test]
+    fn a_file_windows_did_not_write_out_is_undone_from_the_lasting_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let mut file = StateFile::open(&path).unwrap();
+        // A work area of a monitor that is not there: skipped, never applied.
+        file.update(|s| {
+            s.work_areas.push(kabuk_core::state::WorkAreaBackup {
+                monitor: kabuk_core::state::Rect {
+                    left: -90_000,
+                    top: -90_000,
+                    right: -89_000,
+                    bottom: -89_000,
+                },
+                work_area: kabuk_core::state::Rect {
+                    left: -90_000,
+                    top: -90_000,
+                    right: -89_000,
+                    bottom: -89_100,
+                },
+            })
+        })
+        .unwrap();
+        drop(file);
+        std::fs::write(&path, [0u8; 64]).unwrap();
+        let FileOutcome::Restored(report) = restore_file(&path) else {
+            panic!("not undone from the copy")
+        };
+        assert_eq!(report.work_areas_skipped, 1);
+        assert_eq!(std::fs::read(dir.path().join("state.json.corrupt")).unwrap(), [0u8; 64]);
+        assert!(!StateFile::read(&path).unwrap().has_changes());
+        assert!(!StateFile::read_lasting(&path).unwrap().unwrap().has_changes());
     }
 
     #[test]

@@ -1,6 +1,8 @@
 //! `state.json`: everything Kabuk changed in Windows that must be undone after a
 //! crash. Each change is written here *before* it is made (CONTRIBUTING.md safety rule 3),
-//! so the watchdog or `kabuk --restore` can always put the desktop back.
+//! so the watchdog or `kabuk --restore` can always put the desktop back. The records that
+//! outlast Windows stopping (the user's settings) also go to `state.lasting.json`, and
+//! only their changes wait for the disk.
 
 use std::path::{Path, PathBuf};
 
@@ -8,6 +10,10 @@ use serde::{Deserialize, Serialize};
 
 pub const STATE_VERSION: u32 = 1;
 pub const STATE_FILE_NAME: &str = "state.json";
+/// A copy of the state file's lasting records (everything but the windows'), flushed
+/// to disk with each change of theirs: read when Windows stopped before it wrote the
+/// state file out ([`StateFile::read_lasting`]).
+pub const LASTING_FILE_NAME: &str = "state.lasting.json";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Rect {
@@ -179,6 +185,19 @@ impl State {
             || self.system_colors.is_some()
     }
 
+    /// The records that outlast Windows stopping: all but the windows' and the shell's
+    /// pid, which mean nothing once it starts again.
+    fn lasting(&self) -> State {
+        State {
+            kabuk_pid: None,
+            hidden_windows: Vec::new(),
+            bordered_windows: Vec::new(),
+            styled_windows: Vec::new(),
+            genie_windows: Vec::new(),
+            ..self.clone()
+        }
+    }
+
     /// Forgets every change (after they were undone).
     pub fn clear_changes(&mut self) {
         self.clear_changes_except(Unrestored::default());
@@ -236,6 +255,9 @@ pub enum StateError {
 pub struct StateFile {
     path: PathBuf,
     state: State,
+    /// The lasting records as their copy ([`LASTING_FILE_NAME`]) holds them, flushed:
+    /// read when the file is opened, then as last written.
+    lasting_saved: Option<State>,
 }
 
 impl StateFile {
@@ -245,35 +267,31 @@ impl StateFile {
 
     /// Reads the file; a missing file is an empty state.
     pub fn read(path: &Path) -> Result<State, StateError> {
-        let text = match std::fs::read_to_string(path) {
-            Ok(t) => t,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(State::default()),
-            Err(source) => {
-                return Err(StateError::Io {
-                    path: path.to_path_buf(),
-                    source,
-                })
-            }
-        };
-        serde_json::from_str(&text).map_err(|e| StateError::Corrupt {
-            path: path.to_path_buf(),
-            detail: e.to_string(),
-        })
+        read_json(path).map(Option::unwrap_or_default)
+    }
+
+    /// The copy of the lasting records kept beside the state file at `path` (`None`:
+    /// there is none). What is left to undo when the state file is unreadable because
+    /// Windows stopped (a power cut) before it wrote the file out.
+    pub fn read_lasting(path: &Path) -> Result<Option<State>, StateError> {
+        read_json(&lasting_path(path))
     }
 
     pub fn open(path: &Path) -> Result<StateFile, StateError> {
         Ok(StateFile {
             path: path.to_path_buf(),
             state: StateFile::read(path)?,
+            lasting_saved: StateFile::read_lasting(path).ok().flatten(),
         })
     }
 
-    /// Starts from an empty state, ignoring what is on disk (used after a corrupt file
-    /// was reported and the desktop restored as far as possible).
+    /// Starts from an empty state, ignoring what the file holds (used after a corrupt
+    /// file was reported and the desktop restored as far as possible).
     pub fn fresh(path: &Path) -> StateFile {
         StateFile {
             path: path.to_path_buf(),
             state: State::default(),
+            lasting_saved: StateFile::read_lasting(path).ok().flatten(),
         }
     }
 
@@ -378,21 +396,64 @@ impl StateFile {
         self.update(|s| s.bordered_windows.retain(|w| w.hwnd != hwnd))
     }
 
-    fn save(&self) -> Result<(), StateError> {
+    /// Writes the file. Only a change of the lasting records waits for the disk, and
+    /// writes their copy too; the window records are written without (found in the test
+    /// VM, where each flush took 20 to 90 ms: a workspace switch, recording the windows
+    /// it hid and the frame it moved, took over 100 ms). Every program reads them at
+    /// once and they stay after Kabuk ends in any way; only Windows stopping can lose
+    /// them, and with them the windows they are about.
+    fn save(&mut self) -> Result<(), StateError> {
+        let io = |path: &Path| {
+            let path = path.to_path_buf();
+            move |source| StateError::Io { path, source }
+        };
         // Serializing this plain data cannot fail.
         let json = serde_json::to_vec_pretty(&self.state).unwrap_or_default();
-        crate::fsutil::write_atomic(&self.path, &json).map_err(|source| StateError::Io {
-            path: self.path.clone(),
-            source,
-        })
+        let lasting = self.state.lasting();
+        if self.lasting_saved.as_ref() == Some(&lasting) {
+            return crate::fsutil::write_atomic_cached(&self.path, &json).map_err(io(&self.path));
+        }
+        // The state file first: those reading it (the shell's pid) wait no longer than
+        // before the copy was kept.
+        crate::fsutil::write_atomic(&self.path, &json).map_err(io(&self.path))?;
+        let copy = lasting_path(&self.path);
+        let lasting_json = serde_json::to_vec_pretty(&lasting).unwrap_or_default();
+        crate::fsutil::write_atomic(&copy, &lasting_json).map_err(io(&copy))?;
+        self.lasting_saved = Some(lasting);
+        Ok(())
     }
+}
+
+/// The copy of the lasting records next to the state file at `path`.
+fn lasting_path(path: &Path) -> PathBuf {
+    path.with_file_name(LASTING_FILE_NAME)
+}
+
+/// A state file's content; `None` when there is no file.
+fn read_json(path: &Path) -> Result<Option<State>, StateError> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(StateError::Io {
+                path: path.to_path_buf(),
+                source,
+            })
+        }
+    };
+    serde_json::from_str(&text).map(Some).map_err(|e| StateError::Corrupt {
+        path: path.to_path_buf(),
+        detail: e.to_string(),
+    })
 }
 
 #[cfg(test)]
 mod tests {
     //! Edge cases: missing file, empty object, unknown future fields, corrupt JSON,
     //! save-before-change ordering, duplicate HWND, removing an unknown HWND,
-    //! rollback when the save fails, clearing changes, has_changes for each kind.
+    //! rollback when the save fails, clearing changes, has_changes for each kind, window
+    //! records leaving the lasting copy alone, a zero-filled file read from the copy, a
+    //! corrupt or missing copy.
     use super::*;
 
     fn window(hwnd: u64) -> HiddenWindow {
@@ -573,6 +634,98 @@ mod tests {
         // Files written before borders existed still load.
         std::fs::write(&p, r#"{"version":1,"hidden_windows":[]}"#).unwrap();
         assert!(StateFile::read(&p).unwrap().bordered_windows.is_empty());
+    }
+
+    /// Found in the test VM: every record waited for the disk (`FlushFileBuffers`, 20 to
+    /// 90 ms there and more at times), so switching workspaces, which records the windows
+    /// it hides and the frame of the one it focuses, took over 100 ms. Window records are
+    /// only written now; the lasting records' copy, written and flushed with every change
+    /// of theirs, is left alone by them.
+    #[test]
+    fn window_records_do_not_wait_for_the_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("state.json");
+        let copy = dir.path().join(LASTING_FILE_NAME);
+        let mut f = StateFile::open(&p).unwrap();
+        f.update(|s| s.taskbar = Some(TaskbarBackup { autohide: false }))
+            .unwrap();
+        let lasting = StateFile::read_lasting(&p).unwrap().unwrap();
+        assert_eq!(lasting.taskbar, Some(TaskbarBackup { autohide: false }));
+        std::fs::remove_file(&copy).unwrap();
+        f.add_hidden_all(vec![window(1), window(2)]).unwrap();
+        f.add_bordered(window(3)).unwrap();
+        f.add_styled(window(3)).unwrap();
+        f.add_genie(window(3)).unwrap();
+        f.remove_hidden_all(&[1, 2]).unwrap();
+        f.remove_bordered(3).unwrap();
+        // The shell's pid means nothing after Windows starts again either.
+        f.update(|s| s.kabuk_pid = Some(9)).unwrap();
+        assert!(!copy.exists(), "a window record waited for the disk");
+        let on_disk = StateFile::read(&p).unwrap();
+        assert_eq!(on_disk.styled_windows, vec![window(3)]);
+        assert_eq!(on_disk.taskbar, Some(TaskbarBackup { autohide: false }));
+        assert_eq!(on_disk.kabuk_pid, Some(9));
+        // A lasting record is flushed again, with its copy.
+        f.update(|s| s.cursors = Some(CursorBackup::default())).unwrap();
+        let lasting = StateFile::read_lasting(&p).unwrap().unwrap();
+        assert!(lasting.cursors.is_some() && lasting.taskbar.is_some());
+        assert_eq!(lasting.kabuk_pid, None);
+        assert!(lasting.styled_windows.is_empty() && lasting.genie_windows.is_empty());
+    }
+
+    /// A file opened again (the restore at every start, the watchdog's) knows the copy
+    /// already holds its lasting records: clearing the pid or the window records does
+    /// not wait for the disk, which kept a starting shell's pid out of the file longer
+    /// (`kabuk --restore` cannot stop a shell whose pid is not there yet).
+    #[test]
+    fn a_file_opened_again_knows_its_lasting_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("state.json");
+        let copy = dir.path().join(LASTING_FILE_NAME);
+        let mut f = StateFile::open(&p).unwrap();
+        f.update(|s| s.taskbar = Some(TaskbarBackup { autohide: true }))
+            .unwrap();
+        f.add_hidden(window(1)).unwrap();
+        f.update(|s| s.kabuk_pid = Some(9)).unwrap();
+        drop(f);
+        let mut again = StateFile::open(&p).unwrap();
+        std::fs::remove_file(&copy).unwrap();
+        again.add_hidden(window(2)).unwrap();
+        again.update(|s| s.kabuk_pid = None).unwrap();
+        assert!(!copy.exists(), "the copy written again");
+        let mut fresh = StateFile::fresh(&p);
+        fresh.update(|s| s.kabuk_pid = Some(10)).unwrap();
+        assert!(copy.exists(), "the copy no longer holds what a fresh file has");
+        assert_eq!(StateFile::read_lasting(&p).unwrap().unwrap(), State::default());
+        let mut later = StateFile::fresh(&p);
+        std::fs::remove_file(&copy).unwrap();
+        later.update(|s| s.kabuk_pid = Some(11)).unwrap();
+        assert!(!copy.exists(), "a fresh file wrote the same copy again");
+    }
+
+    /// Windows stopping (a power cut) before it wrote an unflushed `state.json` out
+    /// leaves the file's place filled with zeros: the user's settings recorded before
+    /// are in their copy; the window records went with the windows.
+    #[test]
+    fn the_users_settings_outlast_a_state_file_windows_did_not_write_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("state.json");
+        assert_eq!(StateFile::read_lasting(&p).unwrap(), None);
+        let mut f = StateFile::open(&p).unwrap();
+        let saver = SaverBackup {
+            values: vec![("ScreenSaveActive".into(), Some("1".into()))],
+            theme: Some(2),
+        };
+        f.update(|s| s.saver = Some(saver.clone())).unwrap();
+        f.add_hidden(window(1)).unwrap();
+        let len = std::fs::metadata(&p).unwrap().len();
+        std::fs::write(&p, vec![0u8; usize::try_from(len).unwrap()]).unwrap();
+        assert!(matches!(StateFile::read(&p), Err(StateError::Corrupt { .. })));
+        let lasting = StateFile::read_lasting(&p).unwrap().unwrap();
+        assert_eq!(lasting.saver, Some(saver));
+        assert!(lasting.hidden_windows.is_empty());
+        std::fs::write(dir.path().join(LASTING_FILE_NAME), "{ not json").unwrap();
+        assert!(matches!(StateFile::read_lasting(&p), Err(StateError::Corrupt { .. })));
     }
 
     #[test]
