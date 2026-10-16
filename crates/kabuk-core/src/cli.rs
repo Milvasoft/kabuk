@@ -26,6 +26,9 @@ pub struct Debug {
     /// Stop the window manager answering after this many milliseconds, as a hung shell
     /// (first start only, not after a restart).
     pub hang_after_ms: Option<u64>,
+    /// Attach the bars to the window manager this many milliseconds after it started
+    /// (messages are handled meanwhile), so it has published what it found by then.
+    pub attach_wm_after_ms: Option<u64>,
     /// Read Windows' app mode from this file (`light` or `dark`) instead of the registry,
     /// so a test can switch it without touching the user's settings.
     pub app_mode_file: Option<PathBuf>,
@@ -39,6 +42,7 @@ impl Debug {
         self.hide_title.is_some()
             || self.crash_after_ms.is_some()
             || self.hang_after_ms.is_some()
+            || self.attach_wm_after_ms.is_some()
             || self.app_mode_file.is_some()
             || self.shortcuts
     }
@@ -154,6 +158,8 @@ pub fn debug_unavailable(debug: &Debug) -> Option<Message> {
         "--debug-crash-after-ms"
     } else if debug.hang_after_ms.is_some() {
         "--debug-hang-after-ms"
+    } else if debug.attach_wm_after_ms.is_some() {
+        "--debug-attach-wm-after-ms"
     } else if debug.app_mode_file.is_some() {
         "--debug-app-mode-file"
     } else if debug.shortcuts {
@@ -301,6 +307,10 @@ pub fn parse_kabuk(args: impl IntoIterator<Item = OsString>) -> Result<KabukComm
                 run.debug.hang_after_ms = Some(number(&flag, &args.value(&flag, inline)?)?);
                 run_only.get_or_insert(flag);
             }
+            "--debug-attach-wm-after-ms" => {
+                run.debug.attach_wm_after_ms = Some(number(&flag, &args.value(&flag, inline)?)?);
+                run_only.get_or_insert(flag);
+            }
             "--debug-shortcuts" => {
                 run.debug.shortcuts = true;
                 run_only.get_or_insert(flag);
@@ -445,6 +455,7 @@ mod tests {
             "--debug-crash-after-ms=50",
             "--debug-hang-after-ms",
             "70",
+            "--debug-attach-wm-after-ms=900",
             "--debug-app-mode-file",
             "D:\\mode",
             "--debug-shortcuts",
@@ -459,6 +470,7 @@ mod tests {
         assert_eq!(run.debug.hide_title.as_deref(), Some("t 1"));
         assert_eq!(run.debug.crash_after_ms, Some(50));
         assert_eq!(run.debug.hang_after_ms, Some(70));
+        assert_eq!(run.debug.attach_wm_after_ms, Some(900));
         assert_eq!(run.debug.app_mode_file, Some(PathBuf::from("D:\\mode")));
         assert!(run.debug.shortcuts);
         assert!(run.debug.is_set());
@@ -470,6 +482,15 @@ mod tests {
         assert_eq!(
             debug_unavailable(&only_mode).unwrap().args[0].1,
             kabuk_i18n::Arg::Str("--debug-app-mode-file".into())
+        );
+        let only_attach = Debug {
+            attach_wm_after_ms: Some(1),
+            ..Debug::default()
+        };
+        assert!(only_attach.is_set());
+        assert_eq!(
+            debug_unavailable(&only_attach).unwrap().args[0].1,
+            kabuk_i18n::Arg::Str("--debug-attach-wm-after-ms".into())
         );
     }
 

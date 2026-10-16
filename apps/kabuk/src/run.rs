@@ -212,6 +212,12 @@ pub fn main(options: Run) -> i32 {
             }
         }
     };
+    // The bars meet the window manager late, after it published what it found (as a
+    // slow start of its mouse hook let it once); their windows answer meanwhile.
+    #[cfg(feature = "integration")]
+    if let Some(ms) = options.debug.attach_wm_after_ms {
+        let _ = msgloop::run_until(&[], Some(Duration::from_millis(ms)));
+    }
     if let (Some(b), Some(w)) = (&bars, &manager) {
         b.attach_wm(w.link());
         w.set_bar_window(b.control_window());

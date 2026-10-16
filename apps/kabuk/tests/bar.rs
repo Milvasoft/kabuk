@@ -5,7 +5,8 @@
 //! Edge cases: bars must settle (no rebuild loop when one bar's reservation notifies
 //! the others); the reserved strip matches the look's size at the monitor's DPI;
 //! a forced kill with bars up gets the work areas back through the watchdog; a module
-//! switched off in `kabuk.toml` is applied live.
+//! switched off in `kabuk.toml` is applied live; bars that meet the window manager only
+//! after it published the open windows still show them.
 //!
 //! Run with: `cargo test -p kabuk --features integration -- --test-threads=1`
 
@@ -1311,6 +1312,40 @@ fn the_apps_module_follows_its_setting_live() {
     assert!(wait_until(SETTLE, || apps_drawn() == 0).is_some(), "apps still drawn");
     std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
     assert!(wait_until(SETTLE, || apps_drawn() >= 1).is_some(), "apps not back");
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
+}
+
+/// Found by a flaky run of the genie test: the window manager took over the open windows
+/// and published them before the bars listened, nothing changed afterwards, and the bar
+/// never showed their programs nor told the window manager where their icons are (a
+/// genie would have poured into the wrong place). Here the bars meet it a second late.
+/// (Pinned programs are drawn either way, so the bar's pictures cannot tell.)
+#[test]
+fn bars_that_meet_the_window_manager_late_still_show_its_windows() {
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    let w = TestWindow::open(&["--title", &title("late-bars")]);
+    let _shell = sandbox.kabuk_with(&[
+        "--manage-class",
+        TEST_WINDOW_CLASS,
+        "--debug-attach-wm-after-ms",
+        "1000",
+    ]);
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let managed = format!("managing window hwnd={}", w.hwnd.0);
+    assert!(wait_until(SETTLE, || sandbox.log_lines(&managed) == 1).is_some());
+    // Its program's icon on the bar, which the window manager hears of (the only window
+    // it manages).
+    assert!(
+        wait_until(SETTLE, || sandbox
+            .last_log_line(&["app icons known"])
+            .is_some_and(|l| l.contains("icons=1")))
+        .is_some(),
+        "the window manager does not know the icons: {:?}",
+        sandbox.last_log_line(&["app icons known"])
+    );
     assert_eq!(sandbox.restore().0, 0);
     assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
 }
