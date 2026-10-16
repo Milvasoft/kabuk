@@ -209,6 +209,11 @@ impl Tray {
         }
     }
 
+    /// Every icon held, hidden ones too, in registration order.
+    pub fn icons(&self) -> &[Icon] {
+        &self.icons
+    }
+
     /// Icons to draw: not hidden and with a picture.
     pub fn visible(&self) -> impl Iterator<Item = &Icon> {
         self.icons.iter().filter(|i| !i.hidden && i.icon != 0)

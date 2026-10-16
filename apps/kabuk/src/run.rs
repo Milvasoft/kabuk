@@ -220,6 +220,7 @@ pub fn main(options: Run) -> i32 {
     let commands = crate::ipc::start(crate::ipc::Targets {
         wm: manager.as_ref().map(WmHandle::link),
         bar: bars.as_ref().and_then(BarManager::control_window),
+        tray: bars.as_ref().and_then(BarManager::tray_list),
         state: state.clone(),
         instance: instance.clone(),
     })

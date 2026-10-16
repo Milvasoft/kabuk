@@ -26,6 +26,8 @@ pub struct Targets {
     pub wm: Option<WmLink>,
     /// The bars' control window.
     pub bar: Option<Hwnd>,
+    /// The tray icons the bars hold (`query tray`).
+    pub tray: Option<std::sync::Arc<std::sync::Mutex<Vec<kabuk_core::tray::Icon>>>>,
     pub state: SharedState,
     pub instance: Instance,
 }
@@ -149,6 +151,42 @@ fn query(kind: QueryKind, t: &Targets) -> Value {
                     })
                 }).collect::<Vec<_>>(),
             })
+        }
+        QueryKind::Tray => {
+            let icons = t
+                .tray
+                .as_ref()
+                .and_then(|l| l.lock().ok().map(|l| l.clone()))
+                .unwrap_or_default();
+            Value::Array(
+                icons
+                    .iter()
+                    .map(|i| {
+                        let owner = Hwnd(i.hwnd);
+                        let path = owner
+                            .pid()
+                            .and_then(|pid| kabuk_win::process::Process::query(pid).ok())
+                            .and_then(|p| p.image_path());
+                        let guid = match i.key {
+                            kabuk_core::tray::IconKey::Guid(g) => {
+                                Some(g.iter().map(|b| format!("{b:02x}")).collect::<String>())
+                            }
+                            kabuk_core::tray::IconKey::Window { .. } => None,
+                        };
+                        json!({
+                            "tip": i.tip,
+                            "hwnd": i.hwnd,
+                            "uid": i.uid,
+                            "guid": guid,
+                            "version": i.version,
+                            "shown": !i.hidden && i.icon != 0,
+                            "pid": owner.pid(),
+                            "exe": path.as_deref().and_then(|p| p.rsplit(['\\', '/']).next()),
+                            "window_class": owner.class_name(),
+                        })
+                    })
+                    .collect(),
+            )
         }
         QueryKind::Windows => Value::Array(
             view.windows

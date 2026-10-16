@@ -58,6 +58,8 @@ pub enum QueryKind {
     State,
     Windows,
     Monitors,
+    /// Other programs' tray icons the bar holds, with their programs.
+    Tray,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -139,12 +141,13 @@ pub fn parse(words: &[String]) -> Result<Request, IpcError> {
             })
         }
         "query" => {
-            takes(1, "state, windows or monitors")?;
+            takes(1, "state, windows, monitors or tray")?;
             Request::Query(match arg {
                 Some("state") => QueryKind::State,
                 Some("windows") => QueryKind::Windows,
                 Some("monitors") => QueryKind::Monitors,
-                _ => return Err(one("state, windows or monitors")),
+                Some("tray") => QueryKind::Tray,
+                _ => return Err(one("state, windows, monitors or tray")),
             })
         }
         "reload" => {
@@ -287,6 +290,7 @@ mod tests {
         assert_eq!(p("query state"), Ok(Request::Query(QueryKind::State)));
         assert_eq!(p("query windows"), Ok(Request::Query(QueryKind::Windows)));
         assert_eq!(p("query monitors"), Ok(Request::Query(QueryKind::Monitors)));
+        assert_eq!(p("query tray"), Ok(Request::Query(QueryKind::Tray)));
         assert_eq!(p("launcher"), Ok(Request::Launcher));
         assert_eq!(p("overview"), Ok(Request::Overview));
         assert_eq!(p("saver"), Ok(Request::Saver));

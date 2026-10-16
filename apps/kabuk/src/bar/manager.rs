@@ -14,6 +14,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use kabuk_core::clock::WallTime;
@@ -21,7 +22,7 @@ use kabuk_core::config::{
     self, BarBackground, BarMonitors, ClockFormat, Config, Edge, LiveConfig, Reload, WorkspaceLayout,
 };
 use kabuk_core::state::{TaskbarBackup, WorkAreaBackup};
-use kabuk_core::tray::{click_messages, Click, IconCall, IconKey, Tray};
+use kabuk_core::tray::{click_messages, Click, Icon, IconCall, IconKey, Tray};
 use kabuk_i18n::{ClockStyle, I18n};
 use kabuk_theme::resolve::{minutes_to_next_flip, mode_now, resolve, ModeChoice, TextSize};
 use kabuk_theme::{Mode, Tokens};
@@ -458,6 +459,9 @@ struct Shared {
     /// longer shown are forgotten, never another part's (the app grid's, the launcher's).
     tray_images: Vec<u64>,
     tray_calls: Rc<RefCell<VecDeque<IconCall>>>,
+    /// Every tray icon held (hidden ones too), for `kabuk msg query tray` on the
+    /// command pipe's thread; written whenever the tray changes.
+    tray_list: Arc<Mutex<Vec<Icon>>>,
     /// Kabuk hides the Windows taskbar while it runs (not with `--leave-explorer`).
     hides_taskbar: bool,
     /// Tests: Windows' app mode comes from this file instead of the registry.
@@ -727,6 +731,7 @@ impl BarManager {
                 tray: Tray::default(),
                 tray_images: Vec::new(),
                 tray_calls: Rc::default(),
+                tray_list: Arc::default(),
                 hides_taskbar: !leave_explorer,
                 app_mode_file,
                 config: LiveConfig::new(config),
@@ -887,6 +892,11 @@ impl BarManager {
             shared,
             _foreground: foreground,
         })
+    }
+
+    /// The tray icons held, kept current, for `kabuk msg query tray`.
+    pub fn tray_list(&self) -> Option<Arc<Mutex<Vec<Icon>>>> {
+        Some(self.shared.try_borrow().ok()?.tray_list.clone())
     }
 
     /// The control window, where other threads post [`MSG_OPEN_LAUNCHER`], [`MSG_RELOAD`]
@@ -1929,6 +1939,7 @@ impl Shared {
         if !on {
             if self.tray_host.take().is_some() {
                 self.tray = Tray::default();
+                self.publish_tray_list();
                 let tray = self.tray.visible().map(|i| i.icon).collect::<Vec<_>>();
                 self.forget_tray_images(tray);
                 self.render_all(false);
@@ -1977,6 +1988,14 @@ impl Shared {
             self.render_all(false);
             self.refresh_tray_panel();
         }
+        self.publish_tray_list();
+    }
+
+    /// Hands the tray icons held to the command pipe (`query tray`).
+    fn publish_tray_list(&self) {
+        if let Ok(mut l) = self.tray_list.lock() {
+            *l = self.tray.icons().to_vec();
+        }
     }
 
     /// Pictures for the shown icons at the primary bar's DPI; forgets the others.
@@ -2020,6 +2039,7 @@ impl Shared {
         }
         if changed {
             self.refresh_tray_images();
+            self.publish_tray_list();
         }
     }
 
