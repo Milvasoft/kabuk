@@ -82,6 +82,9 @@ $testLines = ($tests | ForEach-Object { "    '" + $_.Substring($root.Length).Tri
 @"
 `$ErrorActionPreference = 'Continue'
 `$root = '$root'
+# A checkout new to the VM (a worktree): without its folder, Copy-Item would make the
+# payload's one folder (target) the checkout itself.
+New-Item -ItemType Directory -Force `$root | Out-Null
 Copy-Item -Recurse -Force (Join-Path `$PSScriptRoot 'payload\*') `$root
 # Nobody moves the VM's mouse: it rests in the middle, not over a bar the tests hide.
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
