@@ -3,8 +3,8 @@
 //! window handle), a duplicate add, a modify or delete of an unknown icon, an owner window
 //! that disappears, data that is too short or has the wrong signature, an old (smaller)
 //! structure without a GUID, click messages for the old and the version-4 conventions;
-//! a question about where an icon is (each corner, by GUID or by window, a GUID nobody
-//! registered, a hidden icon, bad data, negative coordinates).
+//! a question about where an icon is (the corner and the size, by GUID or by window, a
+//! GUID nobody registered, a hidden icon, bad data, negative coordinates).
 
 use super::*;
 
@@ -322,7 +322,7 @@ fn reads_a_question_about_where_an_icon_is() {
     assert_eq!(
         q,
         RectQuery {
-            corner: Corner::TopLeft,
+            asks: Asked::TopLeft,
             hwnd: 0x1234,
             uid: 7,
             guid: None
@@ -330,7 +330,7 @@ fn reads_a_question_about_where_an_icon_is() {
     );
     let g = [9u8; 16];
     let q = parse_rect_query(&rect_question(2, 0, 0, g)).unwrap();
-    assert_eq!((q.corner, q.guid), (Corner::BottomRight, Some(g)));
+    assert_eq!((q.asks, q.guid), (Asked::Size, Some(g)));
     // Wrong signature, an unknown message, data too short.
     let mut bad = rect_question(1, 1, 1, [0; 16]);
     bad[0] ^= 1;
@@ -376,14 +376,20 @@ fn a_question_finds_its_icon_by_guid_or_by_window() {
     assert_eq!(t.shown_index(&ask(4, 1, [0; 16])), Some(1));
 }
 
+/// Found by the user: the second question asks for the icon's size, which the shell adds
+/// to the top-left corner; answered with the bottom-right corner, the Bluetooth icon was
+/// at (2400, 21)-(4829, 65), past the screen, and its menu opened far from it.
 #[test]
-fn the_answer_is_the_asked_corner() {
+fn the_answer_is_the_top_left_corner_then_the_size() {
     let top_left = parse_rect_query(&rect_question(1, 1, 1, [0; 16])).unwrap();
-    let bottom_right = parse_rect_query(&rect_question(2, 1, 1, [0; 16])).unwrap();
+    let size = parse_rect_query(&rect_question(2, 1, 1, [0; 16])).unwrap();
     let a = top_left.answer(100, 20, 124, 44);
     assert_eq!((a & 0xFFFF, a >> 16), (100, 20));
-    let b = bottom_right.answer(100, 20, 124, 44);
-    assert_eq!((b & 0xFFFF, b >> 16), (124, 44));
+    let b = size.answer(100, 20, 124, 44);
+    assert_eq!((b & 0xFFFF, b >> 16), (24, 24));
+    // On Monitor 2, left of the primary, the size stays positive.
+    let c = size.answer(-2000, 10, -1971, 33);
+    assert_eq!((c & 0xFFFF, c >> 16), (29, 23));
     // Negative coordinates (Monitor 2 left of the primary) survive the packing.
     let n = top_left.answer(-2000, -30, 0, 0);
     assert_eq!(((n & 0xFFFF) as u16 as i16, (n >> 16) as u16 as i16), (-2000, -30));

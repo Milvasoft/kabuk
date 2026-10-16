@@ -543,6 +543,20 @@ fn a_program_asking_where_its_icon_is_gets_its_place_on_the_bar() {
         (l, t, r, b)
     );
     assert!(r > l && b > t, "an empty place: {:?}", (l, t, r, b));
+    // Found by the user: the second answer was read as the icon's size and added to the
+    // first, so the place reached past the screen and the Bluetooth menu opened far away.
+    // The place is the icon itself: on the bar, no larger than the bar is high.
+    let high = bar.bottom - bar.top;
+    assert!(
+        bar.left <= l && r <= bar.right && bar.top <= t && b <= bar.bottom,
+        "place {:?} is not on the bar {bar:?}",
+        (l, t, r, b)
+    );
+    assert!(
+        r - l <= high && b - t <= high,
+        "place {:?} is larger than an icon on a bar {high} px high",
+        (l, t, r, b)
+    );
 
     app.close();
     assert_eq!(sandbox.restore().0, 0);

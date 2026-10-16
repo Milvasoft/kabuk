@@ -268,12 +268,12 @@ pub fn click_messages(icon: &Icon, click: Click, x: i32, y: i32) -> Vec<(usize, 
     }
 }
 
-/// Which corner of its icon a program asks for: `Shell_NotifyIconGetRect` asks twice, the
-/// top-left corner first, then the bottom-right one.
+/// What a program asks about its icon: `Shell_NotifyIconGetRect` asks twice, for the
+/// top-left corner first, then for the size, which the shell adds to the corner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Corner {
+pub enum Asked {
     TopLeft,
-    BottomRight,
+    Size,
 }
 
 /// A program asks where its icon is on screen (`Shell_NotifyIconGetRect`, `WM_COPYDATA`
@@ -282,36 +282,36 @@ pub enum Corner {
 /// left edge.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RectQuery {
-    pub corner: Corner,
+    pub asks: Asked,
     pub hwnd: u64,
     pub uid: u32,
     pub guid: Option<[u8; 16]>,
 }
 
 // Offsets in the internal `NOTIFYICONIDENTIFIER` the shell sends: signature, message
-// (1 = top-left, 2 = bottom-right), size, padding, then window, id and GUID.
+// (1 = top-left corner, 2 = size), size, padding, then window, id and GUID.
 const RQ_MESSAGE: usize = 4;
 const RQ_HWND: usize = 16;
 const RQ_UID: usize = 20;
 const RQ_GUID: usize = 24;
 const RQ_SIZE: usize = RQ_GUID + 16;
 const RQ_TOP_LEFT: u32 = 1;
-const RQ_BOTTOM_RIGHT: u32 = 2;
+const RQ_ICON_SIZE: u32 = 2;
 
 /// Reads a `Shell_NotifyIconGetRect` question (the `WM_COPYDATA` payload of kind 3).
 pub fn parse_rect_query(bytes: &[u8]) -> Option<RectQuery> {
     if bytes.len() < RQ_SIZE || u32_at(bytes, 0)? != TRAY_SIGNATURE {
         return None;
     }
-    let corner = match u32_at(bytes, RQ_MESSAGE)? {
-        RQ_TOP_LEFT => Corner::TopLeft,
-        RQ_BOTTOM_RIGHT => Corner::BottomRight,
+    let asks = match u32_at(bytes, RQ_MESSAGE)? {
+        RQ_TOP_LEFT => Asked::TopLeft,
+        RQ_ICON_SIZE => Asked::Size,
         _ => return None,
     };
     let mut g = [0u8; 16];
     g.copy_from_slice(&bytes[RQ_GUID..RQ_SIZE]);
     Some(RectQuery {
-        corner,
+        asks,
         hwnd: u64::from(u32_at(bytes, RQ_HWND)?),
         uid: u32_at(bytes, RQ_UID)?,
         guid: (g != [0; 16]).then_some(g),
@@ -330,11 +330,11 @@ impl RectQuery {
     }
 
     /// The answer for the icon at screen rectangle (left, top, right, bottom), in physical
-    /// pixels: the asked corner as `MAKELPARAM(x, y)`.
+    /// pixels: the top-left corner or the size, as `MAKELPARAM(x, y)`.
     pub fn answer(&self, left: i32, top: i32, right: i32, bottom: i32) -> isize {
-        let (x, y) = match self.corner {
-            Corner::TopLeft => (left, top),
-            Corner::BottomRight => (right, bottom),
+        let (x, y) = match self.asks {
+            Asked::TopLeft => (left, top),
+            Asked::Size => (right - left, bottom - top),
         };
         ((y as u16 as isize) << 16) | (x as u16 as isize)
     }

@@ -105,7 +105,7 @@ impl TrayHost {
             if kind == COPYDATA_ICON_RECT {
                 let q = model::parse_rect_query(bytes);
                 if let Some((q, r)) = q.and_then(|q| place(&q).map(|r| (q, r))) {
-                    tracing::debug!(corner = ?q.corner, hwnd = q.hwnd, uid = q.uid, ?r, "tray icon place answered");
+                    tracing::debug!(asks = ?q.asks, hwnd = q.hwnd, uid = q.uid, ?r, "tray icon place answered");
                     return Some(q.answer(r.x, r.y, r.x + r.w, r.y + r.h));
                 }
                 tracing::debug!(
