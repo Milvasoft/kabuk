@@ -383,7 +383,7 @@ impl Shared {
         let icon = match (framed, self.apps.exes.get(&pid)) {
             (Some(app), _) => app,
             (None, Some((_, icon))) => icon.clone(),
-            (None, None) => kabuk_win::process::Process::open(pid).ok()?.image_path()?,
+            (None, None) => kabuk_win::process::Process::query(pid).ok()?.image_path()?,
         };
         let side = u32::try_from(scale.px(STYLE.icon)).unwrap_or(1).max(1) * super::apps_host::OVERSAMPLE;
         let key = apps::image_key(&format!("{icon}@{side}"));

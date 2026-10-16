@@ -1444,7 +1444,7 @@ impl Shared {
                 if let Some((h, r, _)) = w {
                     let exe = h
                         .pid()
-                        .and_then(|p| kabuk_win::process::Process::open(p).ok())
+                        .and_then(|p| kabuk_win::process::Process::query(p).ok())
                         .and_then(|p| p.image_name())
                         .unwrap_or_default();
                     tracing::info!(device = %b.monitor.device, hwnd = h.0, class = %h.class_name(), exe, rect = ?r, "full screen by window");

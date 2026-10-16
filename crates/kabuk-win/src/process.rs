@@ -29,6 +29,19 @@ impl Process {
         })
     }
 
+    /// Opens a process for questions only (its file, its app id, its times). Windows
+    /// grants this for elevated programs too, where [`Process::open`]'s right to end them
+    /// is refused: found by a friend of the user, apps run as administrator were missing
+    /// from the bar.
+    pub fn query(pid: u32) -> std::io::Result<Process> {
+        // SAFETY: plain call; the returned handle is owned by the wrapper.
+        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.map_err(io_error)?;
+        Ok(Process {
+            pid,
+            handle: OwnedHandle::new(handle),
+        })
+    }
+
     pub fn pid(&self) -> u32 {
         self.pid
     }
@@ -315,7 +328,8 @@ impl Waitable for Process {
 #[cfg(test)]
 mod tests {
     //! Edge cases: a running child has no exit code, terminate sets the requested code,
-    //! a process that exits by itself reports its code, a bogus pid fails to open.
+    //! a process that exits by itself reports its code, a bogus pid fails to open, a
+    //! process Kabuk may not end can still be asked its file.
     use super::*;
     use std::process::{Command, Stdio};
 
@@ -329,6 +343,20 @@ mod tests {
         assert!(!higher_rights(false, true));
         assert!(!runs_elevated(std::process::id()), "this very process");
         assert!(!runs_elevated(u32::MAX), "no such process");
+    }
+
+    /// Opened for questions only, the handle holds no right to end the program (the
+    /// right elevated programs refuse), yet tells its file.
+    #[test]
+    fn a_process_opened_for_questions_tells_its_file_and_cannot_be_ended() {
+        let mut child = sleeper();
+        let p = Process::query(child.id()).unwrap();
+        assert_eq!(p.image_name().map(|n| n.to_lowercase()).as_deref(), Some("ping.exe"));
+        assert!(p.terminate(1).is_err(), "no right to end it");
+        assert!(child.try_wait().unwrap().is_none(), "still running");
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(Process::query(0x7fff_fff0).is_err(), "no such process");
     }
 
     #[test]

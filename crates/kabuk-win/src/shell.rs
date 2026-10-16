@@ -23,7 +23,7 @@ const TASKBAR_OWNER: &str = "explorer.exe";
 
 fn owned_by_explorer(w: &Hwnd) -> bool {
     w.pid()
-        .and_then(|pid| crate::process::Process::open(pid).ok())
+        .and_then(|pid| crate::process::Process::query(pid).ok())
         .and_then(|p| p.image_name())
         .is_some_and(|name| name.eq_ignore_ascii_case(TASKBAR_OWNER))
 }

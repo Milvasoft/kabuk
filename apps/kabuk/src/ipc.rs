@@ -157,7 +157,7 @@ fn query(kind: QueryKind, t: &Targets) -> Value {
                     let h = Hwnd(w.hwnd);
                     let path = h
                         .pid()
-                        .and_then(|pid| kabuk_win::process::Process::open(pid).ok())
+                        .and_then(|pid| kabuk_win::process::Process::query(pid).ok())
                         .and_then(|p| p.image_path());
                     json!({
                         "hwnd": w.hwnd,

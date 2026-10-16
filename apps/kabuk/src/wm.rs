@@ -1142,7 +1142,7 @@ impl Wm {
             .filter_map(|id| {
                 let exe = Hwnd(id)
                     .pid()
-                    .and_then(|pid| kabuk_win::process::Process::open(pid).ok())
+                    .and_then(|pid| kabuk_win::process::Process::query(pid).ok())
                     .and_then(|p| p.image_name())?;
                 Some(Seen {
                     hwnd: id,
@@ -1409,7 +1409,7 @@ impl Wm {
         };
         let exe = hwnd
             .pid()
-            .and_then(|pid| kabuk_win::process::Process::open(pid).ok())
+            .and_then(|pid| kabuk_win::process::Process::query(pid).ok())
             .and_then(|p| p.image_name())
             .unwrap_or_default();
         let title = hwnd.title();

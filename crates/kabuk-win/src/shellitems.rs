@@ -350,7 +350,7 @@ pub fn window_app_id(window: crate::window::Hwnd) -> Option<String> {
             })
     };
     explicit.filter(|s| !s.is_empty()).or_else(|| {
-        let process = crate::process::Process::open(window.pid()?).ok()?;
+        let process = crate::process::Process::query(window.pid()?).ok()?;
         process
             .app_user_model_id()
             .or_else(|| known_app_id(&process.image_path()?).map(str::to_string))

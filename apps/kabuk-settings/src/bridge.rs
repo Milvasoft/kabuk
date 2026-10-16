@@ -469,7 +469,7 @@ impl Bridge {
             .into_iter()
             .flatten()
             .filter_map(|w| w["pid"].as_u64().and_then(|p| u32::try_from(p).ok()))
-            .filter_map(|pid| kabuk_win::process::Process::open(pid).ok()?.image_name())
+            .filter_map(|pid| kabuk_win::process::Process::query(pid).ok()?.image_name())
             .collect();
         apps.sort_by_key(|a| a.to_lowercase());
         apps.dedup_by(|a, b| a.eq_ignore_ascii_case(b));

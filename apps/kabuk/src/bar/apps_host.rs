@@ -280,7 +280,7 @@ impl Shared {
             let (exe, icon) = match self.apps.exes.get(&pid) {
                 Some(e) => e.clone(),
                 None => {
-                    let Ok(process) = kabuk_win::process::Process::open(pid) else {
+                    let Ok(process) = kabuk_win::process::Process::query(pid) else {
                         continue;
                     };
                     let Some(exe) = process.image_path() else {
