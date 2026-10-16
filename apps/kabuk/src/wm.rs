@@ -272,11 +272,21 @@ impl WmLink {
         self.view.lock().map(|v| v.clone()).unwrap_or_default()
     }
 
-    /// `window` gets message `id` whenever the workspace summary changes.
+    /// `window` gets message `id` whenever the workspace summary changes, and once now:
+    /// the window manager may have published the windows it took over before anyone
+    /// listened (found by a test: the bar never showed them, nor their genie's icons).
     pub fn listen(&self, window: Hwnd, id: u32) {
         if let Ok(mut l) = self.listener.lock() {
             *l = Some((window, id));
         }
+        let _ = msgloop::post_message(
+            window,
+            Msg {
+                id,
+                wparam: 0,
+                lparam: 0,
+            },
+        );
     }
 }
 
