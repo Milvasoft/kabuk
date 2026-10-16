@@ -202,6 +202,33 @@ pub fn slid(edge: Edge, rect: PxRect, peek: i32, shown: f32) -> PxRect {
     }
 }
 
+/// Where an auto-hiding window that floats in from its edge (Rıhtım's dock, a distance
+/// off the edge; DECISIONS D70) is when `shown` of it is on screen: `rect` (its place
+/// when shown, inside `monitor`) slid over `edge` until only `peek` px of it are left at
+/// the monitor's edge for the mouse to reach.
+pub fn slid_to_edge(edge: Edge, rect: PxRect, monitor: PxRect, peek: i32, shown: f32) -> PxRect {
+    let away = 1.0 - shown.clamp(0.0, 1.0);
+    let toward = |from: i32, to: i32| from + ((to - from) as f32 * away).round() as i32;
+    match edge {
+        Edge::Top => PxRect {
+            y: toward(rect.y, monitor.y + peek - rect.h),
+            ..rect
+        },
+        Edge::Bottom => PxRect {
+            y: toward(rect.y, monitor.y + monitor.h - peek),
+            ..rect
+        },
+        Edge::Left => PxRect {
+            x: toward(rect.x, monitor.x + peek - rect.w),
+            ..rect
+        },
+        Edge::Right => PxRect {
+            x: toward(rect.x, monitor.x + monitor.w - peek),
+            ..rect
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //! Pure geometry only; registering an AppBar changes the desktop and is covered by
@@ -284,5 +311,42 @@ mod tests {
                 h: 1440
             }
         );
+    }
+
+    /// DECISIONS D70, found by the user: Rıhtım's dock did not hide. Floating a distance
+    /// off its edge, it slides until only the peek is left at the monitor's edge, from
+    /// any edge, Monitor 2 left of the main one too; half way is half way.
+    #[test]
+    fn a_floating_dock_slides_off_to_its_monitors_edge() {
+        let m = PxRect {
+            x: -2560,
+            y: 0,
+            w: 2560,
+            h: 1440,
+        };
+        // 600 x 90 px, 12 px above the bottom, centred.
+        let dock = PxRect {
+            x: -1580,
+            y: 1338,
+            w: 600,
+            h: 90,
+        };
+        assert_eq!(slid_to_edge(Edge::Bottom, dock, m, 2, 1.0), dock);
+        assert_eq!(slid_to_edge(Edge::Bottom, dock, m, 2, 0.0).y, 1438);
+        assert_eq!(slid_to_edge(Edge::Bottom, dock, m, 2, 0.5).y, 1388);
+        let top = PxRect { y: 12, ..dock };
+        assert_eq!(slid_to_edge(Edge::Top, top, m, 2, 0.0).y, 2 - 90);
+        let left = PxRect {
+            x: -2548,
+            y: 600,
+            w: 90,
+            h: 400,
+        };
+        assert_eq!(slid_to_edge(Edge::Left, left, m, 2, 0.0).x, -2560 + 2 - 90);
+        let right = PxRect { x: -102, ..left };
+        assert_eq!(slid_to_edge(Edge::Right, right, m, 2, 0.0).x, -2);
+        // Out of reach of nothing: the peek stays inside the monitor.
+        let hidden = slid_to_edge(Edge::Bottom, dock, m, 2, 0.0);
+        assert!(hidden.y < m.y + m.h && hidden.y + hidden.h > m.y + m.h);
     }
 }

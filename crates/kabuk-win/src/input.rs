@@ -120,7 +120,6 @@ impl Drop for MouseHook {
     }
 }
 
-/// The modifier keys now (the physical state, as a hook sees it).
 /// Where the mouse cursor is, in screen pixels (this thread's DPI awareness).
 pub fn cursor_pos() -> Option<(i32, i32)> {
     let mut p = windows::Win32::Foundation::POINT::default();
@@ -130,12 +129,20 @@ pub fn cursor_pos() -> Option<(i32, i32)> {
         .map(|()| (p.x, p.y))
 }
 
+/// Puts the mouse cursor at (x, y), screen pixels (integration tests, in the test
+/// machine: a bar's edge reached as the user's mouse would).
+pub fn set_cursor_pos(x: i32, y: i32) -> bool {
+    // SAFETY: plain call.
+    unsafe { windows::Win32::UI::WindowsAndMessaging::SetCursorPos(x, y) }.is_ok()
+}
+
 /// Hides or shows the mouse cursor over this program's windows (the screen saver).
 pub fn show_cursor(show: bool) {
     // SAFETY: plain call; the display counter is this thread's.
     let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::ShowCursor(show) };
 }
 
+/// The modifier keys now (the physical state, as a hook sees it).
 pub fn keys() -> Keys {
     // SAFETY: GetAsyncKeyState only reads the key state.
     let down = |vk: VIRTUAL_KEY| unsafe { GetAsyncKeyState(i32::from(vk.0)) } < 0;

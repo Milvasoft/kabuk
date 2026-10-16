@@ -71,64 +71,171 @@ fn bars_settle_once_and_reserve_their_strip() {
     );
 }
 
-/// SPEC §2.1, found by the user: `bar.autohide` did nothing. An auto-hiding bar reserves
-/// no space and waits off its edge with a sliver left on screen; the mouse on it brings
-/// it in, and some time after the mouse leaves it slides off again. (The mouse is not
-/// moved: the bar is sent the messages it would get.)
-#[test]
-fn an_auto_hiding_bar_reserves_nothing_and_slides_in_under_the_mouse() {
-    let before = work_areas();
-    let sandbox = Sandbox::new();
-    std::fs::write(sandbox.config_file(), "schema = 1\n[bar]\nautohide = true\n").unwrap();
-    let _shell = sandbox.shell_with_bar(&[]);
-    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("bars built") == 1).is_some());
-    std::thread::sleep(Duration::from_millis(500));
-    assert_eq!(work_areas(), before, "space reserved");
-    let pid = sandbox.state().kabuk_pid.unwrap();
+/// The window of class `class` of Kabuk `pid` on Monitor 1 (main).
+fn primary_window_of(class: &str, pid: u32) -> kabuk_win::window::Hwnd {
     let primary = kabuk_win::shell::monitors().into_iter().find(|m| m.primary).unwrap();
-    let bar = kabuk_win::window::windows_of_class("Kabuk.Bar")
+    kabuk_win::window::windows_of_class(class)
         .into_iter()
         .filter(|w| w.pid() == Some(pid))
         .find(|w| {
             w.window_rect()
                 .is_some_and(|r| r.left >= primary.rect.left && r.right <= primary.rect.right)
         })
-        .expect("the bar of Monitor 1 (main)");
+        .unwrap_or_else(|| panic!("no {class} on Monitor 1 (main)"))
+}
+
+/// SPEC §2.1, found by the user: `bar.autohide` did nothing. An auto-hiding bar reserves
+/// no space and waits off its edge with a sliver left on screen; the mouse resting on it
+/// brings it in, and some time after the mouse leaves it slides off again. DECISIONS
+/// D70, found by the user: it came over the windows whenever the mouse passed the edge
+/// (on its way to a window's top), and slid off while its own panel was open. Run in the
+/// test machine: the mouse is moved.
+#[test]
+fn an_auto_hiding_bar_reserves_nothing_and_slides_in_when_the_mouse_rests() {
+    use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_VOLUME_PANEL};
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n[bar]\nautohide = true\n").unwrap();
+    let primary = kabuk_win::shell::monitors().into_iter().find(|m| m.primary).unwrap();
+    let away = (
+        (primary.rect.left + primary.rect.right) / 2,
+        (primary.rect.top + primary.rect.bottom) / 2,
+    );
+    assert!(kabuk_win::input::set_cursor_pos(away.0, away.1));
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("bars built") == 1).is_some());
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(work_areas(), before, "space reserved");
+    let pid = sandbox.state().kabuk_pid.unwrap();
+    let bar = primary_window_of("Kabuk.Bar", pid);
     let top = || bar.window_rect().map(|r| r.top).unwrap();
-    // Hidden: all but a sliver above the monitor (a moment after, should the mouse
-    // have been at the top when it appeared).
+    // Hidden: all but a sliver above the monitor.
     assert!(
         wait_until(SETTLE, || top() < primary.rect.top).is_some(),
         "not hidden: {}",
         top()
     );
     let hidden = top();
-    assert!(
-        bar.window_rect().unwrap().bottom > primary.rect.top,
-        "nothing left to reach"
-    );
-    let send = |id: u32| {
+    let sliver = bar.window_rect().unwrap().bottom - 1;
+    assert!(sliver >= primary.rect.top, "nothing left to reach");
+    let edge = (away.0, sliver);
+    let move_to = |(x, y): (i32, i32)| {
+        assert!(kabuk_win::input::set_cursor_pos(x, y));
         kabuk_win::msgloop::post_message(
             bar,
             kabuk_win::msgloop::Msg {
-                id,
+                id: kabuk_win::msgloop::msg::MOUSEMOVE,
                 wparam: 0,
+                lparam: 0,
+            },
+        )
+        .unwrap();
+    };
+    // Passing the edge, as on the way to a window's top: it stays away.
+    move_to(edge);
+    std::thread::sleep(Duration::from_millis(60));
+    assert!(kabuk_win::input::set_cursor_pos(away.0, away.1 / 2));
+    std::thread::sleep(Duration::from_millis(900));
+    assert_eq!(top(), hidden, "it came in for a mouse passing the edge");
+    assert_eq!(sandbox.log_lines("mouse rested at the edge"), 0);
+    // Resting there: it comes in.
+    move_to(edge);
+    assert!(
+        wait_until(SETTLE, || top() == primary.rect.top).is_some(),
+        "not shown for a resting mouse: {}\n{}",
+        top(),
+        sandbox.last_log_line(&["auto-hiding"]).unwrap_or_default()
+    );
+    assert_eq!(sandbox.log_lines("mouse rested at the edge"), 1);
+    // Its panel open, the mouse gone from it: it stays while the panel is open.
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|w| w.pid() == Some(pid))
+        .expect("bar control window");
+    let post = |wparam: usize| {
+        kabuk_win::msgloop::post_message(
+            control,
+            kabuk_win::msgloop::Msg {
+                id: MSG_TEST_VOLUME_PANEL,
+                wparam,
                 lparam: 0,
             },
         )
         .unwrap()
     };
-    send(kabuk_win::msgloop::msg::MOUSEMOVE);
-    assert!(
-        wait_until(SETTLE, || top() == primary.rect.top).is_some(),
-        "not shown: {}",
-        top()
-    );
-    send(kabuk_win::msgloop::msg::MOUSELEAVE);
+    post(1);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("volume panel opened") >= 1).is_some());
+    assert!(kabuk_win::input::set_cursor_pos(away.0, away.1));
+    std::thread::sleep(Duration::from_millis(1500));
+    assert_eq!(top(), primary.rect.top, "it slid off with its panel open");
+    // The panel closed: it slides off.
+    post(0);
     assert!(
         wait_until(SETTLE, || top() == hidden).is_some(),
         "not hidden again: {}",
         top()
+    );
+    assert_eq!(sandbox.restore().0, 0);
+    assert_eq!(work_areas(), before);
+}
+
+/// DECISIONS D70, found by the user: with auto-hide, Rıhtım's dock did not hide. It
+/// reserves nothing, waits off its edge with a sliver at the monitor's edge, comes in
+/// when the mouse rests there and slides off once it leaves. Run in the test machine:
+/// the mouse is moved.
+#[test]
+fn rihtims_dock_auto_hides_with_the_bar() {
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(
+        sandbox.config_file(),
+        "schema = 1\n[appearance]\nlook = \"rihtim\"\n[bar]\nautohide = true\n",
+    )
+    .unwrap();
+    let primary = kabuk_win::shell::monitors().into_iter().find(|m| m.primary).unwrap();
+    let away = (
+        (primary.rect.left + primary.rect.right) / 2,
+        (primary.rect.top + primary.rect.bottom) / 2,
+    );
+    assert!(kabuk_win::input::set_cursor_pos(away.0, away.1));
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("dock placed") == 1).is_some());
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(work_areas(), before, "space reserved");
+    let pid = sandbox.state().kabuk_pid.unwrap();
+    let dock = primary_window_of("Kabuk.Dock", pid);
+    let rect = || dock.window_rect().unwrap();
+    let bottom = primary.rect.bottom;
+    // Hidden: only a sliver of it inside the monitor's bottom edge.
+    assert!(
+        wait_until(SETTLE, || rect().top < bottom && rect().bottom > bottom).is_some(),
+        "not hidden: {:?}\n{}",
+        rect(),
+        sandbox.last_log_line(&["auto-hiding"]).unwrap_or_default()
+    );
+    let hidden = rect();
+    let at = ((hidden.left + hidden.right) / 2, bottom - 1);
+    assert!(kabuk_win::input::set_cursor_pos(at.0, at.1));
+    kabuk_win::msgloop::post_message(
+        dock,
+        kabuk_win::msgloop::Msg {
+            id: kabuk_win::msgloop::msg::MOUSEMOVE,
+            wparam: 0,
+            lparam: 0,
+        },
+    )
+    .unwrap();
+    assert!(
+        wait_until(SETTLE, || rect().bottom < bottom).is_some(),
+        "not shown: {:?}\n{}",
+        rect(),
+        sandbox.last_log_line(&["auto-hiding"]).unwrap_or_default()
+    );
+    assert!(kabuk_win::input::set_cursor_pos(away.0, away.1));
+    assert!(
+        wait_until(SETTLE, || rect() == hidden).is_some(),
+        "not hidden again: {:?}",
+        rect()
     );
     assert_eq!(sandbox.restore().0, 0);
     assert_eq!(work_areas(), before);

@@ -185,6 +185,8 @@ mod timer {
     pub const APP_GRID_WIGGLE: usize = 32;
     /// A tray click's program had its time to open its menu: the menu watch ends.
     pub const TRAY_MENU: usize = 33;
+    /// The mouse rested at an auto-hiding bar's (or the dock's) edge: it comes in.
+    pub const REVEAL: usize = 34;
 }
 
 /// An auto-hiding bar (SPEC §2.1): how much of it stays on screen for the mouse to reach
@@ -195,6 +197,17 @@ const AUTOHIDE_PEEK: f32 = 2.0;
 const MSG_VOLUME_KEY: u32 = msgloop::msg::APP + 42;
 const AUTOHIDE_DELAY: Duration = Duration::from_millis(600);
 const BAR_SLIDE_STEP: Duration = Duration::from_millis(16);
+/// How long the mouse rests at an auto-hiding bar's edge before it comes in (found by
+/// the user: it came over the windows whenever the mouse passed the edge, on its way to
+/// a window's top; DECISIONS D70).
+const REVEAL_DELAY: Duration = Duration::from_millis(250);
+
+/// What auto-hides: a bar (by its index) or Rıhtım's dock.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Peeker {
+    Bar(usize),
+    Dock,
+}
 /// How often the mouse on an app's icon tells the window manager a genie may come.
 const GENIE_WARM_EVERY: Duration = Duration::from_secs(10);
 
@@ -440,6 +453,8 @@ struct Dock {
     apps: Vec<dock::DockApp>,
     layout: Layout,
     origin: Point,
+    /// With `bar.autohide` the dock hides too (D70): how much of it is on screen.
+    peek: Option<Peek>,
 }
 
 /// The tooltip window of a tray icon, kept alive while it shows (the surface goes first).
@@ -569,6 +584,8 @@ struct Shared {
     /// icon's key: programs re-adding icons move the others along the bar.
     hover: Option<(usize, IconKey)>,
     tooltip: Option<motion_host::Shown>,
+    /// The auto-hiding bar (or dock) the mouse rests at, until [`REVEAL_DELAY`] passes.
+    reveal: Option<Peeker>,
     /// Watches the clicked tray icon's program for its menu, for `TRAY_MENU_WAIT`.
     tray_menu: Option<kabuk_win::events::MenuWatch>,
     /// Last, so it goes after the bars: their AppBar messages pass through it.
@@ -810,6 +827,7 @@ impl BarManager {
                 tray_asked: None,
                 hover: None,
                 tooltip: None,
+                reveal: None,
                 tray_menu: None,
                 tray_host: None,
             })
@@ -1259,6 +1277,7 @@ impl Shared {
                     timer::APP_PREVIEW_HIDE => self.hide_app_preview(),
                     timer::DRIFT => self.drift_step(false),
                     timer::AUTOHIDE => self.autohide_due(),
+                    timer::REVEAL => self.reveal_due(),
                     timer::BAR_SLIDE => self.step_bar_slides(),
                     timer::SAVER_KEYS => self.saver_keys_due(),
                     timer::APP_GRID_SLIDE => self.app_grid_slide_over(),
@@ -1746,7 +1765,11 @@ impl Shared {
             Shared::on_dock,
         );
         let window = Window::shell_surface(DOCK_CLASS, "Kabuk", appbar::strip(edge, mon, thickness), proc)?;
-        let (appbar, strip) = if self.record_work_area(&monitor) {
+        // Auto-hiding (D70), it reserves nothing and waits off its edge as the bar does.
+        let autohide = self.config().bar.autohide;
+        let (appbar, strip) = if autohide {
+            (None, appbar::strip(edge, mon, thickness))
+        } else if self.record_work_area(&monitor) {
             match AppBar::register(&window, MSG_APPBAR) {
                 Ok(a) => {
                     let strip = a.place(edge, mon, thickness);
@@ -1762,7 +1785,11 @@ impl Shared {
         };
         let distance = scale.px(dock::STYLE.distance) - kabuk_core::oled::MAX_SHIFT;
         let rect = dock::window_rect(edge, mon, strip, self.dock_window_size(edge, scale), distance);
-        window.set_rect(rect);
+        let peek = autohide.then(Peek::hidden);
+        window.set_rect(match peek {
+            Some(_) => appbar::slid_to_edge(edge, rect, mon, peek_px(scale), 0.0),
+            None => rect,
+        });
         window.show();
         let surface = match WindowSurface::new(&self.gpu, window.hwnd().0 as isize, rect.w as u32, rect.h as u32) {
             Ok(s) => Some(s),
@@ -1787,6 +1814,7 @@ impl Shared {
             apps: Vec::new(),
             layout: Layout::default(),
             origin: Point::default(),
+            peek,
         })
     }
 
@@ -2565,6 +2593,15 @@ impl Shared {
                 }
                 None
             }
+            msg::MOUSEMOVE => {
+                kabuk_win::msgloop::track_mouse_leave(d.window.hwnd());
+                self.edge_reached(Peeker::Dock);
+                None
+            }
+            msg::MOUSELEAVE => {
+                self.edge_left(Peeker::Dock);
+                None
+            }
             msg::LBUTTONUP => {
                 let (x, y) = msg::point(m.lparam);
                 let p = Point {
@@ -2658,7 +2695,10 @@ impl Shared {
             let distance = d.scale.px(dock::STYLE.distance) - room;
             let rect = dock::window_rect(d.edge, px_rect(d.monitor.rect), d.strip, size, distance);
             d.rect = rect;
-            d.window.set_rect(rect);
+            d.window.set_rect(match d.peek {
+                Some(p) => appbar::slid_to_edge(d.edge, rect, px_rect(d.monitor.rect), peek_px(d.scale), p.now()),
+                None => rect,
+            });
             if let Some(s) = d.surface.as_mut() {
                 s.resize(
                     &self.gpu,
@@ -2784,31 +2824,92 @@ impl Shared {
         })
     }
 
-    /// Slides auto-hiding bar `index` onto the screen (`show`) or off it; nothing for a
-    /// bar that keeps its place or already goes there.
-    fn peek_bar(&mut self, index: usize, show: bool) {
+    /// How much of auto-hiding `who` is on screen and where it slides; `None` when it
+    /// keeps its place.
+    fn peek_of(&self, who: Peeker) -> Option<Peek> {
+        match who {
+            Peeker::Bar(i) => self.bars.get(i).and_then(|b| b.peek),
+            Peeker::Dock => self.dock.as_ref().and_then(|d| d.peek),
+        }
+    }
+
+    /// Slides auto-hiding `who` onto the screen (`show`) or off it; nothing for one that
+    /// keeps its place or already goes there.
+    fn peek(&mut self, who: Peeker, show: bool) {
         if show {
             self.kill(timer::AUTOHIDE);
         }
         let full = self.motion_level() == kabuk_ui::motion::Level::Full;
-        let Some(bar) = self.bars.get_mut(index) else { return };
-        let Some(p) = bar.peek else { return };
+        let slot = match who {
+            Peeker::Bar(i) => self.bars.get_mut(i).map(|b| &mut b.peek),
+            Peeker::Dock => self.dock.as_mut().map(|d| &mut d.peek),
+        };
+        let Some(slot) = slot else { return };
+        let Some(p) = *slot else { return };
         let to = if show { 1.0 } else { 0.0 };
         if p.to == to {
             return;
         }
-        bar.peek = Some(Peek {
+        *slot = Some(Peek {
             // Without full motion it is there at once.
             from: if full { p.now() } else { to },
             to,
             since: std::time::Instant::now(),
         });
-        tracing::debug!(device = %bar.monitor.device, show, "auto-hiding bar slides");
+        tracing::debug!(?who, show, "auto-hiding bar slides");
         self.step_bar_slides();
     }
 
-    /// Moves the auto-hiding bars to where their slides have got, again until they are
-    /// done.
+    /// The mouse is on auto-hiding `who`: shown (or coming in), it stays; hidden, it
+    /// comes in once the mouse has rested at its edge for [`REVEAL_DELAY`] (D70).
+    fn edge_reached(&mut self, who: Peeker) {
+        let Some(p) = self.peek_of(who) else { return };
+        if p.to > 0.0 {
+            self.peek(who, true);
+        } else if self.reveal != Some(who) {
+            self.reveal = Some(who);
+            if let Some(c) = &self.control {
+                c.set_timer(timer::REVEAL, REVEAL_DELAY);
+            }
+        }
+    }
+
+    /// The mouse left auto-hiding `who`: one about to come in stays away, a shown one
+    /// slides off a while later.
+    fn edge_left(&mut self, who: Peeker) {
+        if self.reveal == Some(who) {
+            self.reveal = None;
+            self.kill(timer::REVEAL);
+        }
+        if self.peek_of(who).is_some() {
+            if let Some(c) = &self.control {
+                c.set_timer(timer::AUTOHIDE, AUTOHIDE_DELAY);
+            }
+        }
+    }
+
+    /// The mouse rested at an edge long enough: what it rests at comes in.
+    fn reveal_due(&mut self) {
+        self.kill(timer::REVEAL);
+        if let Some(who) = self.reveal.take() {
+            tracing::debug!(?who, "mouse rested at the edge");
+            self.peek(who, true);
+        }
+    }
+
+    /// One of the bar's or the dock's popups is open: an auto-hiding bar stays while it
+    /// is (found by the user: it slid off as the mouse went into the panel it opened).
+    fn bar_popup_open(&self) -> bool {
+        self.volume_panel.is_some()
+            || self.tray_panel.is_some()
+            || self.power_menu.is_some()
+            || self.app_menu.is_some()
+            || self.media_card.is_some()
+            || self.app_preview.is_some()
+    }
+
+    /// Moves the auto-hiding bars and dock to where their slides have got, again until
+    /// they are done.
     fn step_bar_slides(&mut self) {
         let mut moving = false;
         for bar in &mut self.bars {
@@ -2817,27 +2918,54 @@ impl Shared {
             bar.window.set_rect(appbar::slid(bar.edge, bar.rect, px, p.now()));
             moving |= !p.done();
         }
+        if let Some(d) = self.dock.as_mut() {
+            if let Some(p) = d.peek {
+                let mon = px_rect(d.monitor.rect);
+                d.window
+                    .set_rect(appbar::slid_to_edge(d.edge, d.rect, mon, peek_px(d.scale), p.now()));
+                moving |= !p.done();
+            }
+        }
         match (&self.control, moving) {
             (Some(c), true) => c.set_timer(timer::BAR_SLIDE, BAR_SLIDE_STEP),
             _ => self.kill(timer::BAR_SLIDE),
         }
     }
 
-    /// The mouse left an auto-hiding bar a while ago: the bars it is not over slide off.
+    /// The mouse left an auto-hiding bar or the dock a while ago: those it is not over
+    /// slide off, unless one of their popups is open.
     fn autohide_due(&mut self) {
         self.kill(timer::AUTOHIDE);
-        let at = kabuk_win::input::cursor_pos();
-        for i in 0..self.bars.len() {
-            let r = self.bars[i].rect;
-            let over = at.is_some_and(|(x, y)| x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
-            if over {
-                // Still on it (the window under the mouse changed): look again later.
-                if let Some(c) = &self.control {
-                    c.set_timer(timer::AUTOHIDE, AUTOHIDE_DELAY);
-                }
-            } else {
-                self.peek_bar(i, false);
+        let again = |s: &Shared| {
+            if let Some(c) = &s.control {
+                c.set_timer(timer::AUTOHIDE, AUTOHIDE_DELAY);
             }
+        };
+        if self.bar_popup_open() {
+            tracing::trace!("auto-hiding bar kept for its popup");
+            again(self);
+            return;
+        }
+        let at = kabuk_win::input::cursor_pos();
+        let over = |r: PxRect| at.is_some_and(|(x, y)| x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
+        let mut still = false;
+        for i in 0..self.bars.len() {
+            if over(self.bars[i].rect) {
+                // Still on it (the window under the mouse changed): look again later.
+                still = true;
+            } else {
+                self.peek(Peeker::Bar(i), false);
+            }
+        }
+        if let Some(r) = self.dock.as_ref().filter(|d| d.peek.is_some()).map(|d| d.rect) {
+            if over(r) {
+                still = true;
+            } else {
+                self.peek(Peeker::Dock, false);
+            }
+        }
+        if still {
+            again(self);
         }
     }
 
@@ -2925,7 +3053,11 @@ impl Shared {
             }
             msg::MOUSEMOVE => {
                 kabuk_win::msgloop::track_mouse_leave(self.bars[index].window.hwnd());
-                self.peek_bar(index, true);
+                self.edge_reached(Peeker::Bar(index));
+                // Away off its edge, its sliver shows nothing to hover or drag.
+                if self.peek_of(Peeker::Bar(index)).is_some_and(|p| p.to == 0.0) {
+                    return Some(0);
+                }
                 let (x, y) = msg::point(m.lparam);
                 if self.app_drag_moved(index, x, y) {
                     return Some(0);
@@ -2935,11 +3067,7 @@ impl Shared {
             }
             msg::MOUSELEAVE => {
                 self.hovering(index, None);
-                if self.bars[index].peek.is_some() {
-                    if let Some(c) = &self.control {
-                        c.set_timer(timer::AUTOHIDE, AUTOHIDE_DELAY);
-                    }
-                }
+                self.edge_left(Peeker::Bar(index));
                 Some(0)
             }
             msg::MOUSEWHEEL => {
