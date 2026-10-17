@@ -928,6 +928,7 @@ impl BarManager {
                     s.live.title = fg.and_then(|h| Title::split(&h.title()));
                     s.tray_panel_foreground(fg);
                     s.step_aside_for_fullscreen();
+                    s.keep_bars_on_top();
                     s.refresh_apps();
                     s.render_all(false);
                 }
@@ -1515,6 +1516,26 @@ impl Shared {
     /// Game mode (SPEC §2.4): a monitor a full-screen program covers (or every monitor,
     /// unless the others stay normal) hides its bar, the window manager pauses tiling
     /// there, and notices wait for one summary; each part as `[game]` says.
+    /// Puts the shown bars and the dock back over the ordinary windows when one is above
+    /// them: topmost as they are, they were found under ordinary windows on the user's
+    /// machine, and the window motion's overlay with them, so a window coming back showed
+    /// over its genie (DECISIONS D78). Looked at as the window in front changes.
+    fn keep_bars_on_top(&self) {
+        let windows = self
+            .bars
+            .iter()
+            .filter(|b| !b.aside)
+            .map(|b| &b.window)
+            .chain(self.dock.as_ref().map(|d| &d.window));
+        for w in windows {
+            let h = w.hwnd();
+            if h.is_visible() && h.under_ordinary_window() {
+                w.raise_topmost();
+                tracing::info!(hwnd = h.0, "bar raised back over the windows");
+            }
+        }
+    }
+
     fn step_aside_for_fullscreen(&mut self) {
         /// How many of the front windows the check logs.
         const FRONT_LOGGED: usize = 3;

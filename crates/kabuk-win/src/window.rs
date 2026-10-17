@@ -684,6 +684,21 @@ impl Hwnd {
         }
     }
 
+    /// Whether a visible ordinary (not topmost) window is above this one in the z-order.
+    /// A topmost window should never be, yet Kabuk's bars were found under ordinary
+    /// windows on the user's machine, as was a topmost window of Explorer's (D78).
+    pub fn under_ordinary_window(self) -> bool {
+        let mut ordinary_above = false;
+        for w in top_level_windows() {
+            if w == self {
+                return ordinary_above;
+            }
+            ordinary_above |= w.is_visible() && !w.is_topmost() && !w.is_cloaked();
+        }
+        // Not a window (any more).
+        false
+    }
+
     /// Whether [`Hwnd::set_see_through`] made the window transparent.
     pub fn is_see_through(self) -> bool {
         use windows::Win32::UI::WindowsAndMessaging::{
@@ -889,6 +904,42 @@ mod tests {
         );
         assert!(h.set_see_through(false), "already opaque");
         assert!(!Hwnd(0x1234_5678).is_see_through());
+    }
+
+    /// D78: an ordinary window under another ordinary one is under an ordinary window; a
+    /// topmost window raised to the top is not; a bogus handle is not.
+    #[test]
+    fn a_window_knows_an_ordinary_window_is_over_it() {
+        use windows::Win32::UI::WindowsAndMessaging::{HWND_TOP, HWND_TOPMOST, SWP_NOMOVE, SWP_SHOWWINDOW};
+        let rect = crate::msgloop::PxRect {
+            x: -30_000,
+            y: -30_000,
+            w: 20,
+            h: 20,
+        };
+        let under = crate::msgloop::Window::desk_surface("Kabuk.Test.Under", "", rect, |_| None).unwrap();
+        let over = crate::msgloop::Window::desk_surface("Kabuk.Test.Over", "", rect, |_| None).unwrap();
+        let place = |w: Hwnd, after| {
+            // SAFETY: our own windows, out of sight; shown without taking the focus.
+            unsafe {
+                let _ = SetWindowPos(
+                    w.raw(),
+                    Some(after),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                );
+            }
+        };
+        place(under.hwnd(), HWND_TOP);
+        place(over.hwnd(), HWND_TOP);
+        assert!(under.hwnd().under_ordinary_window(), "under the other");
+        place(under.hwnd(), HWND_TOPMOST);
+        assert!(under.hwnd().is_topmost());
+        assert!(!under.hwnd().under_ordinary_window(), "raised to the top");
+        assert!(!Hwnd(0x1234_5678).under_ordinary_window());
     }
 
     #[test]

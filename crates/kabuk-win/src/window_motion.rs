@@ -382,17 +382,27 @@ fn desktop_thumbnail(overlay: HWND, source: Hwnd, area: Rect) -> Option<isize> {
     }
 }
 
-/// Where the overlay goes in the z-order: right under the lowest topmost window on screen
-/// (Kabuk's bars among them), so above every ordinary window, the one in front included.
-/// An ordinary overlay stayed under the window in front (Windows keeps it there): a window
-/// minimising went behind it, and one coming back showed behind it and then jumped
-/// before it (found by the user). Topmost windows stay above, as the scenes leave them out.
+/// Where the overlay goes in the z-order: right under the topmost windows that are really
+/// on top, the run of them at the top of the z-order (Kabuk's bars among them), so above
+/// every ordinary window, the one in front included. An ordinary overlay stayed under the
+/// window in front (Windows keeps it there): a window minimising went behind it, and one
+/// coming back showed behind it and then jumped before it (found by the user). Topmost
+/// windows stay above, as the scenes leave them out. A topmost window lower down has sunk
+/// under ordinary windows (found on the user's machine: one of Explorer's had, and the
+/// overlay put under it went under the windows, so a window coming back showed over its
+/// genie; DECISIONS D78).
 fn above_ordinary_windows(overlay: HWND) -> HWND {
-    crate::window::top_level_windows()
-        .into_iter()
-        .rev()
-        .find(|w| w.raw() != overlay && w.is_visible() && w.is_topmost())
-        .map_or(HWND_TOPMOST, |w| w.raw())
+    let mut last = None;
+    for w in crate::window::top_level_windows() {
+        if w.raw() == overlay || !w.is_visible() || w.is_cloaked() {
+            continue;
+        }
+        if !w.is_topmost() {
+            break;
+        }
+        last = Some(w.raw());
+    }
+    last.unwrap_or(HWND_TOPMOST)
 }
 
 fn overlay(area: Rect) -> Option<HWND> {
@@ -967,6 +977,13 @@ mod tests {
         // DWM gives the size of the primary monitor here, though the source rectangle is in
         // Progman's own pixels (the spike shows each monitor's part exactly).
         assert!(size.cx > 0 && size.cy > 0, "{size:?}");
+        // Above every ordinary window, whatever topmost windows sank under them (found on
+        // the user's machine: under the lowest topmost window, Explorer's own having sunk,
+        // the overlay went under the windows, and a window came back over its genie; D78).
+        assert!(
+            !Hwnd::from_raw(p.overlay).under_ordinary_window(),
+            "the overlay is under an ordinary window"
+        );
         end(p);
     }
 
