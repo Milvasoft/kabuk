@@ -910,15 +910,18 @@ mod tests {
     /// topmost window raised to the top is not; a bogus handle is not.
     #[test]
     fn a_window_knows_an_ordinary_window_is_over_it() {
-        use windows::Win32::UI::WindowsAndMessaging::{HWND_TOP, HWND_TOPMOST, SWP_NOMOVE, SWP_SHOWWINDOW};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST, SWP_NOMOVE, SWP_SHOWWINDOW,
+        };
         let rect = crate::msgloop::PxRect {
             x: -30_000,
             y: -30_000,
             w: 20,
             h: 20,
         };
-        let under = crate::msgloop::Window::desk_surface("Kabuk.Test.Under", "", rect, |_| None).unwrap();
-        let over = crate::msgloop::Window::desk_surface("Kabuk.Test.Over", "", rect, |_| None).unwrap();
+        // Shell surfaces made ordinary (desk surfaces keep to the desktop's level).
+        let under = crate::msgloop::Window::shell_surface("Kabuk.Test.Under", "", rect, |_| None).unwrap();
+        let over = crate::msgloop::Window::shell_surface("Kabuk.Test.Over", "", rect, |_| None).unwrap();
         let place = |w: Hwnd, after| {
             // SAFETY: our own windows, out of sight; shown without taking the focus.
             unsafe {
@@ -933,8 +936,10 @@ mod tests {
                 );
             }
         };
-        place(under.hwnd(), HWND_TOP);
+        place(under.hwnd(), HWND_NOTOPMOST);
+        place(over.hwnd(), HWND_NOTOPMOST);
         place(over.hwnd(), HWND_TOP);
+        assert!(!under.hwnd().is_topmost() && !over.hwnd().is_topmost());
         assert!(under.hwnd().under_ordinary_window(), "under the other");
         place(under.hwnd(), HWND_TOPMOST);
         assert!(under.hwnd().is_topmost());
