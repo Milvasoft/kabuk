@@ -282,6 +282,11 @@ impl Desk {
         self.parked.contains_key(&id)
     }
 
+    /// The minimised windows (left out of [`Desk::all_windows`]).
+    pub fn parked_windows(&self) -> Vec<WindowId> {
+        self.parked.keys().copied().collect()
+    }
+
     /// Where a minimised window comes back: the place it had on its monitor when it was
     /// minimised (its tile then, or its floating rectangle), and that monitor's key.
     pub fn parked_place(&self, id: WindowId) -> Option<(String, Rect)> {

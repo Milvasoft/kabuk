@@ -889,6 +889,23 @@ fn a_minimised_window_leaves_the_layout_and_comes_back_to_its_place() {
     assert!(!d.is_parked(8) && !d.contains(8));
 }
 
+/// Found by the user: a window minimised during a game never played the genie again.
+/// Every window is listed with the minimised ones, which `all_windows` leaves out.
+#[test]
+fn the_minimised_windows_are_listed() {
+    let mut d = desk(false);
+    d.add(new(1));
+    d.add(new(2));
+    assert!(d.add_parked(new(3)));
+    d.park(2);
+    let mut parked = d.parked_windows();
+    parked.sort_unstable();
+    assert_eq!(parked, vec![2, 3]);
+    assert!(!d.all_windows().contains(&2) && !d.all_windows().contains(&3));
+    d.unpark(3);
+    assert_eq!(d.parked_windows(), vec![2]);
+}
+
 /// Found by a friend of the user: apps minimised before Kabuk started were missing from
 /// the bar. Taken on as minimised: known (listed) at once, nothing moves, and restored
 /// they join the layout as any minimised window does.

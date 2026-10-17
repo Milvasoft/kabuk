@@ -1820,10 +1820,13 @@ impl Wm {
 
     /// The genie on every managed window, or Windows' transitions back on all of them.
     fn regenie_all(&mut self) {
+        // The minimised ones too (found by the user: a window minimised during a game
+        // never played the genie again once the game was over).
         let ids: Vec<u64> = self
             .desk
             .all_windows()
             .into_iter()
+            .chain(self.desk.parked_windows())
             .chain(self.genie.iter().copied())
             .collect();
         for id in ids {
