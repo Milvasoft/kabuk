@@ -389,6 +389,8 @@ impl Bridge {
             "gallery": crate::gallery::list(),
             "app_grid": { "hidden": grid.hidden, "ordered": !grid.order.is_empty() },
             "version": env!("CARGO_PKG_VERSION"),
+            // Installed from the Microsoft Store, which updates it (DECISIONS D84).
+            "store": kabuk_win::package::is_packaged(),
             // Each language's own name, as the language choice shows them.
             "lang_names": {
                 "tr": kabuk_i18n::I18n::new(Lang::Tr).tr("lang-name"),
@@ -441,6 +443,10 @@ impl Bridge {
     /// Asks GitHub for Kabuk's latest release on a thread of its own; the answer comes as
     /// a second `update` message.
     pub fn check_update(&self) -> Value {
+        if kabuk_win::package::is_packaged() {
+            // The Microsoft Store updates it, not GitHub's setup (DECISIONS D84).
+            return json!({ "op": "update", "state": "store" });
+        }
         let outbox = self.outbox.clone();
         let spawned = std::thread::Builder::new()
             .name("update-check".into())
@@ -713,6 +719,8 @@ mod tests {
         assert_eq!(reply(&b, json!({"op": "preview-saver"}))["started"], false);
         assert_eq!(b.handle("{\"op\":\"pick\",\"what\":\"song\"}"), None);
         assert_eq!(reply(&b, json!({"op": "load"}))["version"], env!("CARGO_PKG_VERSION"));
+        // Not from the Microsoft Store: GitHub's releases are offered.
+        assert_eq!(reply(&b, json!({"op": "load"}))["store"], false);
         assert_eq!(
             reply(&b, json!({"op": "load"}))["lang_names"],
             json!({"tr": "Türkçe", "en": "English"})

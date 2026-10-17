@@ -1,7 +1,8 @@
 //! `kabuk --install`, `--uninstall` and `--startup on|off` (PLAN M14, DECISIONS D38):
 //! installing for the user from the folder of the running program, removing it again
 //! (everything Kabuk changed undone first; the settings stay), and starting at sign-in
-//! only when the user says so.
+//! only when the user says so. Installed from the Microsoft Store (DECISIONS D84), Windows
+//! installs and removes the package, and it starts at sign-in through its startup task.
 
 use kabuk_core::cli::Setup;
 use kabuk_core::install::Roots;
@@ -47,10 +48,23 @@ fn tell(setup: &Setup, i18n: &I18n, text: &str, warning: bool) {
     }
 }
 
+/// Installed from the Microsoft Store, Windows installs and removes Kabuk: said, and
+/// `true` (a test's own folder is installed into as always).
+fn store_managed(setup: &Setup, i18n: &I18n) -> bool {
+    if setup.test_root.is_some() || !kabuk_win::package::is_packaged() {
+        return false;
+    }
+    tell(setup, i18n, &i18n.tr("setup-store-managed"), true);
+    true
+}
+
 pub fn install(setup: &Setup) -> i32 {
     kabuk_win::system::attach_parent_console();
     kabuk_win::system::com_init();
     let i18n = i18n(setup);
+    if store_managed(setup, &i18n) {
+        return exit::USAGE;
+    }
     let Some(roots) = roots(setup) else {
         return exit::USAGE;
     };
@@ -95,6 +109,9 @@ pub fn uninstall(setup: &Setup) -> i32 {
     kabuk_win::system::attach_parent_console();
     kabuk_win::system::com_init();
     let i18n = i18n(setup);
+    if store_managed(setup, &i18n) {
+        return exit::USAGE;
+    }
     let Some(roots) = roots(setup) else {
         return exit::USAGE;
     };
@@ -161,8 +178,18 @@ pub fn startup(setup: &Setup) -> i32 {
     let (Some(roots), Some(on)) = (roots(setup), setup.startup) else {
         return exit::USAGE;
     };
-    match install::set_start_at_sign_in(&roots, on) {
-        Ok(()) => {
+    let set = if setup.test_root.is_none() && kabuk_win::package::is_packaged() {
+        // The package's startup task; Windows' settings may keep it off.
+        kabuk_win::package::set_start_at_sign_in(on)
+    } else {
+        install::set_start_at_sign_in(&roots, on).map(|()| on)
+    };
+    match set {
+        Ok(now) if now != on => {
+            eprintln!("{}", i18n.tr("setup-startup-blocked"));
+            exit::STARTUP_FAILED
+        }
+        Ok(_) => {
             println!("{}", i18n.tr(if on { "setup-startup-on" } else { "setup-startup-off" }));
             exit::OK
         }

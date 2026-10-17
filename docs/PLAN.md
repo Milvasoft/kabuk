@@ -403,6 +403,22 @@ The Explorer and icon layers were removed (see above), so their criteria no long
 
 ---
 
+## M17 · Microsoft Store (requested by the user on 2026-10-17) `[~]`
+
+Kabuk as a free MSIX on the Microsoft Store (DECISIONS D84), beside the GitHub setup. Submitted by 2027-01-17 (the name's reservation ends then).
+
+- Packaged or not: `kabuk_win::package::is_packaged`. Packaged, start at sign-in through the package's `StartupTask` (`kabuk --startup on|off` too), `--install`/`--uninstall` refused with a message (tr, en), no GitHub update offer in Settings › About (the Store updates it; tr, en).
+- `tools/msix.ps1`: the release build, the four programs, `packaging/AppxManifest.xml` (identity from Partner Center, version from the workspace, `runFullTrust`, `unvirtualizedResources` with HKCU and AppData write virtualization off, the startup task, the `kabuk.exe` app execution alias, capture and notification capabilities) and the tile and logo images made from the app icon; `makeappx pack` into `dist\kabuk-<version>.msix`.
+- Tried in the test VM: the package installed (test certificate, VM only), Kabuk started from Start and at sign-in, cursors, screen saver, wallpaper and colours reach Windows and come back, `kabuk --restore` through the alias, the package removed cleanly.
+- The Store listing: privacy policy page, description tr/en, screenshots, age rating; submitted only after the user confirms.
+
+**Done criteria**
+- [ ] `tools/check.ps1` clean; the packaged/unpackaged switches unit-tested.
+- [ ] The package installs, runs and uninstalls in the VM, every system value back after `--restore` and after removal.
+- [ ] Partner Center accepts the package (no validation error) and the submission passes certification.
+
+---
+
 ## Realistic expectations
 
 The whole plan will not be finished in one session. A good first night: M0 and M1, maybe the start of M2. The window manager (M3) and the tray (M4) are the two hardest milestones; if rushed, they are where the bugs that will burn the user the most come from. The criteria are not loosened for speed.

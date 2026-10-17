@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Kabuk's MSIX package for the Microsoft Store (DECISIONS D84), filled in and packed by
+  tools/msix.ps1: {VERSION} becomes the workspace's version. The identity is the one
+  Partner Center gave the reserved name. The texts come from resources.pri, made from
+  locales/*.ftl.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:uap11="http://schemas.microsoft.com/appx/manifest/uap/windows10/11"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap3 uap11 desktop desktop6 rescap">
+
+  <Identity
+    Name="Milvasoft.Kabuk"
+    Publisher="CN=934D5176-C6E5-455B-9AAC-3ECA3C954CB4"
+    Version="{VERSION}"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>ms-resource:AppName</DisplayName>
+    <PublisherDisplayName>Milvasoft</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+    <!-- Kabuk's cursors, screen saver, wallpaper and colours must reach Windows and be put
+         back: its HKCU and AppData writes are not kept to the package. -->
+    <desktop6:RegistryWriteVirtualization>disabled</desktop6:RegistryWriteVirtualization>
+    <desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.22000.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-US" />
+    <Resource Language="tr-TR" />
+  </Resources>
+
+  <Applications>
+    <Application Id="Kabuk" Executable="kabuk-watchdog.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="ms-resource:AppName"
+        Description="ms-resource:AppDescription"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
+      </uap:VisualElements>
+      <Extensions>
+        <desktop:Extension Category="windows.startupTask" Executable="kabuk-watchdog.exe" EntryPoint="Windows.FullTrustApplication">
+          <desktop:StartupTask TaskId="KabukStartup" Enabled="true" DisplayName="ms-resource:AppName" />
+        </desktop:Extension>
+        <!-- The kabuk command (its restore and msg) from any terminal. -->
+        <uap3:Extension Category="windows.appExecutionAlias" Executable="kabuk.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap3:AppExecutionAlias>
+            <desktop:ExecutionAlias Alias="kabuk.exe" />
+          </uap3:AppExecutionAlias>
+        </uap3:Extension>
+      </Extensions>
+    </Application>
+    <Application Id="Settings" Executable="kabuk-settings.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="ms-resource:SettingsName"
+        Description="ms-resource:SettingsName"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png" />
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+    <rescap:Capability Name="unvirtualizedResources" />
+    <!-- The genie draws a window's picture with no capture border. -->
+    <uap11:Capability Name="graphicsCaptureProgrammatic" />
+    <uap11:Capability Name="graphicsCaptureWithoutBorder" />
+    <!-- The bar's notification count. -->
+    <uap3:Capability Name="userNotificationListener" />
+  </Capabilities>
+</Package>

@@ -601,6 +601,8 @@
   }
   /** "Check for updates" and what Kabuk's latest GitHub release said. */
   function updateRow() {
+    // Installed from the Microsoft Store, which updates it (DECISIONS D84).
+    if (S && S.store) return `<div class="note" data-update-said="store">${escapeHtml(t("setUpdateStore"))}</div>`;
     const u = ui.update || {};
     const checking = u.state === "checking";
     const check = `<button class="set-btn" type="button" data-update-check ${checking ? "disabled" : ""}>${t("update")}</button>`;

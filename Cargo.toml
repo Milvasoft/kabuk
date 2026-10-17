@@ -24,6 +24,7 @@ kabuk-win = { path = "crates/kabuk-win" }
 
 # The windows crate is pinned exactly: its API changes between minor releases.
 windows = { version = "=0.62.2", features = [
+    "ApplicationModel",
     "Foundation",
     "Foundation_Collections",
     "Graphics",

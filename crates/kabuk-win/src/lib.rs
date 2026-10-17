@@ -21,6 +21,7 @@ pub mod keyhook;
 pub mod media;
 pub mod msgloop;
 pub mod notifications;
+pub mod package;
 pub mod picture;
 pub mod pipe;
 pub mod power;
