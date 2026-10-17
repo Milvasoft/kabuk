@@ -5,7 +5,8 @@
 //! the constellation, a created one) are played behind the icons by `kabuk-saver
 //! --wallpaper` (D36), started when a monitor shows one and stopped when none does or
 //! Kabuk ends; Windows'
-//! own wallpaper under them is their still counterpart, pure black. In game mode the
+//! own wallpaper under them is their still counterpart: a gallery design's still picture
+//! (a live one's first frame; D80), or pure black for a created wallpaper. In game mode the
 //! player stops (when the wallpaper pauses), so the game has the GPU, and starts again
 //! after it. A slideshow is left alone. The user's own still picture drifts by two
 //! pixels, a step every few minutes (D47): its four places are made once per picture and
@@ -13,7 +14,7 @@
 
 use std::path::PathBuf;
 
-use kabuk_core::config::{is_live_design, WallpaperKind};
+use kabuk_core::config::WallpaperKind;
 use kabuk_core::state::Rect;
 use kabuk_core::wallpaper::{BLACK_FILE, DRIFT_PREFIX, GALLERY_PREFIX, GRADIENT_PREFIX};
 
@@ -112,6 +113,12 @@ impl Shared {
             }
             Some(path)
         };
+        let black = || {
+            write(BLACK_FILE, &|| {
+                let px = vec![0u8; (BLACK_SIDE * BLACK_SIDE * 3) as usize];
+                kabuk_core::wallpaper::bmp(BLACK_SIDE, BLACK_SIDE, &px)
+            })
+        };
         match kind {
             WallpaperKind::Windows => None,
             WallpaperKind::Image => {
@@ -188,18 +195,19 @@ impl Shared {
                     kabuk_core::wallpaper::bmp(w, h, &kabuk_core::wallpaper::night_gradient(w, h, accent, desk))
                 })
             }
-            WallpaperKind::Gallery if !is_live_design(&self.config().wallpaper.gallery_for(m.number)) => {
+            // A gallery design, live or still, sets its still picture (a live one's first
+            // frame): so when the player stops in game mode, or the genie takes a picture
+            // of the desktop, its still shows instead of black (asked for by the user: on
+            // another computer the live wallpaper went black in game mode and under the
+            // genie, on the primary monitor; DECISIONS D80). If the still cannot be made
+            // it falls back to black below.
+            WallpaperKind::Gallery => {
                 let key = self.config().wallpaper.gallery_for(m.number);
-                self.gallery_still(&key, m, &folder)
+                self.gallery_still(&key, m, &folder).or_else(black)
             }
-            WallpaperKind::Black
-            | WallpaperKind::Circuit
-            | WallpaperKind::Constellation
-            | WallpaperKind::Generated
-            | WallpaperKind::Gallery => write(BLACK_FILE, &|| {
-                let px = vec![0u8; (BLACK_SIDE * BLACK_SIDE * 3) as usize];
-                kabuk_core::wallpaper::bmp(BLACK_SIDE, BLACK_SIDE, &px)
-            }),
+            WallpaperKind::Black | WallpaperKind::Circuit | WallpaperKind::Constellation | WallpaperKind::Generated => {
+                black()
+            }
         }
     }
 
