@@ -29,12 +29,16 @@ use windows::Win32::Graphics::Dwm::{
     DWM_THUMBNAIL_PROPERTIES, DWM_TNP_OPACITY, DWM_TNP_RECTDESTINATION, DWM_TNP_RECTSOURCE,
     DWM_TNP_SOURCECLIENTAREAONLY, DWM_TNP_VISIBLE,
 };
-use windows::Win32::Graphics::Gdi::{GetStockObject, BLACK_BRUSH, HBRUSH};
+use windows::Win32::Graphics::Gdi::{
+    GetStockObject, RedrawWindow, BLACK_BRUSH, HBRUSH, RDW_ERASE, RDW_INVALIDATE, RDW_UPDATENOW,
+};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 use crate::window::Hwnd;
 
+#[path = "window_motion_backdrop.rs"]
+mod backdrop;
 #[path = "window_motion_gpu.rs"]
 mod gpu;
 
@@ -271,6 +275,10 @@ pub fn between(a: Rect, b: Rect, u: f32) -> Rect {
 }
 
 extern "system" fn overlay_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    // The wallpapers under the desktop's thumbnails (D81).
+    if msg == WM_PAINT && backdrop::paint(hwnd) {
+        return LRESULT(0);
+    }
     // SAFETY: default processing for our own window.
     unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
 }
@@ -600,6 +608,9 @@ fn begin(scene: Scene, before: Option<Playing>, renderer: Option<&gpu::Renderer>
         ),
         None => {
             let o = overlay(scene.area)?;
+            // The wallpapers first, under everything (D81).
+            backdrop::refresh();
+            backdrop::attach(o, scene.area);
             let desktop = desktop_thumbnails(o, scene.area);
             if desktop.is_empty() {
                 tracing::warn!("no picture of the desktop under the window motion; it shows black");
@@ -674,6 +685,8 @@ fn begin(scene: Scene, before: Option<Playing>, renderer: Option<&gpu::Renderer>
             SWP_NOACTIVATE | SWP_SHOWWINDOW,
         );
         if new_overlay {
+            // Its wallpapers painted before it shows.
+            let _ = RedrawWindow(Some(overlay), None, None, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW);
             // Unseen until the compositor has drawn its thumbnails once: shown at once,
             // its black background went first (found on another computer: the screen
             // went black for a frame as a window minimised).
@@ -801,6 +814,7 @@ fn end(p: Playing) {
             unregister(t);
         }
         unregister_genie(p.genie);
+        backdrop::detach(p.overlay);
         let _ = DestroyWindow(p.overlay);
     }
 }
@@ -826,6 +840,8 @@ fn make_renderer(tx: &mpsc::Sender<Order>) {
 }
 
 fn run(rx: &mpsc::Receiver<Order>, ease: fn(f32) -> f32, pictured: &Pictured, tx: &mpsc::Sender<Order>) {
+    // For the wallpapers' files and pictures (D81).
+    crate::system::com_init();
     let mut playing: Vec<Playing> = Vec::new();
     let mut renderer: Option<gpu::Renderer> = None;
     let mut making = false;
@@ -854,6 +870,8 @@ fn run(rx: &mpsc::Receiver<Order>, ease: fn(f32) -> f32, pictured: &Pictured, tx
         }
         Order::Warm => {
             *last_used = Instant::now();
+            // A genie may come: its wallpapers decoded ahead.
+            backdrop::refresh();
             if renderer.is_none() && !*making {
                 *making = true;
                 make_renderer(tx);
@@ -877,6 +895,7 @@ fn run(rx: &mpsc::Receiver<Order>, ease: fn(f32) -> f32, pictured: &Pictured, tx
                         if last_used.elapsed() >= RENDERER_KEPT {
                             renderer = None;
                             tracing::info!("genie renderer let go");
+                            backdrop::release();
                         }
                         None
                     }
