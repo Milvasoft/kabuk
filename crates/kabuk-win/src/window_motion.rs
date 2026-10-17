@@ -378,7 +378,51 @@ fn desktop_thumbnail(overlay: HWND, source: Hwnd, area: Rect) -> Option<isize> {
             ..Default::default()
         };
         let _ = DwmUpdateThumbnailProperties(t, &props);
+        note_desktop_layer(source, origin, t, props.rcSource);
         Some(t)
+    }
+}
+
+/// What the desktop's pictures were last taken from, for the log: found on another
+/// computer, the desktop showed black under the genie on its primary monitor only, and
+/// nothing said what the pictures covered.
+static DESKTOP_SEEN: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+thread_local! {
+    static DESKTOP_NOTES: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Notes desktop window `source` (at `origin`), the size its thumbnail `t` says it has and
+/// the part asked of it; [`log_desktop_layers`] writes them once they change.
+fn note_desktop_layer(source: Hwnd, origin: Rect, t: isize, asked: RECT) {
+    // SAFETY: our registered thumbnail.
+    let size = unsafe { DwmQueryThumbnailSourceSize(t) }.ok();
+    let note = format!(
+        "{} at {:?}, picture {:?}, asked ({}, {}, {}, {})",
+        source.class_name(),
+        (origin.left, origin.top, origin.right, origin.bottom),
+        size.map(|s| (s.cx, s.cy)),
+        asked.left,
+        asked.top,
+        asked.right,
+        asked.bottom
+    );
+    DESKTOP_NOTES.with(|n| n.borrow_mut().push(note));
+}
+
+/// Writes the desktop layers noted for a scene over `area`, when they differ from the
+/// last ones written.
+fn log_desktop_layers(area: Rect) {
+    let notes = DESKTOP_NOTES.with(|n| std::mem::take(&mut *n.borrow_mut()));
+    let line = format!(
+        "{:?}: {}",
+        (area.left, area.top, area.right, area.bottom),
+        notes.join("; ")
+    );
+    if let Ok(mut seen) = DESKTOP_SEEN.lock() {
+        if *seen != line {
+            tracing::info!(layers = %line, "desktop pictured under the window motion");
+            *seen = line;
+        }
     }
 }
 
@@ -560,7 +604,7 @@ fn begin(scene: Scene, before: Option<Playing>, renderer: Option<&gpu::Renderer>
             if desktop.is_empty() {
                 tracing::warn!("no picture of the desktop under the window motion; it shows black");
             } else {
-                tracing::debug!(layers = desktop.len(), "desktop pictured under the window motion");
+                log_desktop_layers(scene.area);
             }
             (o, desktop, HashMap::new(), None, None)
         }
