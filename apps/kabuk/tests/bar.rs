@@ -1411,6 +1411,34 @@ fn minimising_plays_the_genie_into_the_apps_icon() {
         let needle = format!("hwnd={} minimize={minimize}", w.hwnd.0);
         sandbox.log_lines(&needle)
     };
+    // Found by the user: the first genie had the strips' stairs, the later ones were
+    // smooth; the renderer was made only by a genie. While the genie is on it is made
+    // ahead and kept (DECISIONS D83).
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("genie renderer made") == 1).is_some(),
+        "the genie's renderer not made ahead"
+    );
+    // How each genie played: drawn by the GPU with the window's picture for so many
+    // frames, or `None` with the strips.
+    let genie_scenes = || -> Vec<Option<u32>> {
+        std::fs::read_dir(sandbox.state_dir().join("logs"))
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with("kabuk."))
+            .filter_map(|e| std::fs::read_to_string(e.path()).ok())
+            .flat_map(|text| {
+                text.lines()
+                    .filter(|l| l.contains("window motion played") && l.contains("genie=true"))
+                    .map(|l| {
+                        l.split("gpu=")
+                            .nth(1)
+                            .and_then(|v| v.split_whitespace().next())
+                            .and_then(|v| v.parse::<u32>().ok())
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    };
     let frames = kabuk_win::screen::Frames::now();
     let was = w.hwnd.window_rect().expect("its place");
     w.hwnd.minimize_async();
@@ -1556,29 +1584,17 @@ fn minimising_plays_the_genie_into_the_apps_icon() {
     assert_eq!(leads(), 2);
     assert!(wait_until(SETTLE, || overlays() == 0).is_some(), "the overlay stayed");
 
-    // Found by the user: the strips' 22 px stairs on the funnel's edges. Once its renderer
-    // is ready (made after the first genie), a genie is drawn by the GPU with the window's
-    // picture, smooth.
-    let smooth = sandbox.log_lines("genie renderer made") == 1
-        && std::fs::read_dir(sandbox.state_dir().join("logs"))
-            .unwrap()
-            .flatten()
-            .filter(|e| e.file_name().to_string_lossy().starts_with("kabuk."))
-            .filter_map(|e| std::fs::read_to_string(e.path()).ok())
-            .any(|text| {
-                text.lines().filter(|l| l.contains("window motion played")).any(|l| {
-                    l.split("gpu=")
-                        .nth(1)
-                        .and_then(|v| v.split_whitespace().next())
-                        .and_then(|v| v.parse::<u32>().ok())
-                        .is_some_and(|n| n > 0)
-                })
-            });
+    // Found by the user: the strips' 22 px stairs on the funnel's edges. Every genie from
+    // the bar is drawn by the GPU with the window's picture, smooth: the first into the
+    // icon too, and the ones out of it with the picture kept when the window went in (D82,
+    // D83). The first of all is Windows' own minimise: the window is gone before Kabuk
+    // hears of it, no picture can be taken of it, and it plays with the strips.
+    let scenes = genie_scenes();
     assert!(
-        smooth,
-        "no genie drawn smooth: {:?}",
-        sandbox.last_log_line(&["window motion played"])
+        scenes.len() == 5 && scenes[1..].iter().all(|g| g.is_some_and(|n| n > 0)),
+        "a genie from the bar not drawn smooth: {scenes:?}"
     );
+    assert_eq!(sandbox.log_lines("genie renderer made"), 1);
     // Windows' own effect: the record goes, the transitions come back.
     std::fs::write(
         sandbox.config_file(),
@@ -1586,6 +1602,11 @@ fn minimising_plays_the_genie_into_the_apps_icon() {
     )
     .unwrap();
     assert!(wait_until(SETTLE, || !recorded()).is_some(), "still recorded");
+    // No genie: its renderer goes.
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("genie renderer let go") == 1).is_some(),
+        "the genie's renderer kept with Windows' own effect"
+    );
     let played = genies(true);
     w.hwnd.minimize_async();
     assert!(wait_until(SETTLE, || w.hwnd.is_minimized()).is_some());
@@ -1600,6 +1621,10 @@ fn minimising_plays_the_genie_into_the_apps_icon() {
     )
     .unwrap();
     assert!(wait_until(SETTLE, recorded).is_some(), "not recorded again");
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("genie renderer made") == 2).is_some(),
+        "the genie's renderer not made again"
+    );
     let (code, out) = sandbox.restore();
     assert_eq!(code, 0, "{out}");
     assert!(

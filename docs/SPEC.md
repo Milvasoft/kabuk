@@ -250,7 +250,7 @@ Each is measurable; each is verified in every release with the tests in PLAN.
 7. **Shortcuts** do not conflict with Windows' reserved shortcuts or with the Turkish keyboard; all are changeable.
 8. **System tray.** All tray icons are visible, menus open next to the icon.
 9. **Administrator windows** do not silently break; they are marked floating. If desired, Kabuk can be started as administrator.
-10. **Resource usage.** Average CPU below 0.1% over ten minutes idle. RAM is measured in every release and shown in About; target below 40 MB for bar+WM+launcher (excluding the settings application; it runs only while open).
+10. **Resource usage.** Average CPU below 0.1% over ten minutes idle. RAM is measured in every release and shown in About; target below 40 MB for bar+WM+launcher (excluding the settings application; it runs only while open), plus the smooth genie's GPU renderer (~49 MB), kept while the genie is on (chosen by the user on 2026-10-17; DECISIONS D83).
 11. **Response time.** Below 16 ms from shortcut to the window layout being applied (without animation); launcher below 100 ms from shortcut to first frame.
 12. **Live settings.** Every change applies without a restart; also when `kabuk.toml` is edited by hand.
 13. **Floating windows** (§2.2).

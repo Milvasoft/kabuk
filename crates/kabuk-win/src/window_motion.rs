@@ -45,9 +45,10 @@ mod gpu;
 /// How many rows the genie drawn by the GPU is bent in: a straight edge every ~11 px of
 /// a full-height window, smoothed by multisampling.
 const GENIE_ROWS: usize = 128;
-/// How long the GPU renderer is kept after the last genie or warm-up: a hardware device
-/// costs ~49 MB (measured), more than Kabuk's idle budget, and takes ~180 ms to make, so
-/// it is made ahead (the mouse on an app's icon) and let go when no genie came for a while.
+/// How long the GPU renderer is kept after the last genie or warm-up while it is not kept
+/// for good ([`Mover::keep_renderer`]), and the wallpapers' pictures always: a hardware
+/// device costs ~49 MB (measured) and takes ~180 ms to make. While the genie is on it is
+/// kept (DECISIONS D83: made on demand, the first genie fell back to the strips).
 const RENDERER_KEPT: Duration = Duration::from_secs(60);
 /// Frames drawn with the window's picture before the window counts as pictured (and may
 /// be minimised): the first is only on screen at the compositor's next frame, so with
@@ -60,6 +61,8 @@ enum Order {
     Play(Scene),
     /// A genie may come soon: make the renderer if there is none.
     Warm,
+    /// Keep the renderer for good (made now), or let it go.
+    Keep(bool),
     /// The renderer, made on a thread of its own.
     Made(SendRenderer),
     /// The mover is dropped (a renderer being made still holds a sender, so the channel
@@ -217,6 +220,15 @@ impl Mover {
     pub fn warm(&self) {
         if let Some(tx) = &self.tx {
             let _ = tx.send(Order::Warm);
+        }
+    }
+
+    /// While `on` (the genie is played), the smooth genie's renderer is made now and kept,
+    /// so no genie falls back to the strips and a minimised window's picture stays for
+    /// its way back (D83); off, it is let go with the pictures.
+    pub fn keep_renderer(&self, on: bool) {
+        if let Some(tx) = &self.tx {
+            let _ = tx.send(Order::Keep(on));
         }
     }
 }
@@ -935,6 +947,7 @@ fn run(rx: &mpsc::Receiver<Order>, ease: fn(f32) -> f32, pictured: &Pictured, tx
     let mut renderer: Option<gpu::Renderer> = None;
     let mut making = false;
     let mut last_used = Instant::now();
+    let keep = std::cell::Cell::new(false);
     // Takes one order: a scene starts (or goes on from the one over the same area);
     // false to stop.
     let take = |o: Order,
@@ -968,26 +981,42 @@ fn run(rx: &mpsc::Receiver<Order>, ease: fn(f32) -> f32, pictured: &Pictured, tx
             }
             true
         }
+        Order::Keep(on) => {
+            keep.set(on);
+            if on && renderer.is_none() && !*making {
+                *making = true;
+                make_renderer(tx);
+            } else if !on && renderer.take().is_some() {
+                PICTURES.with(|p| p.borrow_mut().clear());
+                tracing::info!("genie renderer let go");
+            }
+            true
+        }
         Order::Made(SendRenderer(r)) => {
             *making = false;
             // Pictures kept from another renderer are not this one's.
             PICTURES.with(|p| p.borrow_mut().clear());
             *renderer = Some(r);
+            *last_used = Instant::now();
             true
         }
         Order::Stop => false,
     };
     loop {
-        // Idle: wait for the next order without waking; the renderer goes after a while.
+        // Idle: wait for the next order without waking; the wallpapers' pictures go after
+        // a while, and the renderer with them unless it is kept.
         if playing.is_empty() {
-            let order = if renderer.is_some() {
+            let waiting = renderer.is_some() && (!keep.get() || last_used.elapsed() < RENDERER_KEPT);
+            let order = if waiting {
                 match rx.recv_timeout(RENDERER_KEPT.saturating_sub(last_used.elapsed())) {
                     Ok(o) => Some(o),
                     Err(mpsc::RecvTimeoutError::Timeout) => {
                         if last_used.elapsed() >= RENDERER_KEPT {
-                            renderer = None;
-                            PICTURES.with(|p| p.borrow_mut().clear());
-                            tracing::info!("genie renderer let go");
+                            if !keep.get() {
+                                renderer = None;
+                                PICTURES.with(|p| p.borrow_mut().clear());
+                                tracing::info!("genie renderer let go");
+                            }
                             backdrop::release();
                         }
                         None

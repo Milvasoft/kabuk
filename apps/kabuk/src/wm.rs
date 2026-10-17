@@ -455,6 +455,8 @@ struct Wm {
     /// A genie Kabuk started before minimising or restoring the window itself, and when;
     /// the event that follows goes on with it instead of starting another.
     own_genie: Option<(kabuk_win::window_motion::Genie, std::time::Instant)>,
+    /// Whether the mover was told to keep the smooth genie's renderer (D83).
+    renderer_kept: bool,
     /// The latest notices and the number of the last one.
     notices: VecDeque<(u64, crate::notify::Notice)>,
     notice_seq: u64,
@@ -506,6 +508,7 @@ fn run(
         icons: std::collections::HashMap::new(),
         pending_genie: None,
         own_genie: None,
+        renderer_kept: false,
         notices: VecDeque::new(),
         notice_seq: 0,
         game: std::collections::HashSet::new(),
@@ -1799,6 +1802,7 @@ impl Wm {
 
     /// Turns window `id`'s own transitions off for the genie (recorded first), or back on.
     fn genie_window(&mut self, id: u64) {
+        self.keep_genie_renderer();
         let h = Hwnd(id);
         if self.genie_on() && self.desk.contains(id) {
             if self.genie.contains(&id) {
@@ -1843,6 +1847,19 @@ impl Wm {
             .collect();
         for id in ids {
             self.genie_window(id);
+        }
+        self.keep_genie_renderer();
+    }
+
+    /// The smooth genie's renderer kept while the genie is played, let go otherwise (in
+    /// game mode too, for the game's sake; DECISIONS D83).
+    fn keep_genie_renderer(&mut self) {
+        let on = self.genie_on();
+        if self.renderer_kept != on {
+            if let Some(m) = &self.mover {
+                m.keep_renderer(on);
+            }
+            self.renderer_kept = on;
         }
     }
 
