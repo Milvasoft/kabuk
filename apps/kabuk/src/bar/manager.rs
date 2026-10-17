@@ -200,6 +200,8 @@ const AUTOHIDE_PEEK: f32 = 2.0;
 const MSG_VOLUME_KEY: u32 = msgloop::msg::APP + 42;
 /// A frame of the screen while an auto-hiding bar slides ([`kabuk_win::ticker`]).
 const MSG_SLIDE_FRAME: u32 = msgloop::msg::APP + 53;
+/// A frame of the screen while the dock's tiles grow or settle ([`kabuk_win::ticker`]).
+const MSG_DOCK_FRAME: u32 = msgloop::msg::APP + 54;
 const AUTOHIDE_DELAY: Duration = Duration::from_millis(600);
 const BAR_SLIDE_STEP: Duration = Duration::from_millis(16);
 /// How long the mouse rests at an auto-hiding bar's edge before it comes in (found by
@@ -460,6 +462,12 @@ struct Dock {
     origin: Point,
     /// With `bar.autohide` the dock hides too (D70): how much of it is on screen.
     peek: Option<Peek>,
+    /// Where the mouse is along the dock, in DIPs from its middle (the last place while
+    /// it leaves), and how far the tiles have grown under it (D79).
+    pointer: f32,
+    grow: Peek,
+    /// The growth and mouse place it was last drawn with, and whether in its grown room.
+    drawn_grow: (f32, f32, bool),
 }
 
 /// The tooltip window of a tray icon, kept alive while it shows (the surface goes first).
@@ -594,6 +602,8 @@ struct Shared {
     /// Steps the auto-hiding bars' slides at every frame the screen shows while they
     /// slide (a timer stepped them in uneven jumps; found by the user; DECISIONS D75).
     slide_ticker: Option<kabuk_win::ticker::FrameTicker>,
+    /// Steps the dock's tiles growing or settling under the mouse (D79).
+    dock_ticker: Option<kabuk_win::ticker::FrameTicker>,
     /// A display change came during a full-screen program: the bars are made again once
     /// it is gone (D72).
     rebuild_after_game: bool,
@@ -840,6 +850,7 @@ impl BarManager {
                 tooltip: None,
                 reveal: None,
                 slide_ticker: None,
+                dock_ticker: None,
                 rebuild_after_game: false,
                 tray_menu: None,
                 tray_host: None,
@@ -1373,6 +1384,14 @@ impl Shared {
                 self.step_bar_slides();
                 Some(0)
             }
+            MSG_DOCK_FRAME => {
+                if let Some(t) = &self.dock_ticker {
+                    t.taken();
+                }
+                self.render_all(false);
+                self.tick_dock();
+                Some(0)
+            }
             MSG_START_SAVER => {
                 self.start_saver_soon();
                 Some(0)
@@ -1887,6 +1906,9 @@ impl Shared {
             layout: Layout::default(),
             origin: Point::default(),
             peek,
+            pointer: 0.0,
+            grow: Peek::hidden(),
+            drawn_grow: (0.0, 0.0, false),
         })
     }
 
@@ -2667,11 +2689,19 @@ impl Shared {
             }
             msg::MOUSEMOVE => {
                 kabuk_win::msgloop::track_mouse_leave(d.window.hwnd());
+                let (x, y) = msg::point(m.lparam);
+                // Along the dock, from the middle of what is drawn (the dock's own).
+                let pointer = match d.edge {
+                    Edge::Left | Edge::Right => d.scale.dips(y) - (d.origin.y + d.layout.size.h / 2.0),
+                    Edge::Top | Edge::Bottom => d.scale.dips(x) - (d.origin.x + d.layout.size.w / 2.0),
+                };
                 self.edge_reached(Peeker::Dock);
+                self.dock_hover(Some(pointer));
                 None
             }
             msg::MOUSELEAVE => {
                 self.edge_left(Peeker::Dock);
+                self.dock_hover(None);
                 None
             }
             msg::LBUTTONUP => {
@@ -2744,20 +2774,81 @@ impl Shared {
         d.window.set_rect(rect);
     }
 
+    /// The mouse moved on the dock (`pointer`: along it, from its middle, DIPs) or left it
+    /// (`None`): the tiles grow under it as macOS's dock's do, and settle once it leaves
+    /// (asked for by the user; DECISIONS D79). Not while the dock waits off its edge.
+    fn dock_hover(&mut self, pointer: Option<f32>) {
+        let full = self.motion_level() == kabuk_ui::motion::Level::Full;
+        let Some(d) = self.dock.as_mut() else { return };
+        let waiting = d.peek.is_some_and(|p| p.to == 0.0);
+        let to = if pointer.is_some() && full && !waiting {
+            1.0
+        } else {
+            0.0
+        };
+        if let Some(p) = pointer {
+            d.pointer = p;
+        }
+        if d.grow.to != to {
+            d.grow = Peek {
+                from: d.grow.now(),
+                to,
+                since: std::time::Instant::now(),
+            };
+        }
+        self.render_all(false);
+        self.tick_dock();
+    }
+
+    /// Keeps the frames coming while the dock's tiles grow or settle; once they are done
+    /// the dock is drawn at rest (at its own size when they settled) and the frames stop.
+    fn tick_dock(&mut self) {
+        let Some(d) = self.dock.as_ref() else {
+            self.dock_ticker = None;
+            return;
+        };
+        if d.grow.done() {
+            if self.dock_ticker.take().is_some() {
+                self.render_all(false);
+            }
+            return;
+        }
+        if self.dock_ticker.is_none() {
+            self.dock_ticker = self.control.as_ref().and_then(|c| {
+                kabuk_win::ticker::FrameTicker::start(c.hwnd(), MSG_DOCK_FRAME)
+                    .map_err(|e| tracing::warn!(error = %e, "the dock's tiles do not grow"))
+                    .ok()
+            });
+        }
+    }
+
     /// Draws the dock when it is new, the look changed (`force`), the OLED shift moved or
     /// its apps changed; it grows and shrinks with them, centred on its edge.
     fn render_dock(&mut self, force: bool, shift: (i32, i32)) -> Result<bool, RenderError> {
         let apps = self.dock_apps();
+        let full = self.motion_level() == kabuk_ui::motion::Level::Full;
         let Some(d) = self.dock.as_mut() else { return Ok(false) };
         let shift = geometry::shift_toward_edge(d.edge, shift);
-        if !force && d.drawn == Some(shift) && d.apps == apps {
+        // The tiles grow under the mouse with full motion only (D79); while they grow or
+        // settle the dock is drawn in its grown room, else at its own size.
+        let amount = if full { d.grow.now() } else { 0.0 };
+        let grown = (amount, d.pointer, amount > 0.0 || (full && d.grow.to > 0.0));
+        if !force && d.drawn == Some(shift) && d.apps == apps && d.drawn_grow == grown {
             return Ok(false);
         }
-        let layout = kabuk_ui::node::layout(
-            &dock::view(d.edge, &dock::STYLE, &apps),
-            Point::default(),
-            &self.gpu.text,
-        );
+        let node = if grown.2 {
+            let k = dock::magnifications(
+                &dock::centers(&dock::STYLE, apps.len()),
+                d.pointer,
+                &dock::STYLE,
+                amount,
+            );
+            let room = dock::grown_room(d.edge, &dock::STYLE, apps.len());
+            dock::view_grown(d.edge, &dock::STYLE, &apps, &k, Some(room))
+        } else {
+            dock::view(d.edge, &dock::STYLE, &apps)
+        };
+        let layout = kabuk_ui::node::layout(&node, Point::default(), &self.gpu.text);
         let room = kabuk_core::oled::MAX_SHIFT;
         let size = (
             (layout.size.w * d.scale.0).ceil() as i32 + 2 * room,
@@ -2794,8 +2885,9 @@ impl Shared {
             (origin.x, origin.y),
             None,
         )?;
-        tracing::debug!(apps = apps.len(), rect = ?d.rect, "dock drawn");
+        tracing::debug!(apps = apps.len(), rect = ?d.rect, grown = ?grown, "dock drawn");
         d.drawn = Some(shift);
+        d.drawn_grow = grown;
         d.apps = apps;
         d.layout = layout;
         d.origin = origin;
