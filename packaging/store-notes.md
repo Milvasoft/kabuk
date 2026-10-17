@@ -6,7 +6,9 @@ What Partner Center asks for that is not the listing itself (DECISIONS D84). The
 
 **runFullTrust.** Kabuk is a desktop shell written in Rust with the Win32 API: a bar on every monitor, a tiling window manager, a launcher and a settings app. It must run as a full-trust desktop program to arrange other programs' windows, show its own bar in place of the Windows taskbar and host the system tray.
 
-**unvirtualizedResources** (HKCU and AppData write virtualization disabled). Kabuk's looks set Windows' own settings while it runs: the mouse cursors (`HKCU\Control Panel\Cursors`), the screen saver (`HKCU\Control Panel\Desktop`), the wallpaper, and the light/dark mode and accent colour (`HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize`, `…\Explorer\Accent`, `HKCU\Software\Microsoft\Windows\DWM`). Windows reads these from the real registry and the files they point to (the cursor files, the screen saver and the wallpaper pictures Kabuk draws under `%LOCALAPPDATA%\kabuk` and `%TEMP%`) from the real AppData; virtualized, none of them would take effect. Every value is recorded before it is changed and written back when Kabuk exits, when its watchdog sees it end, and with `kabuk --restore` (also Ctrl+Alt+Shift+End). Each of these changes can be turned off in Kabuk's settings.
+**unvirtualizedResources** (HKCU and AppData write virtualization disabled; Partner Center takes at most 500 characters):
+
+> Kabuk's looks set Windows' own cursors, screen saver, wallpaper, light/dark mode and accent colour (HKCU Control Panel\Cursors and Desktop, Themes\Personalize, Explorer\Accent, DWM). Windows reads them from the real HKCU, and the files they point to (cursors, screen saver, wallpapers Kabuk draws) from the real AppData; virtualized, they do nothing. Every value is recorded first and written back on exit, by the watchdog and by kabuk --restore (Ctrl+Alt+Shift+End).
 
 ## Notes for certification
 
