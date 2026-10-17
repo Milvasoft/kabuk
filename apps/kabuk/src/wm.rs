@@ -97,9 +97,14 @@ mod timer {
 const GENIE_LEAD: Duration = Duration::from_millis(24);
 /// How long a window being minimised from the bar may wait for its genie's picture (the
 /// GPU draws the genie smooth from it; taken after the window is gone, it cannot be),
-/// and how often it is looked for meanwhile.
-const GENIE_PICTURE_WAIT: Duration = Duration::from_millis(120);
+/// and how often it is looked for meanwhile. The genie plays over it meanwhile, as the
+/// GPU is set up only once the overlay is on screen (D76).
+const GENIE_PICTURE_WAIT: Duration = Duration::from_millis(300);
 const GENIE_PICTURE_STEP: Duration = Duration::from_millis(4);
+/// How long a window coming back from the bar waits for its genie to be on screen over
+/// its place (looked for as often as the picture): it came back bare once, while the
+/// genie was still being set up (found by the user). Past it, it comes back anyway.
+const GENIE_COVER_WAIT: Duration = Duration::from_millis(500);
 /// How long after Kabuk minimised or restored a window its event still belongs to the
 /// genie Kabuk started.
 const GENIE_OWN: Duration = Duration::from_secs(1);
@@ -1280,6 +1285,16 @@ impl Wm {
             return;
         };
         let h = g.window;
+        // Only under its genie: the window goes or comes back once the genie is on screen
+        // over its place.
+        let covered = self.mover.as_ref().is_none_or(|m| m.covering(h));
+        if !covered && since.elapsed() < GENIE_COVER_WAIT {
+            self.schedule(timer::GENIE, GENIE_PICTURE_STEP);
+            return;
+        }
+        if !covered {
+            tracing::warn!(hwnd = h.0, "genie not on screen in time; the window goes on anyway");
+        }
         if g.minimize {
             let pictured = self.mover.as_ref().is_none_or(|m| m.pictured(h));
             if !pictured && since.elapsed() < GENIE_PICTURE_WAIT {

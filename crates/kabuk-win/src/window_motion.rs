@@ -125,8 +125,15 @@ pub fn genie_strips(height: i32) -> usize {
         .clamp(GENIE_STRIPS.0, GENIE_STRIPS.1)
 }
 
-/// The windows whose genie the GPU has a picture of now.
-type Pictured = std::sync::Arc<std::sync::Mutex<std::collections::HashSet<isize>>>;
+/// What the window moves' thread tells the window manager about the genies playing:
+/// the windows whose genie the GPU has a picture of, and those whose genie is on screen
+/// over their place (the window manager brings a window back only under it).
+#[derive(Default)]
+struct Seen {
+    pictured: std::collections::HashSet<isize>,
+    covered: std::collections::HashSet<isize>,
+}
+type Pictured = std::sync::Arc<std::sync::Mutex<Seen>>;
 
 /// Plays scenes on its own thread. Stops when dropped.
 pub struct Mover {
@@ -156,7 +163,19 @@ impl Mover {
     /// picture): the window manager minimises a window once it is, so the picture is
     /// taken before the window is gone.
     pub fn pictured(&self, window: Hwnd) -> bool {
-        self.pictured.lock().is_ok_and(|set| set.contains(&(window.0 as isize)))
+        self.pictured
+            .lock()
+            .is_ok_and(|seen| seen.pictured.contains(&(window.0 as isize)))
+    }
+
+    /// Whether the genie of `window` is on screen, over the window's place: the window
+    /// manager brings a minimised window back once it is, so the window never shows
+    /// before its genie (found by the user: it came back black and unpainted for a
+    /// quarter of a second while the genie was being set up).
+    pub fn covering(&self, window: Hwnd) -> bool {
+        self.pictured
+            .lock()
+            .is_ok_and(|seen| seen.covered.contains(&(window.0 as isize)))
     }
 
     pub fn play(&self, scene: Scene) {
@@ -256,6 +275,9 @@ struct Playing {
     moves: Duration,
     length: Duration,
     shown: HashMap<isize, Rect>,
+    /// The genie this scene plays, as it began (the next scene of the same window goes on
+    /// from where it is on screen).
+    playing_genie: Option<Genie>,
     /// The genie drawn with strips: its strips' thumbnails and its picture's size.
     genie: Option<(Genie, Vec<isize>, (i32, i32))>,
     /// The genie drawn by the GPU (smooth edges); the strips are the fallback, shown
@@ -467,8 +489,19 @@ fn gpu_genie(
     }
 }
 
-fn begin(scene: Scene, before: Option<Playing>, renderer: Option<&gpu::Renderer>) -> Option<Playing> {
+fn begin(scene: Scene, before: Option<Playing>, renderer: Option<&gpu::Renderer>, seen: &Pictured) -> Option<Playing> {
     let asked = Instant::now();
+    let mut scene = scene;
+    // The same window's genie goes on from where it is on screen, whatever the window
+    // manager reckons: the scene before may have come up late.
+    if let (Some(g), Some((old, since))) = (
+        scene.genie.as_mut(),
+        before.as_ref().and_then(|p| p.playing_genie.map(|g| (g, p.started))),
+    ) {
+        if old.window == g.window && old.minimize == g.minimize {
+            g.elapsed = old.elapsed + since.elapsed().as_secs_f32();
+        }
+    }
     // A move over the same area while one plays starts from where its thumbnails are;
     // its own go only once the new ones are up (below).
     let (overlay, desktop, shown, kept, old) = match before {
@@ -492,11 +525,6 @@ fn begin(scene: Scene, before: Option<Playing>, renderer: Option<&gpu::Renderer>
     };
     let new_overlay = old.is_none();
     let area = scene.area;
-    // The strips are drawn too, until the GPU has the window's picture (a few
-    // milliseconds), so the window never shows as a hole meanwhile.
-    let gpu = scene
-        .genie
-        .and_then(|g| gpu_genie(renderer, &g, area, kept).map(|gg| (g, gg)));
     // SAFETY: thumbnails of other windows onto our overlay, unregistered when the scene
     // ends; the overlay goes above the ordinary windows without taking the focus.
     unsafe {
@@ -560,6 +588,16 @@ fn begin(scene: Scene, before: Option<Playing>, renderer: Option<&gpu::Renderer>
             let _ = DwmFlush();
             let _ = SetLayeredWindowAttributes(overlay, COLORREF(0), u8::MAX, LWA_ALPHA);
         }
+        if let (Some(g), Ok(mut seen)) = (&scene.genie, seen.lock()) {
+            seen.covered.insert(g.window.0 as isize);
+        }
+        // The GPU's genie only now: setting it up takes a while (its capture), and the
+        // overlay with the strips is on screen meanwhile (found by the user: nothing
+        // showed for a quarter of a second, and the window came back bare). The strips
+        // are drawn until the GPU has the window's picture.
+        let gpu = scene
+            .genie
+            .and_then(|g| gpu_genie(renderer, &g, area, kept).map(|gg| (g, gg)));
         Some(Playing {
             overlay,
             desktop,
@@ -580,6 +618,7 @@ fn begin(scene: Scene, before: Option<Playing>, renderer: Option<&gpu::Renderer>
                     .max(0.0),
             ),
             shown,
+            playing_genie: scene.genie,
             genie,
             gpu,
             strips_hidden: false,
@@ -716,7 +755,7 @@ fn run(rx: &mpsc::Receiver<Order>, ease: fn(f32) -> f32, pictured: &Pictured, tx
             }
             let same = playing.iter().position(|p| p.area == s.area);
             let before = same.map(|i| playing.remove(i));
-            if let Some(p) = begin(s, before, renderer.as_ref()) {
+            if let Some(p) = begin(s, before, renderer.as_ref(), pictured) {
                 playing.push(p);
             }
             true
@@ -791,14 +830,21 @@ fn run(rx: &mpsc::Receiver<Order>, ease: fn(f32) -> f32, pictured: &Pictured, tx
                 i += 1;
             }
         }
-        if let Ok(mut set) = pictured.lock() {
-            set.clear();
-            set.extend(
+        if let Ok(mut seen) = pictured.lock() {
+            seen.pictured.clear();
+            seen.pictured.extend(
                 playing
                     .iter()
                     .filter_map(|p| p.gpu.as_ref())
                     .filter(|(_, gg)| gg.pictured() >= PICTURED_FRAMES)
                     .map(|(_, gg)| gg.source().0 as isize),
+            );
+            seen.covered.clear();
+            seen.covered.extend(
+                playing
+                    .iter()
+                    .filter_map(|p| p.playing_genie)
+                    .map(|g| g.window.0 as isize),
             );
         }
         pump();
@@ -868,6 +914,7 @@ mod tests {
             },
             None,
             None,
+            &Pictured::default(),
         )
         .expect("overlay");
         assert_eq!(
@@ -902,17 +949,17 @@ mod tests {
             genie: None,
         };
         // A window to show: another scene's overlay, out of sight as well.
-        let source = begin(scene(Vec::new()), None, None).expect("an overlay");
+        let source = begin(scene(Vec::new()), None, None, &Pictured::default()).expect("an overlay");
         let layer = || Layer {
             window: Hwnd::from_raw(source.overlay),
             from: area,
             to: area,
         };
-        let first = begin(scene(vec![layer()]), None, None).expect("the first scene");
+        let first = begin(scene(vec![layer()]), None, None, &Pictured::default()).expect("the first scene");
         let old: Vec<isize> = first.thumbs.iter().map(|(t, _)| *t).collect();
         assert_eq!(old.len(), 1);
         HANDOVER.with(|l| l.borrow_mut().clear());
-        let next = begin(scene(vec![layer()]), Some(first), None).expect("the scene after");
+        let next = begin(scene(vec![layer()]), Some(first), None, &Pictured::default()).expect("the scene after");
         let log = HANDOVER.with(|l| l.borrow().clone());
         let last_new = log.iter().rposition(|(up, _)| *up).expect("new thumbnails");
         let first_gone = log.iter().position(|(up, _)| !*up).expect("the old ones let go");

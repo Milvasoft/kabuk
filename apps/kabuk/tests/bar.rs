@@ -1353,6 +1353,11 @@ fn minimising_plays_the_genie_into_the_apps_icon() {
             }
             Some(false) => seen += 1,
             None if seen > 0 => break,
+            // Found by the user: the window came back, black and unpainted, before its
+            // genie was on screen (the scene came up only once the GPU was ready).
+            None if !w.hwnd.is_minimized() => {
+                panic!("the window came back before its genie was on screen")
+            }
             None => {}
         }
     }
