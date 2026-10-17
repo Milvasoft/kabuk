@@ -468,6 +468,8 @@ struct Dock {
     grow: Peek,
     /// The growth and mouse place it was last drawn with, and whether in its grown room.
     drawn_grow: (f32, f32, bool),
+    /// Hidden while a full-screen program covers its monitor, as the bar is.
+    aside: bool,
 }
 
 /// The tooltip window of a tray icon, kept alive while it shows (the surface goes first).
@@ -1254,6 +1256,11 @@ impl Shared {
                         }
                         self.schedule_clock();
                     }
+                    // Not read during a game: reading the GPU's figures from its driver can
+                    // make a game stutter on some machines (found on another computer:
+                    // a game stuttered with Kabuk running), and the game's bar is away.
+                    timer::STATS if !self.game_devices.is_empty() => {}
+                    timer::GPU if !self.game_devices.is_empty() => {}
                     timer::STATS => {
                         self.live.stats = self.sample();
                         self.drop_dead_tray_icons();
@@ -1616,6 +1623,19 @@ impl Shared {
                 tracing::info!(device = %bar.monitor.device, "bar back after a full-screen program");
             }
         }
+        // Rıhtım's dock steps aside with its monitor's bar (found by the user with a
+        // screenshot: it stayed over a game).
+        let dock_aside = g.hide_bar && self.dock.as_ref().is_some_and(|d| devices.contains(&d.monitor.device));
+        if let Some(d) = self.dock.as_mut().filter(|d| d.aside != dock_aside) {
+            d.aside = dock_aside;
+            if dock_aside {
+                d.window.hide();
+                tracing::info!("dock steps aside for a full-screen program");
+            } else {
+                d.window.show();
+                tracing::info!("dock back after a full-screen program");
+            }
+        }
         if devices != self.game_devices {
             let (was, now) = (!self.game_devices.is_empty(), !devices.is_empty());
             tracing::info!(?devices, "game mode");
@@ -1909,6 +1929,7 @@ impl Shared {
             pointer: 0.0,
             grow: Peek::hidden(),
             drawn_grow: (0.0, 0.0, false),
+            aside: false,
         })
     }
 

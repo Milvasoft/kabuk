@@ -1023,6 +1023,55 @@ fn a_full_screen_program_sends_its_monitors_bar_away() {
     assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
 }
 
+/// Found by the user with a screenshot of a game: Rıhtım's dock stayed over a full-screen
+/// game while the bar went away. The dock steps aside with its monitor's bar, and comes
+/// back with it.
+#[test]
+fn a_full_screen_program_sends_the_dock_away() {
+    use kabuk::bar::manager::MSG_APPBAR;
+    use kabuk_win::msgloop::{post_message, Msg};
+    const ABN_FULLSCREENAPP: usize = 2;
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n[appearance]\nlook = \"rihtim\"\n").unwrap();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("dock placed") == 1).is_some());
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let dock = primary_window_of("Kabuk.Dock", pid);
+    let main_bar = primary_window_of("Kabuk.Bar", pid);
+    assert!(wait_until(SETTLE, || dock.is_visible()).is_some(), "no dock");
+    let notify = |entering: bool| {
+        post_message(
+            main_bar,
+            Msg {
+                id: MSG_APPBAR,
+                wparam: ABN_FULLSCREENAPP,
+                lparam: isize::from(entering),
+            },
+        )
+        .unwrap();
+    };
+    let game = TestWindow::open(&["--fullscreen", "--title", &title("dock-game")]);
+    assert!(wait_until(SETTLE, || game.hwnd.is_visible()).is_some());
+    notify(true);
+    assert!(
+        wait_until(SETTLE, || !main_bar.is_visible()).is_some(),
+        "the bar stayed over the game"
+    );
+    assert!(
+        wait_until(SETTLE, || !dock.is_visible()).is_some(),
+        "the dock stayed over the game"
+    );
+    drop(game);
+    notify(false);
+    assert!(
+        wait_until(SETTLE, || dock.is_visible() && main_bar.is_visible()).is_some(),
+        "the dock did not come back"
+    );
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
+}
+
 /// Found by the user: a program being developed (Fenpo, redeployed by Visual Studio)
 /// showed a blank icon on the bar for as long as the shell ran, the picture loaded while
 /// its package was being put back. A program started again gets its picture anew.
