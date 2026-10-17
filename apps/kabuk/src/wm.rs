@@ -1928,7 +1928,7 @@ impl Wm {
     /// windows jump there, and a pending genie over its whole monitor (only with full
     /// animations, and never in game mode).
     fn animate_moves(&mut self, effects: &[Effect]) {
-        self.play_moves(effects, HashMap::new(), None, kabuk_ui::motion::WINDOW_MOVE, 0.0);
+        self.play_moves(effects, HashMap::new(), None, kabuk_ui::motion::WINDOW_MOVE, 0.0, false);
     }
 
     /// An auto-hiding bar reserves its strip or gives it back a moment from now: the
@@ -1964,6 +1964,7 @@ impl Wm {
             Some((device, union(from, to))),
             kabuk_ui::motion::BAR_SLIDE,
             WORK_AREA_HOLD.as_secs_f32(),
+            true,
         );
         self.carry_out(effects);
     }
@@ -1971,7 +1972,8 @@ impl Wm {
     /// Plays the moves among `effects` and `moving` (windows to their outer rectangles)
     /// over each work area they happen on, `over` a monitor's given area instead, in
     /// `seconds` and staying `hold` seconds more, and a pending genie over its whole
-    /// monitor.
+    /// monitor. With `keep_growing`, a window that grows shows only the picture it had
+    /// (Windows resizes it under the scene before it has painted its new part).
     fn play_moves(
         &mut self,
         effects: &[Effect],
@@ -1979,6 +1981,7 @@ impl Wm {
         over: Option<(&str, state::Rect)>,
         seconds: f32,
         hold: f32,
+        keep_growing: bool,
     ) {
         let genie = self.pending_genie.take();
         let Some(mover) = &self.mover else { return };
@@ -2025,7 +2028,14 @@ impl Wm {
             if here.is_empty() && here_genie.is_none() {
                 continue;
             }
-            let layers = kabuk_win::window_motion::layers_over(a, &here, here_genie.map(|g| g.window));
+            let mut layers = kabuk_win::window_motion::layers_over(a, &here, here_genie.map(|g| g.window));
+            if keep_growing {
+                let size = |r: state::Rect| (r.right - r.left, r.bottom - r.top);
+                for l in &mut layers {
+                    let (from, to) = (size(l.from), size(l.to));
+                    l.keep_picture = to.0 > from.0 || to.1 > from.1;
+                }
+            }
             tracing::info!(device = %m.device, moving = here.len(), layers = layers.len(), "windows move");
             if let Some(g) = &here_genie {
                 tracing::info!(hwnd = g.window.0, minimize = g.minimize, frame = ?g.frame, icon = ?g.icon, "genie");

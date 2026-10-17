@@ -82,6 +82,13 @@ pub struct Layer {
     pub window: Hwnd,
     pub from: Rect,
     pub to: Rect,
+    /// Show only as much of the window's picture as it had when the scene began: a window
+    /// Windows makes larger under the scene has not painted its new part yet, and its
+    /// live picture shows that part black (found by the user: a maximised window's bottom
+    /// flashed black as the auto-hiding bar slid off; DECISIONS D75).
+    pub keep_picture: bool,
+    /// That picture's size, taken when the scene began.
+    picture: Option<(i32, i32)>,
 }
 
 /// A move to play over `area`: the windows there from the bottom of the z-order up
@@ -243,6 +250,8 @@ pub fn layers_over(area: Rect, moving: &HashMap<u64, Rect>, skip: Option<Hwnd>) 
                 window: w,
                 from: now,
                 to,
+                keep_picture: false,
+                picture: None,
             })
         })
         .collect();
@@ -295,6 +304,26 @@ struct Playing {
     last_frame: Option<Instant>,
     /// The longest a frame's own work took (the thumbnails' updates).
     work: Duration,
+}
+
+/// Where layer thumbnail `t` goes: `r`, showing at most `picture` of its source.
+fn layer_props(t: isize, r: Rect, area: Rect, picture: Option<(i32, i32)>) -> DWM_THUMBNAIL_PROPERTIES {
+    let base = props(r, area);
+    let Some((w, h)) = picture else { return base };
+    // SAFETY: our registered thumbnail.
+    let Ok(now) = (unsafe { DwmQueryThumbnailSourceSize(t) }) else {
+        return base;
+    };
+    DWM_THUMBNAIL_PROPERTIES {
+        dwFlags: base.dwFlags | DWM_TNP_RECTSOURCE,
+        rcSource: RECT {
+            left: 0,
+            top: 0,
+            right: now.cx.min(w),
+            bottom: now.cy.min(h),
+        },
+        ..base
+    }
 }
 
 fn props(r: Rect, area: Rect) -> DWM_THUMBNAIL_PROPERTIES {
@@ -537,7 +566,13 @@ fn begin(scene: Scene, before: Option<Playing>, renderer: Option<&gpu::Renderer>
                 layer.from = *now;
             }
             if let Some(t) = register(overlay, layer.window.raw()) {
-                let _ = DwmUpdateThumbnailProperties(t, &props(layer.from, area));
+                if layer.keep_picture {
+                    layer.picture = DwmQueryThumbnailSourceSize(t)
+                        .ok()
+                        .filter(|s| s.cx > 0 && s.cy > 0)
+                        .map(|s| (s.cx, s.cy));
+                }
+                let _ = DwmUpdateThumbnailProperties(t, &layer_props(t, layer.from, area, layer.picture));
                 thumbs.push((t, layer));
             }
         }
@@ -680,14 +715,15 @@ fn frame(p: &mut Playing, now: Instant, ease: fn(f32) -> f32, renderer: Option<&
     }
     let u = ease(x);
     for (thumb, layer) in &p.thumbs {
-        // A window that stays where it is was placed once, at the start.
-        if layer.from == layer.to {
+        // A window that stays where it is was placed once, at the start (unless its
+        // picture is kept: Windows may resize it any time).
+        if layer.from == layer.to && layer.picture.is_none() {
             continue;
         }
         let r = between(layer.from, layer.to, u);
         p.shown.insert(layer.window.0 as isize, r);
         // SAFETY: our registered thumbnail.
-        let _ = unsafe { DwmUpdateThumbnailProperties(*thumb, &props(r, p.area)) };
+        let _ = unsafe { DwmUpdateThumbnailProperties(*thumb, &layer_props(*thumb, r, p.area, layer.picture)) };
     }
     p.work = p.work.max(now.elapsed());
     share(p.length) >= 1.0
@@ -937,6 +973,69 @@ mod tests {
     /// Found by the user: as a window came back from the dock, the scene that followed
     /// the genie's first let the old thumbnails go before putting up its own, and a frame
     /// showed the bare desktop between them.
+    /// D75, found by the user: a window kept at its first picture shows no more of its
+    /// source than it had when the scene began, even once Windows made it larger.
+    #[test]
+    fn a_growing_window_shows_only_the_picture_it_had() {
+        let area = Rect {
+            left: -32000,
+            top: -32000,
+            right: -31900,
+            bottom: -31900,
+        };
+        let scene = |layers| Scene {
+            area,
+            layers,
+            seconds: 0.0,
+            hold: 0.0,
+            genie: None,
+        };
+        let source = begin(scene(Vec::new()), None, None, &Pictured::default()).expect("an overlay");
+        let layer = Layer {
+            window: Hwnd::from_raw(source.overlay),
+            from: area,
+            to: area,
+            keep_picture: true,
+            picture: None,
+        };
+        let p = begin(scene(vec![layer]), None, None, &Pictured::default()).expect("the scene");
+        let (t, kept) = p.thumbs[0];
+        // SAFETY: our registered thumbnail.
+        let began = unsafe { DwmQueryThumbnailSourceSize(t) }.expect("a source size");
+        assert_eq!(
+            kept.picture,
+            Some((began.cx, began.cy)),
+            "the picture's size when the scene began"
+        );
+        // The window grows under the scene.
+        // SAFETY: our own overlay window, resized out of sight.
+        unsafe {
+            let _ = SetWindowPos(
+                source.overlay,
+                None,
+                area.left,
+                area.top,
+                150,
+                180,
+                SWP_NOACTIVATE | SWP_NOZORDER,
+            );
+        }
+        // SAFETY: our registered thumbnail.
+        let grown = unsafe { DwmQueryThumbnailSourceSize(t) }.expect("a source size");
+        assert!(grown.cx > began.cx && grown.cy > began.cy, "{grown:?} after {began:?}");
+        let props = layer_props(t, area, area, kept.picture);
+        assert!(props.dwFlags & DWM_TNP_RECTSOURCE != 0);
+        assert_eq!(
+            (props.rcSource.right, props.rcSource.bottom),
+            (began.cx, began.cy),
+            "more than it had"
+        );
+        let free = layer_props(t, area, area, None);
+        assert_eq!(free.dwFlags & DWM_TNP_RECTSOURCE, 0, "a layer not kept shows all");
+        end(p);
+        end(source);
+    }
+
     #[test]
     fn a_following_scene_lets_the_old_thumbnails_go_last() {
         let area = Rect {
@@ -958,6 +1057,8 @@ mod tests {
             window: Hwnd::from_raw(source.overlay),
             from: area,
             to: area,
+            keep_picture: false,
+            picture: None,
         };
         let first = begin(scene(vec![layer()]), None, None, &Pictured::default()).expect("the first scene");
         let old: Vec<isize> = first.thumbs.iter().map(|(t, _)| *t).collect();
