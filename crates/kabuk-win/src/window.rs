@@ -640,6 +640,65 @@ impl Hwnd {
         // SAFETY: as for `show_async`.
         unsafe { ShowWindowAsync(self.raw(), SW_HIDE) }.as_bool()
     }
+
+    /// Makes the window fully transparent (`on`), so it shows nothing even while
+    /// Windows has it shown, or opaque again. Only a transparency set here is taken off:
+    /// a window that was layered on its own stays so. True when the window is as asked.
+    /// For Explorer's taskbars, which Explorer shows for a moment whenever a work area
+    /// changes (found by the user: Windows' taskbar flashed as the auto-hiding bar came
+    /// and went; DECISIONS D77).
+    pub fn set_see_through(self, on: bool) -> bool {
+        use windows::Win32::Foundation::COLORREF;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetLayeredWindowAttributes, SetLayeredWindowAttributes, SetWindowLongPtrW, LAYERED_WINDOW_ATTRIBUTES_FLAGS,
+            LWA_ALPHA, WS_EX_LAYERED,
+        };
+        let ex = self.long(GWL_EXSTYLE);
+        let layered = ex & WS_EX_LAYERED.0 != 0;
+        let mut alpha = 0u8;
+        let mut flags = LAYERED_WINDOW_ATTRIBUTES_FLAGS(0);
+        // SAFETY: plain query with valid out pointers; fails for a window not layered.
+        let read = layered
+            && unsafe { GetLayeredWindowAttributes(self.raw(), None, Some(&mut alpha), Some(&mut flags)) }.is_ok();
+        let ours = read && flags.contains(LWA_ALPHA) && alpha == 0;
+        // SAFETY: style and layering changes on a window handle; invalid ones fail.
+        unsafe {
+            if on {
+                if ours {
+                    return true;
+                }
+                if layered {
+                    // Layered by its owner: left alone.
+                    return false;
+                }
+                SetWindowLongPtrW(self.raw(), GWL_EXSTYLE, (ex | WS_EX_LAYERED.0) as isize);
+                SetLayeredWindowAttributes(self.raw(), COLORREF(0), 0, LWA_ALPHA).is_ok()
+            } else {
+                if !ours {
+                    return !layered || read;
+                }
+                let _ = SetLayeredWindowAttributes(self.raw(), COLORREF(0), u8::MAX, LWA_ALPHA);
+                SetWindowLongPtrW(self.raw(), GWL_EXSTYLE, (ex & !WS_EX_LAYERED.0) as isize);
+                true
+            }
+        }
+    }
+
+    /// Whether [`Hwnd::set_see_through`] made the window transparent.
+    pub fn is_see_through(self) -> bool {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetLayeredWindowAttributes, LAYERED_WINDOW_ATTRIBUTES_FLAGS, LWA_ALPHA, WS_EX_LAYERED,
+        };
+        if self.long(GWL_EXSTYLE) & WS_EX_LAYERED.0 == 0 {
+            return false;
+        }
+        let mut alpha = 0u8;
+        let mut flags = LAYERED_WINDOW_ATTRIBUTES_FLAGS(0);
+        // SAFETY: plain query with valid out pointers.
+        unsafe { GetLayeredWindowAttributes(self.raw(), None, Some(&mut alpha), Some(&mut flags)) }.is_ok()
+            && flags.contains(LWA_ALPHA)
+            && alpha == 0
+    }
 }
 
 /// The window rectangle that puts the visible frame at `frame`, given the window's current
@@ -804,6 +863,32 @@ mod tests {
             w
         });
         assert_eq!(w.hwnd().restored_size(), Some((321, 123)));
+    }
+
+    /// D77: a window made see-through is fully transparent and turned back opaque, as it
+    /// was; twice is as once; a bogus handle does nothing.
+    #[test]
+    fn a_window_turns_see_through_and_back() {
+        let rect = crate::msgloop::PxRect {
+            x: -30_000,
+            y: -30_000,
+            w: 50,
+            h: 50,
+        };
+        let w = crate::msgloop::Window::shell_surface("Kabuk.Test.SeeThrough", "", rect, |_| None).unwrap();
+        let h = w.hwnd();
+        assert!(!h.is_see_through());
+        assert!(h.set_see_through(true));
+        assert!(h.is_see_through());
+        assert!(h.set_see_through(true), "twice");
+        assert!(h.set_see_through(false));
+        assert!(!h.is_see_through());
+        assert_eq!(
+            h.long(GWL_EXSTYLE) & windows::Win32::UI::WindowsAndMessaging::WS_EX_LAYERED.0,
+            0
+        );
+        assert!(h.set_see_through(false), "already opaque");
+        assert!(!Hwnd(0x1234_5678).is_see_through());
     }
 
     #[test]

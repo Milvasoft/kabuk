@@ -81,13 +81,18 @@ fn story(sandbox: &Sandbox) -> String {
     out
 }
 
+/// Shown, and opaque again (D77).
 fn taskbars_visible() -> bool {
     let bars = kabuk_win::shell::taskbars();
-    !bars.is_empty() && bars.iter().all(|b| b.is_visible())
+    !bars.is_empty() && bars.iter().all(|b| b.is_visible() && !b.is_see_through())
 }
 
+/// Hidden, and see-through for the moments Explorer shows them anyway (found by the
+/// user: they flashed at every work area change; D77).
 fn taskbars_hidden() -> bool {
-    kabuk_win::shell::taskbars().iter().all(|b| !b.is_visible())
+    kabuk_win::shell::taskbars()
+        .iter()
+        .all(|b| !b.is_visible() && b.is_see_through())
 }
 
 #[test]

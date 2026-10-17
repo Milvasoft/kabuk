@@ -43,21 +43,25 @@ pub fn taskbars() -> Vec<Hwnd> {
     out
 }
 
-/// Hides every taskbar. Callers record the taskbar in the state file first and turn on
-/// auto-hide, so the hidden taskbars give their space back. Returns how many were found.
+/// Hides every taskbar and makes it see-through, so the moment Explorer shows it again
+/// (it does whenever a work area changes) shows nothing (D77). Callers record the
+/// taskbar in the state file first and turn on auto-hide, so the hidden taskbars give
+/// their space back. Returns how many were found.
 pub fn hide_taskbars() -> usize {
     let bars = taskbars();
     for bar in &bars {
+        bar.set_see_through(true);
         bar.hide_async();
     }
     bars.len()
 }
 
-/// Shows every taskbar without activating it. Harmless when they are already visible.
-/// Returns how many taskbars were found.
+/// Shows every taskbar, opaque again, without activating it. Harmless when they are
+/// already visible. Returns how many taskbars were found.
 pub fn show_taskbars() -> usize {
     let bars = taskbars();
     for bar in &bars {
+        bar.set_see_through(false);
         bar.show_async();
     }
     bars.len()

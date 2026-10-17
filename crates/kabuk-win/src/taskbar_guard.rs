@@ -48,6 +48,10 @@ fn guard(h: Hwnd) {
         (!t.bars.is_empty() && (t.bars.contains(&h) || is_taskbar(&h.class_name()))).then_some((t.front, t.behind))
     });
     let Some((front, behind)) = guarded else { return };
+    // See-through first: Explorer shows its taskbars at every work area change, and the
+    // hide below comes a frame or more later (found by the user: they flashed as the
+    // auto-hiding bar came and went; D77).
+    h.set_see_through(true);
     h.hide_async();
     // Showing put Explorer's tray window on top; put Kabuk's back in front, and say so if
     // it was behind (icons added meanwhile went to Explorer only).
@@ -106,6 +110,7 @@ impl TaskbarGuard {
             return Err(std::io::Error::other("SetWinEventHook failed"));
         }
         for b in &bars {
+            b.set_see_through(true);
             b.hide_async();
         }
         if let Some(f) = keep_in_front {
@@ -121,6 +126,7 @@ impl TaskbarGuard {
     pub fn hide_all(&self) {
         let bars = crate::shell::taskbars();
         for b in &bars {
+            b.set_see_through(true);
             b.hide_async();
         }
         TASKBARS.with(|t| {
