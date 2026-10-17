@@ -97,7 +97,10 @@ pub struct Layer {
 
 /// A move to play over `area`: the windows there from the bottom of the z-order up
 /// (the desktop and the ones that do not move too, so nothing under the overlay
-/// disappears), and a genie above them.
+/// disappears), and a genie above them. A scene with a genie and no windows is played on
+/// a see-through window instead: the genie alone, over the real desktop and windows, so
+/// nothing of the desktop is copied (DECISIONS D82: on some machines its copy fell short
+/// and showed black).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Scene {
     pub area: Rect,
@@ -146,6 +149,9 @@ pub fn genie_strips(height: i32) -> usize {
 struct Seen {
     pictured: std::collections::HashSet<isize>,
     covered: std::collections::HashSet<isize>,
+    /// The windows whose genie has played to its end (a window coming back is brought
+    /// back then, under its last picture; D82).
+    played: std::collections::HashSet<isize>,
 }
 type Pictured = std::sync::Arc<std::sync::Mutex<Seen>>;
 
@@ -190,6 +196,14 @@ impl Mover {
         self.pictured
             .lock()
             .is_ok_and(|seen| seen.covered.contains(&(window.0 as isize)))
+    }
+
+    /// Whether the genie of `window` has played to its end: a window coming back out of
+    /// its icon is brought back then, under the genie's last picture (D82).
+    pub fn played(&self, window: Hwnd) -> bool {
+        self.pictured
+            .lock()
+            .is_ok_and(|seen| seen.played.contains(&(window.0 as isize)))
     }
 
     pub fn play(&self, scene: Scene) {
@@ -287,6 +301,8 @@ extern "system" fn overlay_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
 /// and where each window's is now.
 struct Playing {
     overlay: HWND,
+    /// Played on a see-through window: a genie alone (D82).
+    see_through: bool,
     desktop: Vec<isize>,
     area: Rect,
     thumbs: Vec<(isize, Layer)>,
@@ -457,7 +473,12 @@ fn above_ordinary_windows(overlay: HWND) -> HWND {
     last.unwrap_or(HWND_TOPMOST)
 }
 
-fn overlay(area: Rect) -> Option<HWND> {
+/// Whether `scene` plays on a see-through window: a genie and no windows (D82).
+fn see_through(scene: &Scene) -> bool {
+    scene.genie.is_some() && scene.layers.is_empty()
+}
+
+fn overlay(area: Rect, see_through: bool) -> Option<HWND> {
     // SAFETY: class registration (an existing class is fine) and creation of our own
     // window, which this thread destroys.
     unsafe {
@@ -471,8 +492,15 @@ fn overlay(area: Rect) -> Option<HWND> {
             ..Default::default()
         };
         RegisterClassW(&wc);
+        // A see-through one has no surface of its own: only the thumbnails on it show,
+        // over the real desktop and windows.
+        let surface = if see_through {
+            WS_EX_NOREDIRECTIONBITMAP
+        } else {
+            WS_EX_LAYERED
+        };
         let h = CreateWindowExW(
-            WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST,
+            surface | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST,
             &class,
             &HSTRING::from(""),
             WS_POPUP,
@@ -486,8 +514,10 @@ fn overlay(area: Rect) -> Option<HWND> {
             None,
         )
         .ok()?;
-        // Unseen until its thumbnails are drawn ([`begin`]).
-        let _ = SetLayeredWindowAttributes(h, COLORREF(0), 0, LWA_ALPHA);
+        if !see_through {
+            // Unseen until its thumbnails are drawn ([`begin`]).
+            let _ = SetLayeredWindowAttributes(h, COLORREF(0), 0, LWA_ALPHA);
+        }
         Some(h)
     }
 }
@@ -558,9 +588,43 @@ fn unregister_genie(genie: Option<(Genie, Vec<isize>, (i32, i32))>) {
     }
 }
 
+/// How many windows' pictures are kept from their genies into the icon, for the genies
+/// that bring them back (D82); the oldest goes first.
+const KEPT_PICTURES: usize = 6;
+
+thread_local! {
+    /// Pictures of windows that poured into their icons, the newest last, made by the
+    /// renderer this thread has now (let go with it).
+    static PICTURES: std::cell::RefCell<Vec<(isize, gpu::Picture)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Keeps `window`'s picture from its genie into the icon.
+fn keep_picture(window: Hwnd, picture: gpu::Picture) {
+    PICTURES.with(|p| {
+        let mut p = p.borrow_mut();
+        p.retain(|(w, _)| *w != window.0 as isize);
+        p.push((window.0 as isize, picture));
+        let over = p.len().saturating_sub(KEPT_PICTURES);
+        p.drain(..over);
+    });
+}
+
+/// `window`'s kept picture, if it poured into its icon since the renderer was made.
+fn kept_picture(window: Hwnd) -> Option<gpu::Picture> {
+    PICTURES.with(|p| {
+        p.borrow()
+            .iter()
+            .find(|(w, _)| *w == window.0 as isize)
+            .map(|(_, pic)| pic.clone())
+    })
+}
+
 /// The genie of `g` drawn by the GPU, going on with `kept` (the scene before's, holding
 /// the window's picture) when it is the same window's; `None` for the strips: no
 /// renderer, or a window already minimised by Windows (no picture can be taken of it).
+/// A window coming back out of its icon is drawn with the picture kept when it went in:
+/// minimised, it gives none, and that picture stays as it is while the window paints
+/// (D82; found by the user: its live picture went black as it came back).
 fn gpu_genie(
     renderer: Option<&gpu::Renderer>,
     g: &Genie,
@@ -574,7 +638,12 @@ fn gpu_genie(
     if g.minimize && g.window.is_minimized() {
         return None;
     }
-    match gpu::GpuGenie::new(r, g.window.raw(), area, GENIE_ROWS) {
+    let picture = if g.minimize { None } else { kept_picture(g.window) };
+    if !g.minimize && picture.is_none() && g.window.is_minimized() {
+        // No picture of it at all: the strips, from Windows' own.
+        return None;
+    }
+    match gpu::GpuGenie::new(r, g.window.raw(), area, GENIE_ROWS, picture) {
         Ok(gg) => Some(gg),
         Err(e) => {
             tracing::warn!(error = %e, "genie drawn with strips");
@@ -586,6 +655,7 @@ fn gpu_genie(
 fn begin(scene: Scene, before: Option<Playing>, renderer: Option<&gpu::Renderer>, seen: &Pictured) -> Option<Playing> {
     let asked = Instant::now();
     let mut scene = scene;
+    let see_through = see_through(&scene);
     // The same window's genie goes on from where it is on screen, whatever the window
     // manager reckons: the scene before may have come up late.
     if let (Some(g), Some((old, since))) = (
@@ -606,8 +676,9 @@ fn begin(scene: Scene, before: Option<Playing>, renderer: Option<&gpu::Renderer>
             p.gpu.map(|(_, gg)| gg),
             Some((p.thumbs, p.genie)),
         ),
+        None if see_through => (overlay(scene.area, true)?, Vec::new(), HashMap::new(), None, None),
         None => {
-            let o = overlay(scene.area)?;
+            let o = overlay(scene.area, false)?;
             // The wallpapers first, under everything (D81).
             backdrop::refresh();
             backdrop::attach(o, scene.area);
@@ -675,16 +746,26 @@ fn begin(scene: Scene, before: Option<Playing>, renderer: Option<&gpu::Renderer>
             }
             unregister_genie(genie);
         }
+        // A genie pours over everything, Kabuk's bars too, into its icon (as the GPU's
+        // genie window does); a move goes over the ordinary windows only.
+        let place = if see_through {
+            HWND_TOPMOST
+        } else {
+            above_ordinary_windows(overlay)
+        };
         let _ = SetWindowPos(
             overlay,
-            Some(above_ordinary_windows(overlay)),
+            Some(place),
             area.left,
             area.top,
             area.right - area.left,
             area.bottom - area.top,
             SWP_NOACTIVATE | SWP_SHOWWINDOW,
         );
-        if new_overlay {
+        if new_overlay && see_through {
+            // On screen once the compositor has drawn its strips.
+            let _ = DwmFlush();
+        } else if new_overlay {
             // Its wallpapers painted before it shows.
             let _ = RedrawWindow(Some(overlay), None, None, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW);
             // Unseen until the compositor has drawn its thumbnails once: shown at once,
@@ -705,6 +786,7 @@ fn begin(scene: Scene, before: Option<Playing>, renderer: Option<&gpu::Renderer>
             .and_then(|g| gpu_genie(renderer, &g, area, kept).map(|gg| (g, gg)));
         Some(Playing {
             overlay,
+            see_through,
             desktop,
             area,
             thumbs,
@@ -807,6 +889,13 @@ fn end(p: Playing) {
         gpu = p.gpu.as_ref().map(|(_, gg)| gg.pictured()),
         "window motion played"
     );
+    // A window that poured into its icon gives no picture there: its last one is kept
+    // for the genie that brings it back (D82).
+    if let Some((g, gg)) = &p.gpu {
+        if let (true, Some(picture)) = (g.minimize, gg.picture()) {
+            keep_picture(g.window, picture);
+        }
+    }
     // SAFETY: our own overlay and thumbnails.
     unsafe {
         let _ = ShowWindow(p.overlay, SW_HIDE);
@@ -861,7 +950,8 @@ fn run(rx: &mpsc::Receiver<Order>, ease: fn(f32) -> f32, pictured: &Pictured, tx
                     make_renderer(tx);
                 }
             }
-            let same = playing.iter().position(|p| p.area == s.area);
+            let kind = see_through(&s);
+            let same = playing.iter().position(|p| p.area == s.area && p.see_through == kind);
             let before = same.map(|i| playing.remove(i));
             if let Some(p) = begin(s, before, renderer.as_ref(), pictured) {
                 playing.push(p);
@@ -880,6 +970,8 @@ fn run(rx: &mpsc::Receiver<Order>, ease: fn(f32) -> f32, pictured: &Pictured, tx
         }
         Order::Made(SendRenderer(r)) => {
             *making = false;
+            // Pictures kept from another renderer are not this one's.
+            PICTURES.with(|p| p.borrow_mut().clear());
             *renderer = Some(r);
             true
         }
@@ -894,6 +986,7 @@ fn run(rx: &mpsc::Receiver<Order>, ease: fn(f32) -> f32, pictured: &Pictured, tx
                     Err(mpsc::RecvTimeoutError::Timeout) => {
                         if last_used.elapsed() >= RENDERER_KEPT {
                             renderer = None;
+                            PICTURES.with(|p| p.borrow_mut().clear());
                             tracing::info!("genie renderer let go");
                             backdrop::release();
                         }
@@ -949,6 +1042,14 @@ fn run(rx: &mpsc::Receiver<Order>, ease: fn(f32) -> f32, pictured: &Pictured, tx
                     .filter_map(|p| p.gpu.as_ref())
                     .filter(|(_, gg)| gg.pictured() >= PICTURED_FRAMES)
                     .map(|(_, gg)| gg.source().0 as isize),
+            );
+            seen.played.clear();
+            seen.played.extend(
+                playing
+                    .iter()
+                    .filter_map(|p| p.playing_genie.map(|g| (g, p.started)))
+                    .filter(|(g, started)| started.elapsed().as_secs_f32() + g.elapsed >= g.seconds)
+                    .map(|(g, _)| g.window.0 as isize),
             );
             seen.covered.clear();
             seen.covered.extend(

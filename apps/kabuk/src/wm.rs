@@ -105,6 +105,9 @@ const GENIE_PICTURE_STEP: Duration = Duration::from_millis(4);
 /// its place (looked for as often as the picture): it came back bare once, while the
 /// genie was still being set up (found by the user). Past it, it comes back anyway.
 const GENIE_COVER_WAIT: Duration = Duration::from_millis(500);
+/// How long a window brought back from the bar stays under its genie's last picture once
+/// it is back: the time it takes to paint, so it never shows bare (D82).
+const GENIE_HOLD: Duration = Duration::from_millis(150);
 /// How long the scene of windows pushed by an auto-hiding bar stays once they are in
 /// place: the bar reserves its strip only as its slide ends (so the maximised windows'
 /// pictures do not change size halfway), and Windows' resized windows paint meanwhile
@@ -1300,7 +1303,12 @@ impl Wm {
         let genie = if minimize {
             self.genie_of_shown(h)
         } else {
-            self.genie_of(h, false, true)
+            // Out of its icon while it stays minimised, its last picture held while it
+            // comes back and paints (D82).
+            self.genie_of(h, false, true).map(|g| kabuk_win::window_motion::Genie {
+                hold: GENIE_HOLD.as_secs_f32(),
+                ..g
+            })
         };
         let Some(g) = genie else { return false };
         self.own_genie = Some((g, std::time::Instant::now()));
@@ -1336,6 +1344,15 @@ impl Wm {
             }
             h.minimize_async();
         } else {
+            // Back only once its genie has played: over the real desktop, the genie is all
+            // that shows of it until then, and its last picture covers it while it paints
+            // (D82; found by the user: brought back early, it showed before its genie).
+            let played = self.mover.as_ref().is_none_or(|m| m.played(h));
+            let due = GENIE_COVER_WAIT + Duration::from_secs_f32(g.seconds);
+            if !played && since.elapsed() < due {
+                self.schedule(timer::GENIE, GENIE_PICTURE_STEP);
+                return;
+            }
             self.put_back_where_tiled(h);
             h.restore_async();
             if !h.focus() {
@@ -1344,22 +1361,16 @@ impl Wm {
         }
     }
 
-    /// The genie Kabuk already started for `h`, going on from where it is, for the event
-    /// its own minimise or restore brings; `None` for another window or after a while.
-    /// It keeps its frame and icon (the icon moved between them once).
+    /// Whether the event `h`'s minimise or restore brings belongs to the genie Kabuk
+    /// started for it, which plays on its own (D82): no genie is started for it again.
+    /// `None` for another window or after a while.
     fn own_genie_for(&mut self, h: Hwnd, minimize: bool) -> Option<Option<kabuk_win::window_motion::Genie>> {
         let (g, since) = self.own_genie?;
-        let late = GENIE_OWN;
-        if g.window != h || g.minimize != minimize || since.elapsed() > late {
+        if g.window != h || g.minimize != minimize || since.elapsed() > GENIE_OWN {
             return None;
         }
         self.own_genie = None;
-        // The event comes once the window is where the genie left it: no hold after.
-        Some(Some(kabuk_win::window_motion::Genie {
-            elapsed: since.elapsed().as_secs_f32(),
-            hold: 0.0,
-            ..g
-        }))
+        Some(None)
     }
 
     fn toggle_floating_layout(&mut self, device: &str) {
@@ -1630,10 +1641,11 @@ impl Wm {
                 if self.desk.is_parked(h.0) {
                     tracing::info!(hwnd = h.0, "window restored");
                     let effects = self.desk.unpark(h.0);
-                    self.pending_genie = match self.own_genie_for(h, false) {
-                        Some(own) => own,
-                        None => self.genie_of(h, false, false),
-                    };
+                    // No genie starts here: one Kabuk started plays on its own, and a window
+                    // Windows brought back itself (Alt+Tab, another program) shows at once,
+                    // so a genie over the real desktop would pour out over it (D82).
+                    self.own_genie_for(h, false);
+                    self.pending_genie = None;
                     self.apply(effects);
                 } else {
                     self.consider(h);
@@ -2010,13 +2022,24 @@ impl Wm {
             return;
         }
         for m in kabuk_win::shell::monitors() {
-            // The genie's monitor plays over all of it: the icon is on its bar.
+            // The genie plays alone, over the whole of its monitor (the icon is on its bar),
+            // on a see-through window over the real desktop and windows: nothing of the
+            // desktop is copied (D82: on some machines its copy fell short and showed black).
             let here_genie = genie.filter(|g| {
                 let (cx, cy) = ((g.frame.left + g.frame.right) / 2, (g.frame.top + g.frame.bottom) / 2);
                 cx >= m.rect.left && cx < m.rect.right && cy >= m.rect.top && cy < m.rect.bottom
             });
+            if let Some(g) = here_genie {
+                tracing::info!(hwnd = g.window.0, minimize = g.minimize, frame = ?g.frame, icon = ?g.icon, "genie");
+                mover.play(kabuk_win::window_motion::Scene {
+                    area: m.rect,
+                    layers: Vec::new(),
+                    seconds: 0.0,
+                    hold: 0.0,
+                    genie: Some(g),
+                });
+            }
             let a = match over {
-                _ if here_genie.is_some() => m.rect,
                 Some((device, area)) if device == m.device => area,
                 _ => m.work_area,
             };
@@ -2028,7 +2051,7 @@ impl Wm {
                 })
                 .map(|(id, to)| (*id, *to))
                 .collect();
-            if here.is_empty() && here_genie.is_none() {
+            if here.is_empty() {
                 continue;
             }
             let mut layers = kabuk_win::window_motion::layers_over(a, &here, here_genie.map(|g| g.window));
@@ -2040,15 +2063,12 @@ impl Wm {
                 }
             }
             tracing::info!(device = %m.device, moving = here.len(), layers = layers.len(), "windows move");
-            if let Some(g) = &here_genie {
-                tracing::info!(hwnd = g.window.0, minimize = g.minimize, frame = ?g.frame, icon = ?g.icon, "genie");
-            }
             mover.play(kabuk_win::window_motion::Scene {
                 area: a,
                 layers,
                 seconds,
                 hold,
-                genie: here_genie,
+                genie: None,
             });
         }
     }

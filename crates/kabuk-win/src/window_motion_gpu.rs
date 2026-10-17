@@ -228,8 +228,10 @@ impl Renderer {
     }
 }
 
-/// Kabuk's copy of the window's picture (the capture reuses its own textures).
-struct Picture {
+/// Kabuk's copy of the window's picture (the capture reuses its own textures); kept after
+/// a genie into the icon, for the genie that brings the window back (D82).
+#[derive(Clone)]
+pub(super) struct Picture {
     texture: ID3D11Texture2D,
     view: ID3D11ShaderResourceView,
     size: (u32, u32),
@@ -393,7 +395,10 @@ pub(super) struct GpuGenie {
     msaa_view: ID3D11RenderTargetView,
     vertices: ID3D11Buffer,
     capacity: usize,
-    capture: Capture,
+    /// The window's live picture, or a picture kept from before (a minimised window gives
+    /// none: D82), drawn as it is.
+    capture: Option<Capture>,
+    kept: Option<Picture>,
     /// Frames drawn with the window's picture, for the log.
     pictured: u32,
 }
@@ -406,9 +411,19 @@ impl Drop for GpuGenie {
 }
 
 impl GpuGenie {
-    /// The genie of `source` over `area` (screen pixels), drawn with up to `rows` rows.
-    pub(super) fn new(r: &Renderer, source: HWND, area: Rect, rows: usize) -> Result<GpuGenie, Failed> {
-        let capture = Capture::start(r, source)?;
+    /// The genie of `source` over `area` (screen pixels), drawn with up to `rows` rows:
+    /// with `kept`, a picture of it from before, as it is; else with its live picture.
+    pub(super) fn new(
+        r: &Renderer,
+        source: HWND,
+        area: Rect,
+        rows: usize,
+        kept: Option<Picture>,
+    ) -> Result<GpuGenie, Failed> {
+        let capture = match kept {
+            Some(_) => None,
+            None => Some(Capture::start(r, source)?),
+        };
         let (w, h) = ((area.right - area.left).max(1), (area.bottom - area.top).max(1));
         // SAFETY: (whole block) our own window and GPU objects, made here and released with
         // the genie; every description is fully set and lives for its call.
@@ -517,6 +532,7 @@ impl GpuGenie {
                     vertices,
                     capacity,
                     capture,
+                    kept,
                     pictured: 0,
                 })
             })();
@@ -552,10 +568,21 @@ impl GpuGenie {
         self.pictured
     }
 
+    /// The window's latest picture, to keep (D82).
+    pub(super) fn picture(&self) -> Option<Picture> {
+        match &self.capture {
+            Some(c) => c.picture.clone(),
+            None => self.kept.clone(),
+        }
+    }
+
     /// Draws `rows` (screen pixels) with the window's newest picture; false while the
     /// capture has given none yet (nothing is drawn then).
     pub(super) fn draw(&mut self, r: &Renderer, rows: &[Row]) -> bool {
-        let pictured = self.capture.update(r);
+        let (pictured, picture) = match &mut self.capture {
+            Some(c) => (c.update(r), c.picture.clone()),
+            None => (self.kept.is_some(), self.kept.clone()),
+        };
         self.pictured += u32::from(pictured);
         let (w, h) = (
             (self.area.right - self.area.left).max(1) as f32,
@@ -566,7 +593,7 @@ impl GpuGenie {
         // context; the mapped buffer is written within its capacity.
         unsafe {
             r.context.ClearRenderTargetView(&self.msaa_view, &[0.0, 0.0, 0.0, 0.0]);
-            if let (true, Some(Picture { view, share, .. })) = (pictured, self.capture.picture.as_ref()) {
+            if let (true, Some(Picture { view, share, .. })) = (pictured, picture.as_ref()) {
                 let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
                 if r.context
                     .Map(&self.vertices, 0, D3D11_MAP_WRITE_DISCARD, 0, Some(&mut mapped))
@@ -654,11 +681,10 @@ mod tests {
         crate::dpi::physical(drawn_with_smooth_edges);
     }
 
-    fn drawn_with_smooth_edges() {
-        let r = Renderer::new().expect("a renderer");
-        let (x0, y0, size) = (300, 300, 200);
-        // SAFETY: the test's own window, destroyed at the end.
-        let src = unsafe {
+    /// A red window at `x0`, `y0`, `size` wide and high, for a genie to take.
+    fn red_source(x0: i32, y0: i32, size: i32) -> HWND {
+        // SAFETY: the test's own window, destroyed by the test.
+        unsafe {
             let module = GetModuleHandleW(None).unwrap();
             let class = HSTRING::from("Kabuk.Test.GenieSource");
             let wc = WNDCLASSW {
@@ -684,22 +710,69 @@ mod tests {
                 None,
             )
             .unwrap()
-        };
+        }
+    }
+
+    /// The genie of `src` over `area` with its live picture; `None` on a CI runner, which
+    /// has no desktop whose windows can be captured (the genie is tried on a real desktop
+    /// and in the test VM: docs/TESTING.md).
+    fn live_genie(r: &Renderer, src: HWND, area: Rect) -> Option<GpuGenie> {
+        match GpuGenie::new(r, src, area, 8, None) {
+            Ok(g) => Some(g),
+            Err(e) if std::env::var_os("CI").is_some() && format!("{e:?}").contains("capture item") => {
+                println!("no window capture on this runner: {e:?}");
+                None
+            }
+            Err(e) => panic!("a genie: {e:?}"),
+        }
+    }
+
+    /// Draws `g` over `rows` once it has the window's picture, and takes the screen of
+    /// `area` (`size` wide and high) as the compositor shows it.
+    fn drawn(r: &Renderer, g: &mut GpuGenie, rows: &[Row], area: Rect, size: i32) -> Vec<u8> {
+        let started = std::time::Instant::now();
+        while !g.draw(r, rows) && started.elapsed() < std::time::Duration::from_secs(2) {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        g.draw(r, rows);
+        // SAFETY: plain call; the compositor shows the frame.
+        let _ = unsafe { windows::Win32::Graphics::Dwm::DwmFlush() };
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        crate::screen::capture(crate::msgloop::PxRect {
+            x: area.left,
+            y: area.top,
+            w: size,
+            h: size,
+        })
+        .expect("the screen")
+    }
+
+    /// The genie's whole frame, `size` wide and high, over `area`.
+    fn square(area: Rect, size: i32) -> Vec<Row> {
+        (0..=1)
+            .map(|k| Row {
+                v: k as f32,
+                y: area.top as f32 + k as f32 * size as f32,
+                left: area.left as f32,
+                right: area.right as f32,
+            })
+            .collect()
+    }
+
+    fn drawn_with_smooth_edges() {
+        let r = Renderer::new().expect("a renderer");
+        let (x0, y0, size) = (300, 300, 200);
+        let src = red_source(x0, y0, size);
         let area = Rect {
             left: x0 + size + 20,
             top: y0,
             right: x0 + 2 * size + 20,
             bottom: y0 + size,
         };
-        let mut g = match GpuGenie::new(&r, src, area, 8) {
-            Ok(g) => g,
-            // A CI runner has no desktop whose windows can be captured; the genie is
-            // tried on a real desktop and in the test VM (docs/TESTING.md).
-            Err(e) if std::env::var_os("CI").is_some() && format!("{e:?}").contains("capture item") => {
-                println!("no window capture on this runner: {e:?}");
-                return;
-            }
-            Err(e) => panic!("a genie: {e:?}"),
+        let Some(mut g) = live_genie(&r, src, area) else {
+            // SAFETY: the test's own window.
+            let _ = unsafe { DestroyWindow(src) };
+            return;
         };
         // A trapezoid: full width at the top, a quarter at the bottom.
         let rows: Vec<Row> = (0..=8)
@@ -714,21 +787,7 @@ mod tests {
                 }
             })
             .collect();
-        let started = std::time::Instant::now();
-        while !g.draw(&r, &rows) && started.elapsed() < std::time::Duration::from_secs(2) {
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
-        g.draw(&r, &rows);
-        // SAFETY: plain call; the compositor shows the frame.
-        let _ = unsafe { windows::Win32::Graphics::Dwm::DwmFlush() };
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        let shot = crate::screen::capture(crate::msgloop::PxRect {
-            x: area.left,
-            y: area.top,
-            w: size,
-            h: size,
-        })
-        .expect("the screen");
+        let shot = drawn(&r, &mut g, &rows, area, size);
         let w = size as usize;
         let mid = red_at(&shot, w, w / 2, w / 2);
         assert!(mid.0 > 200 && mid.1 < 60, "middle not red: {mid:?}");
@@ -742,6 +801,46 @@ mod tests {
             .any(|(red, green, _)| red > 40 && red < 215 && green < 200);
         assert!(blended, "no blended edge pixel: stairs");
         drop(g);
+        // SAFETY: the test's own window.
+        let _ = unsafe { DestroyWindow(src) };
+    }
+
+    #[test]
+    fn a_window_brought_back_is_drawn_with_the_picture_kept_when_it_went_in() {
+        crate::dpi::physical(drawn_with_the_kept_picture);
+    }
+
+    /// D82, found by the user: a minimised window gives no live picture (it flashed as
+    /// it came back); the one kept from its genie into the icon is drawn instead.
+    fn drawn_with_the_kept_picture() {
+        let r = Renderer::new().expect("a renderer");
+        let (x0, y0, size) = (300, 560, 160);
+        let src = red_source(x0, y0, size);
+        let area = Rect {
+            left: x0 + size + 20,
+            top: y0,
+            right: x0 + 2 * size + 20,
+            bottom: y0 + size,
+        };
+        let rows = square(area, size);
+        let Some(mut going) = live_genie(&r, src, area) else {
+            // SAFETY: the test's own window.
+            let _ = unsafe { DestroyWindow(src) };
+            return;
+        };
+        drawn(&r, &mut going, &rows, area, size);
+        let kept = going.picture().expect("a picture of the window going in");
+        drop(going);
+        // SAFETY: the test's own window.
+        unsafe {
+            let _ = ShowWindow(src, SW_MINIMIZE);
+        }
+        let mut coming = GpuGenie::new(&r, src, area, 8, Some(kept)).expect("a genie with the kept picture");
+        let shot = drawn(&r, &mut coming, &rows, area, size);
+        let w = size as usize;
+        let mid = red_at(&shot, w, w / 2, w / 2);
+        assert!(mid.0 > 200 && mid.1 < 60, "the kept picture not drawn: {mid:?}");
+        drop(coming);
         // SAFETY: the test's own window.
         let _ = unsafe { DestroyWindow(src) };
     }

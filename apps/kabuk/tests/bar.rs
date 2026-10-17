@@ -1358,8 +1358,9 @@ fn a_window_met_minimised_gets_the_genie() {
 }
 
 /// Asked for by the user (macOS's genie): a managed window's own transitions are turned
-/// off (recorded first); minimising and restoring it play the genie into and out of its
-/// icon on the bar; Windows' own effect chosen in the file gives its transitions back,
+/// off (recorded first); minimising it plays the genie into its icon on the bar, and
+/// bringing it back from the bar plays it out of the icon (brought back by Windows, it
+/// shows at once: D82); Windows' own effect chosen in the file gives its transitions back,
 /// and so does `--restore`.
 #[test]
 fn minimising_plays_the_genie_into_the_apps_icon() {
@@ -1438,12 +1439,13 @@ fn minimising_plays_the_genie_into_the_apps_icon() {
     );
     assert!(w.hwnd.is_minimized());
     assert!(wait_until(SETTLE, || overlays() == 0).is_some(), "the overlay stayed");
+    // Brought back by Windows (Alt+Tab, another program), it shows at once: a genie over
+    // the real desktop would pour out over it (DECISIONS D82). From the bar, below, it
+    // comes out of its icon.
     w.hwnd.restore_async();
-    assert!(
-        wait_until(SETTLE, || genies(false) == 1).is_some(),
-        "no genie out of the icon"
-    );
     assert!(wait_until(SETTLE, || !w.hwnd.is_minimized()).is_some());
+    std::thread::sleep(Duration::from_secs_f32(kabuk_ui::motion::WINDOW_GENIE));
+    assert_eq!(genies(false), 0, "a genie over the window Windows brought back");
     assert!(wait_until(SETTLE, || overlays() == 0).is_some(), "the overlay stayed");
     // The compositor kept up with the strips.
     let f = frames.since(kabuk_win::screen::Frames::now());
