@@ -201,6 +201,106 @@ fn an_auto_hiding_bar_makes_room_while_shown_and_slides_in_when_the_mouse_rests(
     assert_eq!(work_areas(), before);
 }
 
+/// DECISIONS D75, asked for by the user: a shown auto-hiding bar pushed a maximised window
+/// at once ("tak diye"). The window manager hears the work area coming first: the scene is
+/// up over the window before Windows moves it, so it slides with the bar, as it slides
+/// back when the bar goes. Run in the test machine: the mouse is moved.
+#[test]
+fn an_auto_hiding_bar_slides_a_maximised_window_out_of_its_way() {
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n[bar]\nautohide = true\n").unwrap();
+    let primary = kabuk_win::shell::monitors().into_iter().find(|m| m.primary).unwrap();
+    let away = (
+        (primary.rect.left + primary.rect.right) / 2,
+        (primary.rect.top + primary.rect.bottom) / 2,
+    );
+    assert!(kabuk_win::input::set_cursor_pos(away.0, away.1));
+    let _shell = sandbox.shell_with_bar_and_wm();
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("bars built") == 1).is_some());
+    let w = TestWindow::open(&["--title", &title("pushed")]);
+    let managed = format!("managing window hwnd={}", w.hwnd.0);
+    assert!(wait_until(SETTLE, || sandbox.log_lines(&managed) == 1).is_some());
+    assert!(w.hwnd.maximize_async());
+    assert!(wait_until(SETTLE, || w.hwnd.is_maximized()).is_some());
+    let pid = sandbox.state().kabuk_pid.unwrap();
+    let bar = primary_window_of("Kabuk.Bar", pid);
+    let top = || bar.window_rect().map(|r| r.top).unwrap();
+    assert!(wait_until(SETTLE, || top() < primary.rect.top).is_some(), "not hidden");
+    let hidden = top();
+    std::thread::sleep(Duration::from_millis(500));
+    if !kabuk_win::system::animations_on() {
+        // Windows' animation effects are off: no scenes to look for.
+        assert_eq!(sandbox.restore().0, 0);
+        return;
+    }
+    let overlay_up = || {
+        kabuk_win::window::windows_of_class(kabuk_win::window_motion::OVERLAY_CLASS)
+            .into_iter()
+            .any(|o| o.pid() == Some(pid) && o.is_visible())
+    };
+    // Until the window has moved: whether the scene was up over it before it did.
+    let watch = |was: Rect| {
+        let mut covered = false;
+        let moved = wait_until(SETTLE, || {
+            covered |= overlay_up();
+            w.hwnd.window_rect() != Some(was)
+        });
+        (moved.is_some(), covered)
+    };
+    let edge = (away.0, bar.window_rect().unwrap().bottom - 1);
+    let was = w.hwnd.window_rect().unwrap();
+    assert!(kabuk_win::input::set_cursor_pos(edge.0, edge.1));
+    kabuk_win::msgloop::post_message(
+        bar,
+        kabuk_win::msgloop::Msg {
+            id: kabuk_win::msgloop::msg::MOUSEMOVE,
+            wparam: 0,
+            lparam: 0,
+        },
+    )
+    .unwrap();
+    let (moved, covered) = watch(was);
+    assert!(moved, "the maximised window was not pushed");
+    assert!(
+        covered,
+        "the maximised window jumped: no scene over it before it moved\n{:?}",
+        sandbox.last_log_line(&["work area coming"])
+    );
+    assert!(
+        sandbox
+            .last_log_line(&["work area coming"])
+            .is_some_and(|l| l.contains("maximised=1")),
+        "{:?}",
+        sandbox.last_log_line(&["work area coming"])
+    );
+    assert!(wait_until(SETTLE, || top() == primary.rect.top).is_some(), "not shown");
+    assert!(
+        wait_until(SETTLE, || w
+            .hwnd
+            .frame_rect()
+            .is_some_and(|f| f.top >= bar.window_rect().unwrap().bottom))
+        .is_some(),
+        "the window is still under the bar: {:?} under {:?}",
+        w.hwnd.frame_rect(),
+        bar.window_rect()
+    );
+    // The bar slides off: the window slides back up.
+    std::thread::sleep(Duration::from_millis(300));
+    let was = w.hwnd.window_rect().unwrap();
+    assert!(kabuk_win::input::set_cursor_pos(away.0, away.1));
+    let (moved, covered) = watch(was);
+    assert!(moved, "the room was not given back");
+    assert!(
+        covered,
+        "the maximised window jumped back: no scene over it before it moved"
+    );
+    assert!(wait_until(SETTLE, || top() == hidden).is_some(), "not hidden again");
+    assert!(wait_until(SETTLE, || work_areas() == before).is_some());
+    assert_eq!(sandbox.restore().0, 0);
+    assert_eq!(work_areas(), before);
+}
+
 /// DECISIONS D70, found by the user: with auto-hide, Rıhtım's dock did not hide. It
 /// reserves nothing, waits off its edge with a sliver at the monitor's edge, comes in
 /// when the mouse rests there and slides off once it leaves. D73: shown, it pushes the

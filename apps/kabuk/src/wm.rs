@@ -10,7 +10,7 @@
 //! told when it changes.
 
 use std::cell::RefCell;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 use std::sync::{mpsc, Arc, Mutex, MutexGuard};
@@ -105,6 +105,11 @@ const GENIE_PICTURE_STEP: Duration = Duration::from_millis(4);
 /// its place (looked for as often as the picture): it came back bare once, while the
 /// genie was still being set up (found by the user). Past it, it comes back anyway.
 const GENIE_COVER_WAIT: Duration = Duration::from_millis(500);
+/// How long the scene of windows pushed by an auto-hiding bar stays once they are in
+/// place: the bar reserves its strip only as its slide ends (so the maximised windows'
+/// pictures do not change size halfway), and Windows' resized windows paint meanwhile
+/// (DECISIONS D75).
+const WORK_AREA_HOLD: Duration = Duration::from_millis(150);
 /// How long after Kabuk minimised or restored a window its event still belongs to the
 /// genie Kabuk started.
 const GENIE_OWN: Duration = Duration::from_secs(1);
@@ -229,6 +234,12 @@ pub enum Command {
     AppIcons(Vec<(u64, state::Rect)>),
     /// The mouse is on an app's icon: a genie may come soon (its renderer is made ahead).
     WarmGenie,
+    /// An auto-hiding bar reserves its strip or gives it back a moment from now: the work
+    /// area of monitor `device` becomes `to` (DECISIONS D75).
+    WorkAreaComing {
+        device: String,
+        to: state::Rect,
+    },
 }
 
 pub struct Options {
@@ -609,6 +620,27 @@ fn ease(u: f32) -> f32 {
     kabuk_ui::motion::ease_out(0.0, 1.0, 1.0).at(u)
 }
 
+/// Where maximised window `outer` goes when its work area changes from `from` to `to`:
+/// each side moves as the work area's does (its invisible borders stay outside it).
+fn follow_work_area(outer: state::Rect, from: state::Rect, to: state::Rect) -> state::Rect {
+    state::Rect {
+        left: outer.left + (to.left - from.left),
+        top: outer.top + (to.top - from.top),
+        right: outer.right + (to.right - from.right),
+        bottom: outer.bottom + (to.bottom - from.bottom),
+    }
+}
+
+/// The smallest rectangle holding `a` and `b`.
+fn union(a: state::Rect, b: state::Rect) -> state::Rect {
+    state::Rect {
+        left: a.left.min(b.left),
+        top: a.top.min(b.top),
+        right: a.right.max(b.right),
+        bottom: a.bottom.max(b.bottom),
+    }
+}
+
 /// `frame` grown by the invisible borders `outer` has around `visible`.
 fn with_borders(frame: state::Rect, outer: state::Rect, visible: state::Rect) -> state::Rect {
     state::Rect {
@@ -866,6 +898,7 @@ impl Wm {
             }
             Command::SetLayout(name) => self.set_layout(name),
             Command::GameMode(devices) => self.set_game_mode(devices),
+            Command::WorkAreaComing { device, to } => self.work_area_coming(&device, to),
             Command::SetFrame(frame) => {
                 if self.frame != Some(frame) {
                     self.frame = Some(frame);
@@ -1676,6 +1709,11 @@ impl Wm {
     /// fails it stays visible.
     fn apply(&mut self, effects: Vec<Effect>) {
         self.animate_moves(&effects);
+        self.carry_out(effects);
+    }
+
+    /// [`Self::apply`] without playing the moves (played already).
+    fn carry_out(&mut self, effects: Vec<Effect>) {
         // The windows to hide are on disk together before any of them hides, and those
         // shown again leave the record together, after.
         let hiding: Vec<Hwnd> = effects
@@ -1890,13 +1928,64 @@ impl Wm {
     /// windows jump there, and a pending genie over its whole monitor (only with full
     /// animations, and never in game mode).
     fn animate_moves(&mut self, effects: &[Effect]) {
+        self.play_moves(effects, HashMap::new(), None, kabuk_ui::motion::WINDOW_MOVE, 0.0);
+    }
+
+    /// An auto-hiding bar reserves its strip or gives it back a moment from now: the
+    /// layout takes monitor `device`'s new work area `to` at once, and its windows slide
+    /// there with the bar's slide, maximised ones too, which Windows moves at once when
+    /// the work area changes (found by the user: they jumped as the bar came in; D75).
+    /// The shell's own change comes as the slide ends, under the scene, which stays for
+    /// [`WORK_AREA_HOLD`] more; its monitors' update changes nothing more when it is what
+    /// was said.
+    fn work_area_coming(&mut self, device: &str, to: state::Rect) {
+        let Some(monitor) = kabuk_win::shell::monitors().into_iter().find(|m| m.device == device) else {
+            return;
+        };
+        let from = monitor.work_area;
+        if from == to {
+            return;
+        }
+        let mut coming = monitors();
+        for m in coming.iter_mut().filter(|m| m.key == device) {
+            m.area = rect_of(to);
+        }
+        let maximised: HashMap<u64, state::Rect> = kabuk_win::window::top_level_windows()
+            .into_iter()
+            .filter(|h| h.is_visible() && h.is_maximized() && !h.is_cloaked() && !h.is_full_screen())
+            .filter(|h| h.monitor_rect() == Some(monitor.rect))
+            .filter_map(|h| Some((h.0, follow_work_area(h.window_rect()?, from, to))))
+            .collect();
+        tracing::info!(device, ?from, ?to, maximised = maximised.len(), "work area coming");
+        let effects = self.desk.set_monitors(coming);
+        self.play_moves(
+            &effects,
+            maximised,
+            Some((device, union(from, to))),
+            kabuk_ui::motion::BAR_SLIDE,
+            WORK_AREA_HOLD.as_secs_f32(),
+        );
+        self.carry_out(effects);
+    }
+
+    /// Plays the moves among `effects` and `moving` (windows to their outer rectangles)
+    /// over each work area they happen on, `over` a monitor's given area instead, in
+    /// `seconds` and staying `hold` seconds more, and a pending genie over its whole
+    /// monitor.
+    fn play_moves(
+        &mut self,
+        effects: &[Effect],
+        mut moving: HashMap<u64, state::Rect>,
+        over: Option<(&str, state::Rect)>,
+        seconds: f32,
+        hold: f32,
+    ) {
         let genie = self.pending_genie.take();
         let Some(mover) = &self.mover else { return };
         let full = self.config.current().appearance.animations == config::Animations::Full;
         if !full || !self.game.is_empty() || !kabuk_win::system::animations_on() {
             return;
         }
-        let mut moving = std::collections::HashMap::new();
         for e in effects {
             let Effect::Place(id, r) = *e else { continue };
             let h = Hwnd(id);
@@ -1914,15 +2003,18 @@ impl Wm {
         if moving.is_empty() && genie.is_none() {
             return;
         }
-        let seconds = kabuk_ui::motion::WINDOW_MOVE;
         for m in kabuk_win::shell::monitors() {
             // The genie's monitor plays over all of it: the icon is on its bar.
             let here_genie = genie.filter(|g| {
                 let (cx, cy) = ((g.frame.left + g.frame.right) / 2, (g.frame.top + g.frame.bottom) / 2);
                 cx >= m.rect.left && cx < m.rect.right && cy >= m.rect.top && cy < m.rect.bottom
             });
-            let a = if here_genie.is_some() { m.rect } else { m.work_area };
-            let here: std::collections::HashMap<u64, state::Rect> = moving
+            let a = match over {
+                _ if here_genie.is_some() => m.rect,
+                Some((device, area)) if device == m.device => area,
+                _ => m.work_area,
+            };
+            let here: HashMap<u64, state::Rect> = moving
                 .iter()
                 .filter(|(_, to)| {
                     let (cx, cy) = ((to.left + to.right) / 2, (to.top + to.bottom) / 2);
@@ -1942,6 +2034,7 @@ impl Wm {
                 area: a,
                 layers,
                 seconds,
+                hold,
                 genie: here_genie,
             });
         }
@@ -2227,8 +2320,29 @@ impl Wm {
 mod tests {
     //! Edge cases: an exact placement, rounding within the tolerance, a larger window, a
     //! window left elsewhere, a smaller (grid-snapped) window; settings from defaults, a
-    //! floating default and a gap override.
+    //! floating default and a gap override; a maximised window following its work area
+    //! cut at the top and given back, on Monitor 2 left of the main one.
     use super::*;
+
+    /// DECISIONS D75: a maximised window slides with its work area as an auto-hiding bar
+    /// takes its strip, its invisible borders staying outside, and back when it is given
+    /// back; the scene plays over both work areas.
+    #[test]
+    fn a_maximised_window_follows_its_work_area() {
+        let r = |left, top, right, bottom| state::Rect {
+            left,
+            top,
+            right,
+            bottom,
+        };
+        let full = r(-2560, 0, 0, 1440);
+        let cut = r(-2560, 48, 0, 1440);
+        let outer = r(-2568, -8, 8, 1448);
+        assert_eq!(follow_work_area(outer, full, cut), r(-2568, 40, 8, 1448));
+        assert_eq!(follow_work_area(r(-2568, 40, 8, 1448), cut, full), outer);
+        assert_eq!(union(full, cut), full);
+        assert_eq!(union(cut, r(-2560, 0, 0, 1392)), full);
+    }
 
     const WANT: Rect = Rect {
         x: 13,

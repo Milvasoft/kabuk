@@ -92,6 +92,9 @@ pub struct Scene {
     pub area: Rect,
     pub layers: Vec<Layer>,
     pub seconds: f32,
+    /// How long the windows stay at their new places once there before the overlay goes
+    /// (seconds): windows Windows moves under it at the end get the time to paint.
+    pub hold: f32,
     pub genie: Option<Genie>,
 }
 
@@ -606,8 +609,7 @@ fn begin(scene: Scene, before: Option<Playing>, renderer: Option<&gpu::Renderer>
             started: Instant::now(),
             moves: Duration::from_secs_f32(scene.seconds.max(0.0)),
             length: Duration::from_secs_f32(
-                scene
-                    .seconds
+                (scene.seconds + scene.hold.max(0.0))
                     .max(
                         genie
                             .as_ref()
@@ -910,6 +912,7 @@ mod tests {
                 area,
                 layers: Vec::new(),
                 seconds: 0.0,
+                hold: 0.0,
                 genie: None,
             },
             None,
@@ -946,6 +949,7 @@ mod tests {
             area,
             layers,
             seconds: 0.0,
+            hold: 0.0,
             genie: None,
         };
         // A window to show: another scene's overlay, out of sight as well.

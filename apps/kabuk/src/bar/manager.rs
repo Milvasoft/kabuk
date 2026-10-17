@@ -187,6 +187,9 @@ mod timer {
     pub const TRAY_MENU: usize = 33;
     /// The mouse rested at an auto-hiding bar's (or the dock's) edge: it comes in.
     pub const REVEAL: usize = 34;
+    /// The window manager had its moment to put its scene up: the auto-hiding bars
+    /// reserve their strips or give them back.
+    pub const RESERVE: usize = 35;
 }
 
 /// An auto-hiding bar (SPEC §2.1): how much of it stays on screen for the mouse to reach
@@ -195,6 +198,8 @@ mod timer {
 const AUTOHIDE_PEEK: f32 = 2.0;
 /// A volume key the keyboard hook took (`wparam`: its [`kabuk_win::keyhook::VolumeKey`]).
 const MSG_VOLUME_KEY: u32 = msgloop::msg::APP + 42;
+/// A frame of the screen while an auto-hiding bar slides ([`kabuk_win::ticker`]).
+const MSG_SLIDE_FRAME: u32 = msgloop::msg::APP + 53;
 const AUTOHIDE_DELAY: Duration = Duration::from_millis(600);
 const BAR_SLIDE_STEP: Duration = Duration::from_millis(16);
 /// How long the mouse rests at an auto-hiding bar's edge before it comes in (found by
@@ -586,6 +591,9 @@ struct Shared {
     tooltip: Option<motion_host::Shown>,
     /// The auto-hiding bar (or dock) the mouse rests at, until [`REVEAL_DELAY`] passes.
     reveal: Option<Peeker>,
+    /// Steps the auto-hiding bars' slides at every frame the screen shows while they
+    /// slide (a timer stepped them in uneven jumps; found by the user; DECISIONS D75).
+    slide_ticker: Option<kabuk_win::ticker::FrameTicker>,
     /// A display change came during a full-screen program: the bars are made again once
     /// it is gone (D72).
     rebuild_after_game: bool,
@@ -831,6 +839,7 @@ impl BarManager {
                 hover: None,
                 tooltip: None,
                 reveal: None,
+                slide_ticker: None,
                 rebuild_after_game: false,
                 tray_menu: None,
                 tray_host: None,
@@ -1279,6 +1288,7 @@ impl Shared {
                     timer::DRIFT => self.drift_step(false),
                     timer::AUTOHIDE => self.autohide_due(),
                     timer::REVEAL => self.reveal_due(),
+                    timer::RESERVE => self.reserve_due(),
                     timer::BAR_SLIDE => self.step_bar_slides(),
                     timer::SAVER_KEYS => self.saver_keys_due(),
                     timer::APP_GRID_SLIDE => self.app_grid_slide_over(),
@@ -1353,6 +1363,13 @@ impl Shared {
             .then_some(0),
             MSG_VOLUME_KEY => {
                 self.volume_key(m.wparam);
+                Some(0)
+            }
+            MSG_SLIDE_FRAME => {
+                if let Some(t) = &self.slide_ticker {
+                    t.taken();
+                }
+                self.step_bar_slides();
                 Some(0)
             }
             MSG_START_SAVER => {
@@ -2893,8 +2910,69 @@ impl Shared {
             since: std::time::Instant::now(),
         });
         tracing::debug!(?who, show, "auto-hiding bar slides");
-        self.reserve(who, show);
+        self.announce(who, show);
         self.step_bar_slides();
+    }
+
+    /// Auto-hiding `who` is about to reserve its strip (`on`) or give it back: the window
+    /// manager hears the work area coming first, so the windows slide with the bar
+    /// instead of jumping (asked for by the user: they were pushed at once; D75), and
+    /// the change follows as the slide ends: the maximised windows Windows then resizes
+    /// do so under the window manager's scene, not halfway through it (found by the user:
+    /// they slid "takıla takıla"). Without a window manager, or without full motion, it
+    /// is at once.
+    fn announce(&mut self, who: Peeker, on: bool) {
+        let Some(link) = self.wm.clone() else {
+            self.reserve(who, on);
+            return;
+        };
+        let place = match who {
+            Peeker::Bar(i) => self.bars.get(i).map(|b| (b.monitor.clone(), b.edge, b.thickness)),
+            Peeker::Dock => self.dock.as_ref().map(|d| (d.monitor.clone(), d.edge, d.thickness)),
+        };
+        let Some((monitor, edge, thickness)) = place else {
+            return;
+        };
+        if on && !self.record_work_area(&monitor) {
+            return;
+        }
+        let work = kabuk_win::shell::monitors()
+            .into_iter()
+            .find(|m| m.device == monitor.device)
+            .map_or(monitor.work_area, |m| m.work_area);
+        let to = appbar::work_area_with(edge, px_rect(monitor.rect), px_rect(work), thickness, on);
+        link.send(wm::Command::WorkAreaComing {
+            device: monitor.device.clone(),
+            to: kabuk_core::state::Rect {
+                left: to.x,
+                top: to.y,
+                right: to.x + to.w,
+                bottom: to.y + to.h,
+            },
+        });
+        let lead = if self.motion_level() == kabuk_ui::motion::Level::Full {
+            Duration::from_secs_f32(kabuk_ui::motion::BAR_SLIDE)
+        } else {
+            Duration::ZERO
+        };
+        if let Some(c) = &self.control {
+            c.set_timer(timer::RESERVE, lead);
+        }
+    }
+
+    /// The window manager's scene is up: every auto-hiding bar and the dock take or give
+    /// back their strips as they slide now.
+    fn reserve_due(&mut self) {
+        self.kill(timer::RESERVE);
+        let peekers = (0..self.bars.len())
+            .map(Peeker::Bar)
+            .chain(std::iter::once(Peeker::Dock));
+        let due: Vec<(Peeker, bool)> = peekers
+            .filter_map(|who| self.peek_of(who).map(|p| (who, p.to > 0.0)))
+            .collect();
+        for (who, on) in due {
+            self.reserve(who, on);
+        }
     }
 
     /// While auto-hiding `who` is shown it reserves its strip, as a bar that keeps its
@@ -3021,8 +3099,21 @@ impl Shared {
                 moving |= !p.done();
             }
         }
-        match (&self.control, moving) {
-            (Some(c), true) => c.set_timer(timer::BAR_SLIDE, BAR_SLIDE_STEP),
+        if !moving {
+            self.slide_ticker = None;
+            self.kill(timer::BAR_SLIDE);
+            return;
+        }
+        // At the screen's own pace; a timer only when no ticker can be had.
+        if self.slide_ticker.is_none() {
+            self.slide_ticker = self.control.as_ref().and_then(|c| {
+                kabuk_win::ticker::FrameTicker::start(c.hwnd(), MSG_SLIDE_FRAME)
+                    .map_err(|e| tracing::warn!(error = %e, "bar slides stepped by a timer"))
+                    .ok()
+            });
+        }
+        match (&self.control, &self.slide_ticker) {
+            (Some(c), None) => c.set_timer(timer::BAR_SLIDE, BAR_SLIDE_STEP),
             _ => self.kill(timer::BAR_SLIDE),
         }
     }

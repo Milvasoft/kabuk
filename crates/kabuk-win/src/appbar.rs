@@ -229,13 +229,75 @@ pub fn slid_to_edge(edge: Edge, rect: PxRect, monitor: PxRect, peek: i32, shown:
     }
 }
 
+/// The work area `monitor` will have once a bar of `thickness` px on `edge` reserves its
+/// strip (`reserved`) or gives it back, from `work`, the work area now: reserving cuts
+/// the strip off it, giving back lets it reach the monitor's edge again when it ended at
+/// the strip. Said ahead, so the windows can slide as the bar does (DECISIONS D75); the
+/// shell's own answer comes a moment later and wins.
+pub fn work_area_with(edge: Edge, monitor: PxRect, work: PxRect, thickness: i32, reserved: bool) -> PxRect {
+    let (mut l, mut t, mut r, mut b) = (work.x, work.y, work.x + work.w, work.y + work.h);
+    let (ml, mt, mr, mb) = (monitor.x, monitor.y, monitor.x + monitor.w, monitor.y + monitor.h);
+    match (edge, reserved) {
+        (Edge::Top, true) => t = t.max(mt + thickness),
+        (Edge::Bottom, true) => b = b.min(mb - thickness),
+        (Edge::Left, true) => l = l.max(ml + thickness),
+        (Edge::Right, true) => r = r.min(mr - thickness),
+        (Edge::Top, false) if t == mt + thickness => t = mt,
+        (Edge::Bottom, false) if b == mb - thickness => b = mb,
+        (Edge::Left, false) if l == ml + thickness => l = ml,
+        (Edge::Right, false) if r == mr - thickness => r = mr,
+        _ => {}
+    }
+    PxRect {
+        x: l,
+        y: t,
+        w: r - l,
+        h: b - t,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //! Pure geometry only; registering an AppBar changes the desktop and is covered by
     //! the integration tests. Edge cases: each edge, monitors at negative coordinates; an
     //! auto-hiding bar shown, half shown and hidden on each edge, a peek larger than the
-    //! bar.
+    //! bar; the work area said ahead when it is already cut, or not ours to give back.
     use super::*;
+
+    /// DECISIONS D75: the work area an auto-hiding bar's reservation leaves, said before
+    /// the shell changes it, on each edge of Monitor 2 left of the main one; reserving
+    /// twice cuts once, and giving back leaves a work area that does not end at the strip
+    /// (another bar's) alone.
+    #[test]
+    fn the_work_area_a_reservation_leaves_is_known_ahead() {
+        let m = PxRect {
+            x: -2560,
+            y: 0,
+            w: 2560,
+            h: 1440,
+        };
+        for (edge, cut) in [
+            (Edge::Top, PxRect { y: 48, h: 1392, ..m }),
+            (Edge::Bottom, PxRect { h: 1392, ..m }),
+            (Edge::Left, PxRect { x: -2512, w: 2512, ..m }),
+            (Edge::Right, PxRect { w: 2512, ..m }),
+        ] {
+            assert_eq!(work_area_with(edge, m, m, 48, true), cut, "{edge:?} reserved");
+            assert_eq!(work_area_with(edge, m, cut, 48, true), cut, "{edge:?} reserved again");
+            assert_eq!(work_area_with(edge, m, cut, 48, false), m, "{edge:?} given back");
+            assert_eq!(
+                work_area_with(edge, m, m, 48, false),
+                m,
+                "{edge:?} nothing to give back"
+            );
+        }
+        let other = PxRect { h: 1380, ..m };
+        assert_eq!(
+            work_area_with(Edge::Bottom, m, other, 48, false),
+            other,
+            "another bar's room"
+        );
+    }
 
     #[test]
     fn an_auto_hiding_bar_slides_off_its_edge_and_leaves_a_peek() {
