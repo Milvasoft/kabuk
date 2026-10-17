@@ -3135,15 +3135,22 @@ impl Shared {
         let at = kabuk_win::input::cursor_pos();
         let over = |r: PxRect| at.is_some_and(|(x, y)| x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
         let mut still = false;
+        let reach = |edge, rect, monitor: &Monitor| appbar::reach_to_edge(edge, rect, px_rect(monitor.rect));
         for i in 0..self.bars.len() {
-            if over(self.bars[i].rect) {
+            let b = &self.bars[i];
+            if over(reach(b.edge, b.rect, &b.monitor)) {
                 // Still on it (the window under the mouse changed): look again later.
                 still = true;
             } else {
                 self.peek(Peeker::Bar(i), false);
             }
         }
-        if let Some(r) = self.dock.as_ref().filter(|d| d.peek.is_some()).map(|d| d.rect) {
+        if let Some(r) = self
+            .dock
+            .as_ref()
+            .filter(|d| d.peek.is_some())
+            .map(|d| reach(d.edge, d.rect, &d.monitor))
+        {
             if over(r) {
                 still = true;
             } else {

@@ -359,6 +359,15 @@ fn rihtims_dock_auto_hides_with_the_bar() {
         "the shown dock did not push the windows: {:?}",
         primary_work_area()
     );
+    // The mouse resting at the edge, under the floating dock, keeps it (found by the
+    // user: it came and went again and again).
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(
+        rect().bottom < bottom,
+        "it slid off under a resting mouse: {:?}",
+        rect()
+    );
+    assert_eq!(sandbox.log_lines("auto-hiding dock gives its room back"), 0);
     assert!(kabuk_win::input::set_cursor_pos(away.0, away.1));
     assert!(
         wait_until(SETTLE, || rect() == hidden).is_some(),

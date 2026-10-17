@@ -256,6 +256,26 @@ pub fn work_area_with(edge: Edge, monitor: PxRect, work: PxRect, thickness: i32,
     }
 }
 
+/// Where the mouse keeps a shown auto-hiding window (a bar or Rıhtım's dock) on screen:
+/// its place `rect`, reaching on to `monitor`'s `edge`, so the mouse resting at the edge
+/// it came in from keeps it (found by the user: the dock, floating above the bottom
+/// edge, came and went again and again with the mouse resting at that edge; D70).
+pub fn reach_to_edge(edge: Edge, rect: PxRect, monitor: PxRect) -> PxRect {
+    let (l, t, r, b) = (rect.x, rect.y, rect.x + rect.w, rect.y + rect.h);
+    let (l, t, r, b) = match edge {
+        Edge::Top => (l, monitor.y.min(t), r, b),
+        Edge::Bottom => (l, t, r, (monitor.y + monitor.h).max(b)),
+        Edge::Left => (monitor.x.min(l), t, r, b),
+        Edge::Right => (l, t, (monitor.x + monitor.w).max(r), b),
+    };
+    PxRect {
+        x: l,
+        y: t,
+        w: r - l,
+        h: b - t,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //! Pure geometry only; registering an AppBar changes the desktop and is covered by
@@ -263,6 +283,45 @@ mod tests {
     //! auto-hiding bar shown, half shown and hidden on each edge, a peek larger than the
     //! bar; the work area said ahead when it is already cut, or not ours to give back.
     use super::*;
+
+    /// D70, found by the user: the floating dock's reach goes on to its edge, on each
+    /// edge of Monitor 2 left of the main one; a bar already at its edge keeps its place.
+    #[test]
+    fn a_floating_dock_reaches_its_edge() {
+        let m = PxRect {
+            x: -2560,
+            y: 0,
+            w: 2560,
+            h: 1440,
+        };
+        let dock = PxRect {
+            x: -1580,
+            y: 1338,
+            w: 600,
+            h: 90,
+        };
+        assert_eq!(reach_to_edge(Edge::Bottom, dock, m), PxRect { h: 102, ..dock });
+        let top = PxRect { y: 12, ..dock };
+        assert_eq!(reach_to_edge(Edge::Top, top, m), PxRect { y: 0, h: 102, ..dock });
+        let left = PxRect {
+            x: -2548,
+            y: 600,
+            w: 90,
+            h: 400,
+        };
+        assert_eq!(
+            reach_to_edge(Edge::Left, left, m),
+            PxRect {
+                x: -2560,
+                w: 102,
+                ..left
+            }
+        );
+        let right = PxRect { x: -102, ..left };
+        assert_eq!(reach_to_edge(Edge::Right, right, m), PxRect { w: 102, ..right });
+        let bar = strip(Edge::Top, m, 48);
+        assert_eq!(reach_to_edge(Edge::Top, bar, m), bar);
+    }
 
     /// DECISIONS D75: the work area an auto-hiding bar's reservation leaves, said before
     /// the shell changes it, on each edge of Monitor 2 left of the main one; reserving
