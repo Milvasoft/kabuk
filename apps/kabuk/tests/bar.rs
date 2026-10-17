@@ -1172,6 +1172,33 @@ fn an_apps_previews_show_its_windows_and_bring_one_back() {
     assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
 }
 
+/// Found by the user: Chrome, minimised when Kabuk started, never played the genie while
+/// windows opened later did. A window first met minimised gets the genie too.
+#[test]
+fn a_window_met_minimised_gets_the_genie() {
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    let w = TestWindow::open(&["--title", &title("met-minimised"), "--minimized"]);
+    assert!(wait_until(SETTLE, || w.hwnd.is_minimized()).is_some());
+    let _shell = sandbox.shell_with_bar_and_wm();
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let managed = format!("managing window hwnd={}", w.hwnd.0);
+    assert!(wait_until(SETTLE, || sandbox.log_lines(&managed) == 1).is_some());
+    let recorded = || sandbox.state().genie_windows.iter().any(|g| g.hwnd == w.hwnd.0);
+    if kabuk_win::system::animations_on() {
+        assert!(
+            wait_until(SETTLE, recorded).is_some(),
+            "no genie for the minimised window"
+        );
+    } else {
+        // Windows' animation effects are off: no genie, nothing turned off.
+        std::thread::sleep(SETTLE);
+        assert!(!recorded());
+    }
+    assert_eq!(sandbox.restore().0, 0);
+}
+
 /// Asked for by the user (macOS's genie): a managed window's own transitions are turned
 /// off (recorded first); minimising and restoring it play the genie into and out of its
 /// icon on the bar; Windows' own effect chosen in the file gives its transitions back,

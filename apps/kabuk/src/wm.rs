@@ -1531,10 +1531,14 @@ impl Wm {
             place: placed_at.is_some(),
         };
         if minimised {
-            // Nothing on screen changes; restoring it brings it into the layout.
+            // Nothing on screen changes; restoring it brings it into the layout. It gets
+            // its look and the genie now (found by the user: Chrome, minimised when Kabuk
+            // started, never played the genie).
             if self.desk.add_parked(new) {
                 self.publish();
             }
+            self.style_window(id);
+            self.genie_window(id);
             return;
         }
         let effects = self.desk.add(new);
