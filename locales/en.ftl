@@ -510,6 +510,27 @@ setup-startup-on = Kabuk will start when you sign in.
 setup-startup-off = Kabuk will not start when you sign in.
 setup-startup-blocked = Windows' settings keep Kabuk from starting when you sign in; turn it on in Settings › Apps › Startup.
 store-description = A desktop shell for Windows: a bar on every monitor, tiling windows, a launcher and looks of its own. When it exits, Windows is as it was.
+store-listing-description =
+    Kabuk gives Windows a new desktop: its own bar on every monitor, windows that arrange themselves, a fast launcher and ten looks to choose from. The Windows taskbar steps aside while Kabuk runs; when Kabuk exits, Windows is exactly as it was.
+
+    Your windows tile themselves side by side, or float where you put them, on nine workspaces that span all your monitors. Move, resize and switch them from the keyboard, or hold Alt and grab them anywhere. Minimised windows pour into their icon on the bar.
+
+    The bar shows your workspaces, your apps, the system tray, notifications, media, volume, network, battery, the clock and the computer's load. The launcher finds apps, open windows, files and bookmarks as you type, and counts too; the app grid lists everything you have installed.
+
+    Each look changes the bar, the colours, the cursors and the wallpaper together, in dark or light. Animated wallpapers and screen savers are drawn for OLED screens: true black, nothing bright that stays put. You can even describe a wallpaper and let an AI model of your choice draw it.
+
+    Game mode steps aside when a game is in full screen. If anything ever goes wrong, Ctrl+Alt+Shift+End brings back every window and the Windows taskbar at once.
+
+    Kabuk is free and open source (Apache 2.0). It collects nothing about you.
+store-listing-feature-1 = A bar on every monitor: workspaces, apps, tray, notifications, media, clock
+store-listing-feature-2 = Windows that tile themselves, or float, on nine workspaces across your monitors
+store-listing-feature-3 = A launcher for apps, windows, files and bookmarks, and an app grid
+store-listing-feature-4 = Ten looks, dark and light: bar, colours, cursors and wallpaper together
+store-listing-feature-5 = Animated wallpapers and screen savers made for OLED screens
+store-listing-feature-6 = The genie: windows pour into their icon as they minimise
+store-listing-feature-7 = Game mode that steps aside for full-screen games
+store-listing-feature-8 = Ctrl+Alt+Shift+End brings Windows back at any moment
+store-listing-keywords = desktop shell, tiling window manager, taskbar, launcher, workspaces, themes, OLED
 setup-store-managed = Kabuk was installed from the Microsoft Store: Windows installs, updates and removes it (Settings › Apps).
 setup-confirm = Kabuk will be installed for you (no administrator rights needed). While it runs, its own bar takes the place of Windows' taskbar and it arranges your windows; when it exits, Windows is as it was. If anything ever goes wrong, Ctrl+Alt+Shift+End brings everything back. Install Kabuk now?
 setup-done = Kabuk is installed and running. "Kabuk Settings" in the Start menu changes its look and behaviour; the "Kabuk" shortcut on your desktop starts it again. In a terminal, "kabuk --help" lists its commands. Ctrl+Alt+Shift+End brings Windows back at any time.

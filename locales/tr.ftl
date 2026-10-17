@@ -509,6 +509,27 @@ setup-startup-on = Kabuk oturum açınca başlayacak.
 setup-startup-off = Kabuk oturum açınca başlamayacak.
 setup-startup-blocked = Windows ayarları Kabuk'un oturum açılınca başlamasını engelliyor; Ayarlar › Uygulamalar › Başlangıç'tan aç.
 store-description = Windows için bir masaüstü kabuğu: her monitörde bir bar, döşenen pencereler, bir başlatıcı ve kendi görünümleri. Kapanınca Windows eski hâline döner.
+store-listing-description =
+    Kabuk, Windows'a yeni bir masaüstü getirir: her monitörde kendi barı, kendiliğinden düzenlenen pencereler, hızlı bir başlatıcı ve seçilecek on görünüm. Kabuk çalışırken Windows görev çubuğu kenara çekilir; Kabuk kapanınca Windows tam olarak eski hâline döner.
+
+    Pencerelerin yan yana döşenir ya da bıraktığın yerde yüzer; tüm monitörlerine yayılan dokuz çalışma alanı vardır. Onları klavyeden taşı, boyutlandır ve değiştir ya da Alt'a basılı tutup herhangi bir yerinden tut. Küçültülen pencereler bardaki simgelerine akar.
+
+    Bar çalışma alanlarını, uygulamalarını, sistem tepsisini, bildirimleri, medyayı, sesi, ağı, pili, saati ve bilgisayarın yükünü gösterir. Başlatıcı yazdıkça uygulamaları, açık pencereleri, dosyaları ve yer imlerini bulur, hesap da yapar; uygulama ızgarası kurulu her şeyi listeler.
+
+    Her görünüm barı, renkleri, imleçleri ve duvar kâğıdını birlikte değiştirir; koyu ya da açık. Hareketli duvar kâğıtları ve ekran koruyucular OLED ekranlar için çizilir: gerçek siyah, yerinde duran parlak hiçbir şey yok. İstersen bir duvar kâğıdını anlat, seçtiğin bir yapay zekâ modeli çizsin.
+
+    Oyun modu, tam ekran bir oyun açıkken kenara çekilir. Bir şey ters giderse Ctrl+Alt+Shift+End her pencereyi ve Windows görev çubuğunu bir anda geri getirir.
+
+    Kabuk ücretsiz ve açık kaynaktır (Apache 2.0). Senin hakkında hiçbir şey toplamaz.
+store-listing-feature-1 = Her monitörde bir bar: çalışma alanları, uygulamalar, tepsi, bildirimler, medya, saat
+store-listing-feature-2 = Monitörlerine yayılan dokuz çalışma alanında kendiliğinden döşenen ya da yüzen pencereler
+store-listing-feature-3 = Uygulamalar, pencereler, dosyalar ve yer imleri için bir başlatıcı ve uygulama ızgarası
+store-listing-feature-4 = Koyu ve açık on görünüm: bar, renkler, imleçler ve duvar kâğıdı birlikte
+store-listing-feature-5 = OLED ekranlar için yapılmış hareketli duvar kâğıtları ve ekran koruyucular
+store-listing-feature-6 = Cin efekti: pencereler küçülürken simgelerine akar
+store-listing-feature-7 = Tam ekran oyunlar için kenara çekilen oyun modu
+store-listing-feature-8 = Ctrl+Alt+Shift+End Windows'u her an geri getirir
+store-listing-keywords = masaüstü kabuğu, döşemeli pencere yöneticisi, görev çubuğu, başlatıcı, çalışma alanları, temalar, OLED
 setup-store-managed = Kabuk Microsoft Store'dan kuruldu: onu Windows kurar, günceller ve kaldırır (Ayarlar › Uygulamalar).
 setup-confirm = Kabuk senin için kurulacak (yönetici izni gerekmez). Çalışırken Windows görev çubuğunun yerini kendi barı alır ve pencerelerini düzenler; kapanınca Windows eski hâline döner. Bir şey ters giderse Ctrl+Alt+Shift+End her şeyi geri getirir. Kabuk şimdi kurulsun mu?
 setup-done = Kabuk kuruldu ve çalışıyor. Başlat menüsündeki "Kabuk Ayarları" görünümünü ve davranışını değiştirir; masaüstündeki "Kabuk" kısayolu onu yeniden başlatır. Terminalde "kabuk --help" komutlarını listeler. Ctrl+Alt+Shift+End Windows'u her an geri getirir.
