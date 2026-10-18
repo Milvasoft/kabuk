@@ -340,6 +340,14 @@ impl Hwnd {
         }
     }
 
+    /// The monitor that holds most of the window (its `HMONITOR` value), if it is on one.
+    pub fn monitor_handle(self) -> Option<isize> {
+        use windows::Win32::Graphics::Gdi::{MonitorFromWindow, MONITOR_DEFAULTTONULL};
+        // SAFETY: plain query; a gone window gives no monitor.
+        let m = unsafe { MonitorFromWindow(self.raw(), MONITOR_DEFAULTTONULL) };
+        (!m.is_invalid()).then_some(m.0 as isize)
+    }
+
     /// The rectangle of the monitor the window is on, as Windows gives it now (a game in
     /// exclusive full screen may have changed its resolution), physical pixels.
     pub fn monitor_rect(self) -> Option<kabuk_core::state::Rect> {

@@ -22,7 +22,7 @@
 //! changes the volume and shows its own OSD, so Windows' flyout does not show beside it.
 
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use kabuk_core::config::shortcut::{Chord, Mods};
@@ -58,6 +58,13 @@ static PAUSED: AtomicBool = AtomicBool::new(false);
 /// The monitors (`HMONITOR` values) a full-screen program covers while [`PAUSED`].
 static PAUSED_ON: Mutex<Vec<isize>> = Mutex::new(Vec::new());
 static THREAD: OnceLock<Result<(), String>> = OnceLock::new();
+/// The hook thread's id, for telling it to take the hook off or put it back.
+static THREAD_ID: AtomicU32 = AtomicU32::new(0);
+/// Whether the hook is on now (off while a full-screen program is in front: D85).
+static HOOKED: AtomicBool = AtomicBool::new(false);
+/// Thread messages of the hook thread: take the hook off, put it back.
+const MSG_UNHOOK: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 1;
+const MSG_REHOOK: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 2;
 
 /// A key event as the hook sees it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -264,13 +271,44 @@ fn front_monitor() -> Option<isize> {
     (!m.is_invalid()).then_some(m.0 as isize)
 }
 
-/// Game mode, decided per key (cheap: only while a full-screen program runs).
+/// Game mode, decided per key while the hook is on (the window in front may have just
+/// moved to a full-screen monitor, before the hook is taken off).
 fn paused_now() -> bool {
     if !PAUSED.load(Ordering::Relaxed) {
         return false;
     }
-    let paused_on = PAUSED_ON.lock().map(|p| p.clone()).unwrap_or_default();
-    paused_for(front_monitor(), &paused_on)
+    let front = front_monitor();
+    PAUSED_ON.lock().is_ok_and(|p| paused_for(front, &p))
+}
+
+/// Takes the hook off while a full-screen program is in front, and puts it back once it
+/// is not (D85, found by the user: games stuttered). With the hook on, Windows waits for
+/// Kabuk's answer to every key the game gets; off, the game's keys never reach Kabuk.
+/// The emergency exit stays: it is a hotkey Windows holds, not this hook's.
+fn update_hook() {
+    let want = !paused_now();
+    if want == HOOKED.load(Ordering::Relaxed) {
+        return;
+    }
+    let id = THREAD_ID.load(Ordering::Relaxed);
+    if id == 0 {
+        return;
+    }
+    use windows::Win32::UI::WindowsAndMessaging::PostThreadMessageW;
+    let msg = if want { MSG_REHOOK } else { MSG_UNHOOK };
+    // SAFETY: a message to the hook thread of this process, which reads it in its loop.
+    let _ = unsafe { PostThreadMessageW(id, msg, WPARAM(0), LPARAM(0)) };
+}
+
+/// The window in front changed: the hook comes off over a full-screen program and back
+/// elsewhere (D85).
+pub fn front_changed() {
+    update_hook();
+}
+
+/// Whether the keyboard hook is on now (off while a full-screen program is in front).
+pub fn is_hooked() -> bool {
+    HOOKED.load(Ordering::Relaxed)
 }
 
 unsafe extern "system" fn on_key(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -442,18 +480,56 @@ fn ensure_hook() -> Result<(), String> {
         .get_or_init(|| {
             let (tx, rx) = std::sync::mpsc::channel();
             let spawned = std::thread::Builder::new().name("keyboard-hook".into()).spawn(move || {
+                use windows::Win32::System::Threading::{
+                    GetCurrentThread, GetCurrentThreadId, SetThreadPriority, THREAD_PRIORITY_HIGHEST,
+                };
+                use windows::Win32::UI::WindowsAndMessaging::UnhookWindowsHookEx;
+                // Answered first: Windows waits for this hook on every key, and Kabuk runs
+                // below normal while a game is in front (D85).
+                // SAFETY: this thread's own pseudo-handle.
+                let _ = unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST) };
                 // SAFETY: a low-level hook needs no module and runs on this thread, which
                 // pumps messages for it for the life of the process.
                 let hook = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(on_key), None, 0) };
                 let ok = hook.is_ok();
-                let _ = tx.send(hook.map(|_| ()).map_err(|e| e.to_string()));
+                let mut hook = hook.ok();
+                HOOKED.store(ok, Ordering::Relaxed);
+                // SAFETY: plain query.
+                THREAD_ID.store(unsafe { GetCurrentThreadId() }, Ordering::Relaxed);
+                let _ = tx.send(if ok {
+                    Ok(())
+                } else {
+                    Err("keyboard hook not installed".to_string())
+                });
                 if !ok {
                     return;
                 }
                 let mut m = MSG::default();
-                // SAFETY: the standard message loop of this thread.
+                // SAFETY: the standard message loop of this thread; the hook is taken off
+                // and put back only here, on the thread that owns it.
                 unsafe {
                     while GetMessageW(&mut m, None, 0, 0).as_bool() {
+                        if m.hwnd.is_invalid() && m.message == MSG_UNHOOK {
+                            if let Some(h) = hook.take() {
+                                let _ = UnhookWindowsHookEx(h);
+                                HOOKED.store(false, Ordering::Relaxed);
+                                tracing::info!("keyboard hook off: a full-screen program is in front");
+                            }
+                            continue;
+                        }
+                        if m.hwnd.is_invalid() && m.message == MSG_REHOOK {
+                            if hook.is_none() {
+                                match SetWindowsHookExW(WH_KEYBOARD_LL, Some(on_key), None, 0) {
+                                    Ok(h) => {
+                                        hook = Some(h);
+                                        HOOKED.store(true, Ordering::Relaxed);
+                                        tracing::info!("keyboard hook back");
+                                    }
+                                    Err(e) => tracing::error!(error = %e, "keyboard hook not put back"),
+                                }
+                            }
+                            continue;
+                        }
                         let _ = TranslateMessage(&m);
                         DispatchMessageW(&m);
                     }
@@ -554,6 +630,7 @@ pub fn set_paused_on(monitors: Vec<isize>) {
         *p = monitors;
     }
     PAUSED.store(any, Ordering::Relaxed);
+    update_hook();
 }
 
 #[cfg(test)]
@@ -701,8 +778,12 @@ mod tests {
         assert!(VOLUME_SINK.lock().unwrap().is_none());
     }
 
+    /// The game mode's state is the process's: tests that change it take turns.
+    static PAUSE_TURN: Mutex<()> = Mutex::new(());
+
     #[test]
     fn bindings_come_and_go_with_their_shortcut() {
+        let _turn = PAUSE_TURN.lock().unwrap_or_else(|e| e.into_inner());
         let w = crate::msgloop::MessageWindow::new("Kabuk.Test.Keyhook", "", |_| None).unwrap();
         let chord = Chord {
             mods: WIN,
@@ -729,6 +810,31 @@ mod tests {
         assert!(paused_for(Some(2), &[1, 2]));
         assert!(!paused_for(Some(2), &[1]), "the other monitor works as usual");
         assert!(paused_for(None, &[1]), "nothing in front: the game's");
+    }
+
+    /// D85, found by the user (games stuttered): while a full-screen program is in front
+    /// the hook is off, so the game's keys never wait for Kabuk; it comes back after.
+    #[test]
+    fn the_hook_comes_off_over_a_full_screen_program_and_back_after() {
+        let _turn = PAUSE_TURN.lock().unwrap_or_else(|e| e.into_inner());
+        if ensure_hook().is_err() {
+            println!("no keyboard hook on this desktop");
+            return;
+        }
+        let wait = |want: bool| {
+            let started = std::time::Instant::now();
+            while is_hooked() != want && started.elapsed() < std::time::Duration::from_secs(2) {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            is_hooked() == want
+        };
+        assert!(wait(true), "the hook is on to begin with");
+        // The monitor in front (or, with no window in front, any: then it counts as the
+        // game's) is full screen.
+        set_paused_on(vec![front_monitor().unwrap_or(1)]);
+        assert!(wait(false), "the hook stayed on over a full-screen program");
+        set_paused_on(Vec::new());
+        assert!(wait(true), "the hook did not come back");
     }
 
     /// The recorder takes the next chord, Win chords included, and its key's repeats

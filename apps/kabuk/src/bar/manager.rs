@@ -265,6 +265,8 @@ fn active(w: &[Workspace]) -> Vec<u32> {
 /// Sampling and debounce intervals (ARCHITECTURE §5 and §8).
 pub const STATS_INTERVAL: Duration = Duration::from_secs(2);
 pub const GPU_INTERVAL: Duration = Duration::from_secs(5);
+/// How often a full-screen program that keeps renaming itself is looked at again (D85).
+const GAME_RECHECK: Duration = Duration::from_secs(2);
 pub const CONFIG_DEBOUNCE: Duration = Duration::from_millis(100);
 pub const DISPLAY_DEBOUNCE: Duration = Duration::from_millis(500);
 /// The bar is small and redraws only on change: the CPU rasteriser is cheap and saves
@@ -542,6 +544,10 @@ struct Shared {
     notices: notify_host::NotifyState,
     /// The monitors in game mode (SPEC §2.4).
     game_devices: Vec<String>,
+    /// The window in front at the last foreground or title event, and when a renaming
+    /// full-screen program was last looked at (D85).
+    last_front: Option<u64>,
+    last_game_check: std::time::Instant,
     /// Idle dimming's overlays while dimmed.
     idle: idle_host::IdleState,
     /// Touchpad swipes (DECISIONS D68).
@@ -814,6 +820,8 @@ impl BarManager {
                 colors_turn: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
                 notices: notify_host::NotifyState::default(),
                 game_devices: Vec::new(),
+                last_front: None,
+                last_game_check: std::time::Instant::now(),
                 idle: idle_host::IdleState::default(),
                 gestures: gesture_host::GestureState::default(),
                 saver: saver_host::SaverState::default(),
@@ -932,6 +940,22 @@ impl BarManager {
             if let Some(rc) = weak.upgrade() {
                 if let Ok(mut s) = rc.try_borrow_mut() {
                     tracing::trace!("foreground event");
+                    // The window in front renamed itself while a full-screen program covers a
+                    // monitor: a game showing its frame rate in its title does it all the
+                    // time, and each did a full-screen check, the bars' care and drawing
+                    // (D85, found by the user: games stuttered). Only the title is kept.
+                    let same = fg.map(|h| h.0) == s.last_front;
+                    s.last_front = fg.map(|h| h.0);
+                    if same && !s.game_devices.is_empty() {
+                        s.live.title = fg.and_then(|h| Title::split(&h.title()));
+                        // Still looked at now and then: the game may have left full screen
+                        // in its own window, with nothing else in front.
+                        if s.last_game_check.elapsed() >= GAME_RECHECK {
+                            s.last_game_check = std::time::Instant::now();
+                            s.step_aside_for_fullscreen();
+                        }
+                        return;
+                    }
                     // Explorer's taskbar came forward: keep programs finding Kabuk's tray.
                     if let Some(t) = &s.tray_host {
                         if !t.in_front() {
@@ -983,6 +1007,12 @@ impl BarManager {
             }
             link.send(wm::Command::SetAccent(s.accent()));
             link.send(wm::Command::SetFrame(s.frame_style()));
+            // A full-screen program found before the window manager was there (a game
+            // already running when Kabuk starts): it learns of it now (D85, found by a
+            // test: it never paused for it, and its keyboard hook stayed on).
+            if !s.game_devices.is_empty() {
+                link.send(wm::Command::GameMode(s.game_devices.clone()));
+            }
             s.wm = Some(link);
             s.render_all(false);
         }
@@ -1581,35 +1611,40 @@ impl Shared {
                 b.monitor.rect,
             )
         };
-        let full: Vec<bool> = self
-            .bars
-            .iter()
-            .map(|b| g.detect && kabuk_core::fullscreen::is_fullscreen_front(front.iter().copied(), now_rect(b)))
-            .collect();
-        // Which window turned a monitor's game mode on, for the log (found by the user:
-        // the shortcuts stopped, and nothing said which window looked full screen).
-        for (b, is_full) in self.bars.iter().zip(&full) {
-            if *is_full && !self.game_devices.contains(&b.monitor.device) {
-                let w = kabuk_core::fullscreen::front_on(front.iter().map(|(r, _)| *r), now_rect(b))
-                    .and_then(|i| windows.get(i));
-                if let Some((h, r, _)) = w {
-                    let exe = h
-                        .pid()
-                        .and_then(|p| kabuk_win::process::Process::query(p).ok())
-                        .and_then(|p| p.image_name())
-                        .unwrap_or_default();
-                    tracing::info!(device = %b.monitor.device, hwnd = h.0, class = %h.class_name(), exe, rect = ?r, "full screen by window");
-                }
+        // Every monitor Windows has now, and any bar's monitor it did not list (as it was
+        // made): a game on a monitor without a bar counts too (D85).
+        let mut monitors: Vec<(String, kabuk_core::state::Rect)> =
+            live.iter().map(|m| (m.device.clone(), m.rect)).collect();
+        for b in &self.bars {
+            if !monitors.iter().any(|(d, _)| *d == b.monitor.device) {
+                monitors.push((b.monitor.device.clone(), now_rect(b)));
             }
         }
-        tracing::debug!(?full, front = ?front.iter().take(FRONT_LOGGED).collect::<Vec<_>>(), "full-screen check");
-        let any = full.iter().any(|f| *f);
-        let mut devices = Vec::new();
-        for (bar, full) in self.bars.iter_mut().zip(full) {
-            let game = full || (any && !g.other_monitors_normal);
-            if game {
-                devices.push(bar.monitor.device.clone());
+        let devices = kabuk_core::fullscreen::game_devices(
+            &front,
+            monitors.iter().map(|(d, r)| (d.as_str(), *r)),
+            g.detect,
+            g.other_monitors_normal,
+        );
+        // Which window turned a monitor's game mode on, for the log (found by the user:
+        // the shortcuts stopped, and nothing said which window looked full screen).
+        for (device, rect) in monitors
+            .iter()
+            .filter(|(d, _)| devices.contains(d) && !self.game_devices.contains(d))
+        {
+            let w = kabuk_core::fullscreen::front_on(front.iter().map(|(r, _)| *r), *rect).and_then(|i| windows.get(i));
+            if let Some((h, r, _)) = w {
+                let exe = h
+                    .pid()
+                    .and_then(|p| kabuk_win::process::Process::query(p).ok())
+                    .and_then(|p| p.image_name())
+                    .unwrap_or_default();
+                tracing::info!(device = %device, hwnd = h.0, class = %h.class_name(), exe, rect = ?r, "full screen by window");
             }
+        }
+        tracing::debug!(?devices, front = ?front.iter().take(FRONT_LOGGED).collect::<Vec<_>>(), "full-screen check");
+        for bar in self.bars.iter_mut() {
+            let game = devices.contains(&bar.monitor.device);
             let hide = game && g.hide_bar;
             if hide == bar.aside {
                 continue;
@@ -2849,6 +2884,10 @@ impl Shared {
         let apps = self.dock_apps();
         let full = self.motion_level() == kabuk_ui::motion::Level::Full;
         let Some(d) = self.dock.as_mut() else { return Ok(false) };
+        // Aside for a full-screen program: not drawn (D85).
+        if d.aside {
+            return Ok(false);
+        }
         let shift = geometry::shift_toward_edge(d.edge, shift);
         // The tiles grow under the mouse with full motion only (D79); while they grow or
         // settle the dock is drawn in its grown room, else at its own size.
@@ -3648,6 +3687,12 @@ impl Shared {
         let blends = self.motion_level() != kabuk_ui::motion::Level::Off;
         let mut blending = false;
         for i in 0..self.bars.len() {
+            // A bar aside for a full-screen program is not drawn: nobody sees it, and the
+            // game shares the processor and the compositor with it (D85). It is drawn
+            // again, when its content changed, once it is back.
+            if self.bars[i].aside {
+                continue;
+            }
             let data = self.data(&self.bars[i].monitor.device, self.bars[i].primary, self.bars[i].edge);
             if !force && self.bars[i].last.as_ref() == Some(&data) {
                 continue;

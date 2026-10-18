@@ -47,6 +47,34 @@ pub fn front_on(windows: impl IntoIterator<Item = Rect>, monitor: Rect) -> Optio
     windows.into_iter().position(|w| on_monitor(&w))
 }
 
+/// The monitors in game mode (SPEC §2.4): each of `monitors` (device, rectangle) whose
+/// front window is full screen, or every monitor when one is and the others do not stay
+/// normal. Every monitor is looked at, not only those with a bar (found on the user's
+/// machine: with the bar on the main monitor only, a game on Monitor 2 was never seen,
+/// and nothing stepped aside for it; D85). `windows` as for [`is_fullscreen_front`].
+pub fn game_devices<'a>(
+    windows: &[(Rect, bool)],
+    monitors: impl IntoIterator<Item = (&'a str, Rect)>,
+    detect: bool,
+    other_monitors_normal: bool,
+) -> Vec<String> {
+    if !detect {
+        return Vec::new();
+    }
+    let monitors: Vec<(&str, Rect)> = monitors.into_iter().collect();
+    let full: Vec<bool> = monitors
+        .iter()
+        .map(|(_, r)| is_fullscreen_front(windows.iter().copied(), *r))
+        .collect();
+    let any = full.iter().any(|f| *f);
+    monitors
+        .iter()
+        .zip(full)
+        .filter(|(_, f)| *f || (any && !other_monitors_normal))
+        .map(|((d, _), _)| (*d).to_string())
+        .collect()
+}
+
 /// Monitor `device`'s rectangle now: the one Windows gives for it among `live` (device,
 /// rectangle), else the one it had when its bar was made (`made`). A game in exclusive
 /// full screen changes the resolution, and the bar keeps the old size until it is made
@@ -269,6 +297,24 @@ mod tests {
 
     /// D72: a game at 1920 x 1080 on a 2560 x 1440 monitor covers it as Windows gives it
     /// now, not as the bar was made; a monitor Windows no longer lists keeps its old size.
+    #[test]
+    fn every_monitor_is_looked_at_for_game_mode() {
+        let game = |r: Rect| vec![(r, false)];
+        let both = [("M1", M1), ("M2", M2)];
+        // A game on Monitor 2 is seen, though it may have no bar.
+        assert_eq!(game_devices(&game(M2), both, true, true), vec!["M2".to_string()]);
+        assert_eq!(game_devices(&game(M1), both, true, true), vec!["M1".to_string()]);
+        // The others follow when they do not stay normal.
+        assert_eq!(
+            game_devices(&game(M2), both, true, false),
+            vec!["M1".to_string(), "M2".to_string()]
+        );
+        // Nothing full screen, or detection off: none.
+        assert!(game_devices(&[(NORMAL, false)], both, true, false).is_empty());
+        assert!(game_devices(&game(M1), both, false, true).is_empty());
+        assert!(game_devices(&[], both, true, true).is_empty());
+    }
+
     #[test]
     fn a_monitors_rectangle_is_the_one_windows_gives_now() {
         let made = Rect {

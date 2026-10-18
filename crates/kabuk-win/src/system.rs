@@ -57,6 +57,23 @@ pub fn apps_use_light_theme() -> bool {
     r.is_ok() && value != 0
 }
 
+/// Kabuk steps back for a full-screen program (D85, found by the user: games stuttered):
+/// below-normal priority for its whole process while one is in front, so the game wins
+/// every contest for the processor; normal again after. Its keyboard hook's thread stays
+/// high within it (keyhook), so keys typed on another monitor meanwhile are not delayed.
+pub fn yield_to_full_screen(on: bool) -> std::io::Result<()> {
+    use windows::Win32::System::Threading::{
+        GetCurrentProcess, SetPriorityClass, BELOW_NORMAL_PRIORITY_CLASS, NORMAL_PRIORITY_CLASS,
+    };
+    let class = if on {
+        BELOW_NORMAL_PRIORITY_CLASS
+    } else {
+        NORMAL_PRIORITY_CLASS
+    };
+    // SAFETY: this process's own pseudo-handle and a valid priority class.
+    unsafe { SetPriorityClass(GetCurrentProcess(), class) }.map_err(crate::sync::io_error)
+}
+
 /// Windows' "Animation effects" (Settings → Accessibility → Visual effects). Read-only;
 /// on when it cannot be read, as Windows' default is.
 pub fn animations_on() -> bool {
@@ -227,8 +244,23 @@ pub fn attach_parent_console() {
 
 #[cfg(test)]
 mod tests {
-    //! Edge case: the language tag looks like a BCP-47 tag.
+    //! Edge cases: the language tag looks like a BCP-47 tag; the process steps back for a
+    //! game and comes back.
     use super::*;
+
+    /// D85: the process steps back for a game and comes back after.
+    #[test]
+    fn kabuk_steps_back_for_a_game_and_comes_back() {
+        use windows::Win32::System::Threading::{
+            GetCurrentProcess, GetPriorityClass, BELOW_NORMAL_PRIORITY_CLASS, NORMAL_PRIORITY_CLASS,
+        };
+        // SAFETY: plain query of this process.
+        let class = || unsafe { GetPriorityClass(GetCurrentProcess()) };
+        yield_to_full_screen(true).expect("lowered");
+        assert_eq!(class(), BELOW_NORMAL_PRIORITY_CLASS.0);
+        yield_to_full_screen(false).expect("back");
+        assert_eq!(class(), NORMAL_PRIORITY_CLASS.0);
+    }
 
     #[test]
     fn the_animation_setting_reads() {

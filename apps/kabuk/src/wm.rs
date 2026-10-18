@@ -445,6 +445,10 @@ struct Wm {
     styled: std::collections::HashSet<u64>,
     /// Monitors where tiling is paused for a full-screen program (SPEC §2.4).
     game: std::collections::HashSet<String>,
+    /// The `HMONITOR`s a full-screen program covers, whatever the tiling setting (D85).
+    covered: Vec<isize>,
+    /// Whether Kabuk runs below normal priority for a full-screen program (D85).
+    yielded: bool,
     /// Plays window moves over the work area (DECISIONS D35).
     mover: Option<kabuk_win::window_motion::Mover>,
     /// The windows whose own transitions are off for the genie, where their icons are,
@@ -512,6 +516,8 @@ fn run(
         notices: VecDeque::new(),
         notice_seq: 0,
         game: std::collections::HashSet::new(),
+        covered: Vec::new(),
+        yielded: false,
         mover: kabuk_win::window_motion::Mover::start(ease)
             .map_err(|e| tracing::warn!(error = %e, "window moves will not be animated"))
             .ok(),
@@ -1654,9 +1660,14 @@ impl Wm {
                     self.consider(h);
                 }
             }
-            // Known windows change titles all the time; only one not taken on is asked again.
+            // Known windows change titles all the time; only one not taken on is asked again,
+            // and not on a monitor a full-screen program covers: a game that shows its frame
+            // rate in its title renames itself all the time, and asking again opened its
+            // process each time (D85, found by the user: games stuttered).
             WindowEvent::Renamed(h) => {
-                if !self.desk.contains(h.0) && h.is_visible() {
+                let under_game =
+                    !self.covered.is_empty() && h.monitor_handle().is_some_and(|m| self.covered.contains(&m));
+                if !under_game && !self.desk.contains(h.0) && h.is_visible() {
                     self.consider(h);
                 }
             }
@@ -1696,6 +1707,8 @@ impl Wm {
                 self.forget(h, "destroyed")
             }
             WindowEvent::Foreground(h) => {
+                // The keyboard hook comes off over a full-screen program, back elsewhere.
+                kabuk_win::keyhook::front_changed();
                 if self.desk.contains(h.0) {
                     self.desk.focused(h.0);
                     self.update_border();
@@ -2248,12 +2261,25 @@ impl Wm {
     /// the setting says so, and the layout comes back as it was once they are free again.
     fn set_game_mode(&mut self, devices: Vec<String>) {
         crate::grab::pause(&self.snapshot, !devices.is_empty());
-        let covered = kabuk_win::shell::monitors()
+        let covered: Vec<isize> = kabuk_win::shell::monitors()
             .into_iter()
             .filter(|m| devices.contains(&m.device))
             .map(|m| m.handle)
             .collect();
+        self.covered.clone_from(&covered);
         kabuk_win::keyhook::set_paused_on(covered);
+        // Kabuk steps back for the game while it runs (D85): only now, once the hooks are
+        // off; below normal, a game using every core could keep this thread waiting.
+        let yield_now = !devices.is_empty();
+        if yield_now != self.yielded {
+            match kabuk_win::system::yield_to_full_screen(yield_now) {
+                Ok(()) => {
+                    self.yielded = yield_now;
+                    tracing::info!(below_normal = yield_now, "priority for game mode");
+                }
+                Err(e) => tracing::warn!(error = %e, "priority not changed for game mode"),
+            }
+        }
         let paused: std::collections::HashSet<String> = if self.config.current().game.pause_tiling {
             devices.into_iter().collect()
         } else {

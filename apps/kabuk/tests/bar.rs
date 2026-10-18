@@ -1023,6 +1023,146 @@ fn a_full_screen_program_sends_its_monitors_bar_away() {
     assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
 }
 
+/// D85, found by the user: games stuttered. While a full-screen program is in front the
+/// keyboard hook is off (the game's keys never wait for Kabuk) and Kabuk runs below normal
+/// priority; both come back once the program leaves full screen.
+#[test]
+fn kabuk_steps_back_for_a_full_screen_program() {
+    use kabuk::bar::manager::MSG_APPBAR;
+    use kabuk_win::msgloop::{post_message, Msg};
+    const ABN_FULLSCREENAPP: usize = 2;
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    let _shell = sandbox.kabuk_with(&["--manage-class", TEST_WINDOW_CLASS, "--debug-shortcuts"]);
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("bars built") >= 1).is_some());
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let primary = kabuk_win::shell::monitors().into_iter().find(|m| m.primary).unwrap();
+    let main_bar = shell_windows("Kabuk.Bar", pid)
+        .into_iter()
+        .find(|b| {
+            b.window_rect().is_some_and(|r| {
+                let (cx, cy) = ((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+                primary.rect.left <= cx && cx < primary.rect.right && primary.rect.top <= cy && cy < primary.rect.bottom
+            })
+        })
+        .expect("primary bar");
+    let notify = |entering: bool| {
+        post_message(
+            main_bar,
+            Msg {
+                id: MSG_APPBAR,
+                wparam: ABN_FULLSCREENAPP,
+                lparam: isize::from(entering),
+            },
+        )
+        .unwrap();
+    };
+
+    let game = TestWindow::open(&["--fullscreen", "--title", &title("stepback")]);
+    assert!(wait_until(SETTLE, || game.hwnd.is_visible()).is_some());
+    // The game in front, as a game is: only then do its keys stop going through Kabuk
+    // (a window left in front by another test on another monitor keeps the hook on).
+    assert!(
+        wait_until(SETTLE, || game.hwnd.focus()).is_some(),
+        "the game could not come to the front"
+    );
+    notify(true);
+    // Every line of the shell's log about game mode, for a failure's message.
+    let game_lines = || -> String {
+        std::fs::read_dir(sandbox.state_dir().join("logs"))
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with("kabuk."))
+            .filter_map(|e| std::fs::read_to_string(e.path()).ok())
+            .flat_map(|t| t.lines().map(str::to_string).collect::<Vec<_>>())
+            .filter(|l| {
+                [
+                    "game mode",
+                    "kabuk::wm",
+                    "keyboard",
+                    "full screen",
+                    "steps aside",
+                    "front",
+                ]
+                .iter()
+                .any(|k| l.contains(k))
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("keyboard hook off") == 1).is_some(),
+        "the keyboard hook stayed on over the full-screen window:\n{}",
+        game_lines()
+    );
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("below_normal=true") == 1).is_some(),
+        "Kabuk's priority stayed normal: {:?}",
+        sandbox.last_log_line(&["priority"])
+    );
+
+    kabuk_win::dpi::physical(|| {
+        let r = kabuk_core::state::Rect {
+            left: primary.work_area.left + 100,
+            top: primary.work_area.top + 100,
+            right: primary.work_area.left + 900,
+            bottom: primary.work_area.top + 700,
+        };
+        assert!(game.hwnd.place_frame_async(r));
+    });
+    assert!(wait_until(SETTLE, || game
+        .hwnd
+        .window_rect()
+        .is_some_and(|r| r.right - r.left < 1000))
+    .is_some());
+    notify(false);
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("keyboard hook back") == 1).is_some(),
+        "the keyboard hook did not come back"
+    );
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("below_normal=false") == 1).is_some(),
+        "Kabuk's priority did not come back"
+    );
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
+}
+
+/// D85, found by a test: a game already in full screen when Kabuk starts is found by the
+/// bar before the window manager is there, and the window manager never paused for it.
+/// It learns of it as it comes, and its keyboard hook comes off.
+#[test]
+fn a_game_running_before_kabuk_starts_is_stepped_back_for() {
+    let before = work_areas();
+    let game = TestWindow::open(&["--fullscreen", "--title", &title("early-game")]);
+    assert!(wait_until(SETTLE, || game.hwnd.is_visible()).is_some());
+    assert!(
+        wait_until(SETTLE, || game.hwnd.focus()).is_some(),
+        "the game could not come to the front"
+    );
+    let sandbox = Sandbox::new();
+    let _shell = sandbox.kabuk_with(&["--manage-class", TEST_WINDOW_CLASS, "--debug-shortcuts"]);
+    assert!(
+        wait_until(STARTUP_TIMEOUT, || sandbox
+            .log_lines("tiling paused for full-screen programs")
+            == 1)
+        .is_some(),
+        "the window manager never heard of the game: {:?}",
+        sandbox.last_log_line(&["game mode"])
+    );
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("keyboard hook off") == 1).is_some(),
+        "the keyboard hook stayed on over the game"
+    );
+    drop(game);
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("keyboard hook back") == 1).is_some(),
+        "the keyboard hook did not come back after the game"
+    );
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
+}
+
 /// Found by the user with a screenshot of a game: Rıhtım's dock stayed over a full-screen
 /// game while the bar went away. The dock steps aside with its monitor's bar, and comes
 /// back with it.

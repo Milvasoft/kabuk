@@ -466,6 +466,13 @@ impl Shared {
 
     /// The drift's step came (or a test moved it on).
     pub(super) fn drift_step(&mut self, bump: bool) {
+        // Not while a game is in front: setting the wallpaper (and, after a resolution
+        // change, drawing it again) would take from the game (D85). The next step comes.
+        if !self.game_devices.is_empty() && !bump {
+            tracing::debug!("wallpaper drift waits for the full-screen program");
+            self.schedule_drift();
+            return;
+        }
         if bump {
             self.wallpaper.drift_bump += 1;
         }

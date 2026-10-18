@@ -191,6 +191,12 @@ impl Shared {
         let Some((i, monitor, bar)) = self.notice_monitor() else {
             return;
         };
+        // Not over a full-screen program: a window over a game takes its frames off their
+        // direct way to the screen (D85). The game, or Windows, shows the volume there.
+        if self.game_devices.contains(&self.bars[i].monitor.device) {
+            tracing::debug!(percent = p, "volume not shown over a full-screen program");
+            return;
+        }
         // A bar on the left or right leaves the bottom free.
         let bar = bar.filter(|b| b.edge == Edge::Bottom);
         if !self.redraw_osd(i, &node) {
