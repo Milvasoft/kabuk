@@ -35,6 +35,11 @@ pub(super) const OVERSAMPLE: u32 = 2;
 /// Integration tests click the app owning window `wparam`, as a click on its icon would;
 /// `lparam` 1: as if that window were in front.
 pub const MSG_TEST_APP_CLICK: u32 = kabuk_win::msgloop::msg::APP + 28;
+/// Integration tests: a drag rests over the app owning window `wparam` (D86).
+pub const MSG_TEST_DRAG_APP: u32 = kabuk_win::msgloop::msg::APP + 56;
+/// How long a drag rests over an app before its window comes forward (D86), as on
+/// Windows' taskbar.
+const DRAG_REVEAL_AFTER: std::time::Duration = std::time::Duration::from_millis(700);
 
 /// What the module keeps between redraws.
 #[derive(Default)]
@@ -508,6 +513,48 @@ impl Shared {
             }
             apps::ClickAction::Nothing => {}
         }
+    }
+
+    /// A drag (a file, a picture) is over app `app` of a bar or the dock, or over none
+    /// (D86, asked for by the user: Windows' taskbar brings the app's window forward so
+    /// the file can be dropped into it). Resting there a moment brings it forward.
+    pub(super) fn drag_over_app(&mut self, app: Option<usize>) {
+        if app == self.drag_rest {
+            return;
+        }
+        self.drag_rest = app;
+        self.kill(super::timer::DRAG_REVEAL);
+        if app.is_some() {
+            if let Some(c) = &self.control {
+                c.set_timer(super::timer::DRAG_REVEAL, DRAG_REVEAL_AFTER);
+            }
+        }
+    }
+
+    /// The drag rested over its app: the app's window comes forward. An app with no
+    /// window is not started (a drop on it would not open the file).
+    pub(super) fn drag_reveal_due(&mut self) {
+        self.kill(super::timer::DRAG_REVEAL);
+        let Some(app) = self.drag_rest.and_then(|i| self.apps.list.get(i)).cloned() else {
+            return;
+        };
+        if let apps::ClickAction::Show(hwnd) = apps::click_action(&app, None, false) {
+            tracing::info!(hwnd, source = %app.source, "app shown for a drag");
+            match &self.wm {
+                Some(link) => link.send(wm::Command::Reveal(hwnd)),
+                None => {
+                    Hwnd(hwnd).focus();
+                }
+            }
+        }
+    }
+
+    /// Integration tests: a drag rests over the app owning `hwnd`.
+    #[cfg(feature = "integration")]
+    pub(super) fn test_drag_app(&mut self, hwnd: u64) {
+        self.refresh_apps();
+        let app = self.apps.list.iter().position(|a| a.windows.contains(&hwnd));
+        self.drag_over_app(app);
     }
 
     /// Integration tests: a click on the app owning `hwnd`, with `hwnd` in front when

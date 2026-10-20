@@ -111,7 +111,7 @@ const NOTIFICATION_CENTRE: &str = "ms-actioncenter:";
 const MSG_NOTIF_COUNT: u32 = msg::APP + 31;
 /// Windows' notification centre changed: count again.
 const MSG_NOTIF_CHANGED: u32 = msg::APP + 34;
-pub use apps_host::MSG_TEST_APP_CLICK;
+pub use apps_host::{MSG_TEST_APP_CLICK, MSG_TEST_DRAG_APP};
 pub use idle_host::{MSG_INPUT, MSG_TEST_DIM};
 /// Integration tests: a touchpad swipe (`wparam`: 0 left, 1 right, 2 up, 3 down), as the
 /// touchpad's fingers would make it (DECISIONS D68; this machine has no touchpad).
@@ -190,14 +190,26 @@ mod timer {
     /// The window manager had its moment to put its scene up: the auto-hiding bars
     /// reserve their strips or give them back.
     pub const RESERVE: usize = 35;
+    /// A drag has rested over an app long enough: its window comes forward (D86).
+    pub const DRAG_REVEAL: usize = 36;
 }
 
 /// An auto-hiding bar (SPEC §2.1): how much of it stays on screen for the mouse to reach
 /// (DIPs), how long the mouse may be away before it slides off, and how often its slide
 /// is stepped.
 const AUTOHIDE_PEEK: f32 = 2.0;
+
+/// `window` told of drags over it (D86); a window that cannot be (no OLE) works as before.
+fn drag_watch(window: kabuk_win::window::Hwnd) -> Option<kabuk_win::droptarget::DragWatch> {
+    kabuk_win::droptarget::DragWatch::register(window, MSG_DRAG)
+        .map_err(|e| tracing::warn!(error = %e, "drags over the bar not seen"))
+        .ok()
+}
 /// A volume key the keyboard hook took (`wparam`: its [`kabuk_win::keyhook::VolumeKey`]).
 const MSG_VOLUME_KEY: u32 = msgloop::msg::APP + 42;
+/// A drag over a bar or the dock (`wparam`: [`kabuk_win::droptarget::OVER`] with the
+/// screen point in `lparam`, or [`kabuk_win::droptarget::LEFT`]; D86).
+const MSG_DRAG: u32 = msgloop::msg::APP + 55;
 /// A frame of the screen while an auto-hiding bar slides ([`kabuk_win::ticker`]).
 const MSG_SLIDE_FRAME: u32 = msgloop::msg::APP + 53;
 /// A frame of the screen while the dock's tiles grow or settle ([`kabuk_win::ticker`]).
@@ -413,6 +425,8 @@ struct Bar {
     /// With `bar.autohide`: how much of the bar is on screen and where it is sliding;
     /// `None` for a bar that keeps its place (and reserves it).
     peek: Option<Peek>,
+    /// Tells it of drags over it (D86); taken off with it.
+    _drag: Option<kabuk_win::droptarget::DragWatch>,
 }
 
 /// An auto-hiding bar's slide: from `from` of it on screen to `to` (0 hidden, 1 shown)
@@ -446,6 +460,8 @@ impl Peek {
 
 /// Rıhtım's dock on the primary monitor, opposite the bar.
 struct Dock {
+    /// Tells it of drags over it (D86); taken off with it, before its window goes.
+    _drag: Option<kabuk_win::droptarget::DragWatch>,
     window: Window,
     surface: Option<WindowSurface>,
     appbar: Option<AppBar>,
@@ -574,6 +590,8 @@ struct Shared {
     /// taskbar; found in the user's video: a preview popped up over the window just
     /// brought back).
     preview_held: Option<usize>,
+    /// The app a drag rests over (D86): its window comes forward when the drag stays.
+    drag_rest: Option<usize>,
     /// Closed popups playing their exit.
     leaving: Vec<motion_host::Leaving>,
     /// The tabbed groups' strips on screen.
@@ -836,6 +854,7 @@ impl BarManager {
                 app_preview: None,
                 preview_bar: 0,
                 preview_held: None,
+                drag_rest: None,
                 app_hover: AppHover {
                     app: None,
                     leaving: None,
@@ -1333,6 +1352,7 @@ impl Shared {
                     timer::CROSSFADE => self.sweep_crossfades(),
                     timer::APP_GROW => self.step_app_growth(),
                     timer::APP_PREVIEW => self.preview_due(),
+                    timer::DRAG_REVEAL => self.drag_reveal_due(),
                     timer::APP_PREVIEW_HIDE => self.hide_app_preview(),
                     timer::DRIFT => self.drift_step(false),
                     timer::AUTOHIDE => self.autohide_due(),
@@ -1402,6 +1422,11 @@ impl Shared {
             #[cfg(feature = "integration")]
             MSG_TEST_APP_CLICK => {
                 self.test_app_click(m.wparam as u64, m.lparam == 1);
+                Some(0)
+            }
+            #[cfg(feature = "integration")]
+            MSG_TEST_DRAG_APP => {
+                self.test_drag_app(m.wparam as u64);
                 Some(0)
             }
             msgloop::MSG_HOTKEY => (self.launcher_hotkey(m.wparam)
@@ -1947,6 +1972,7 @@ impl Shared {
         self.set_backdrop(window.hwnd());
         tracing::info!(device = %monitor.device, ?edge, ?strip, ?rect, "dock placed");
         Ok(Dock {
+            _drag: drag_watch(window.hwnd()),
             window,
             surface,
             appbar,
@@ -2723,6 +2749,25 @@ impl Shared {
         if let Some(r) = self.on_notification(&m) {
             return r;
         }
+        if m.id == MSG_DRAG {
+            let app = (m.wparam == kabuk_win::droptarget::OVER)
+                .then(|| {
+                    let d = self.dock.as_ref()?;
+                    let (x, y) = kabuk_win::droptarget::unpack(m.lparam);
+                    let r = d.window.hwnd().window_rect()?;
+                    let p = Point {
+                        x: d.scale.dips(x - r.left) - d.origin.x,
+                        y: d.scale.dips(y - r.top) - d.origin.y,
+                    };
+                    match d.layout.hit_test(p).map(|h| (h.module, h.value)) {
+                        Some((dock::hit::APP, i)) => usize::try_from(i).ok(),
+                        _ => None,
+                    }
+                })
+                .flatten();
+            self.drag_over_app(app);
+            return Some(0);
+        }
         let d = self.dock.as_ref()?;
         match m.id {
             MSG_APPBAR => {
@@ -3032,7 +3077,9 @@ impl Shared {
         // setting had none, so blur looked as none).
         self.set_backdrop(window.hwnd());
         tracing::info!(device = %monitor.device, dpi = monitor.dpi, ?rect, "bar placed");
+        let drag = drag_watch(window.hwnd());
         Ok(Bar {
+            _drag: drag,
             window,
             surface,
             appbar,
@@ -3342,6 +3389,20 @@ impl Shared {
         }
         let index = self.bars.iter().position(|b| b.monitor.device == device)?;
         match m.id {
+            MSG_DRAG => {
+                let app = (m.wparam == kabuk_win::droptarget::OVER)
+                    .then(|| {
+                        let (x, y) = kabuk_win::droptarget::unpack(m.lparam);
+                        let r = self.bars[index].window.hwnd().window_rect()?;
+                        match self.hit(index, x - r.left, y - r.top) {
+                            Some((view::hit::APP, i)) => usize::try_from(i).ok(),
+                            _ => None,
+                        }
+                    })
+                    .flatten();
+                self.drag_over_app(app);
+                Some(0)
+            }
             MSG_APPBAR => {
                 // Another AppBar (often a sibling bar) moved: ask for our place again. Only
                 // a real change moves the window, so the bars settle instead of notifying

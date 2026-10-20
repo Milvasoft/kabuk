@@ -1290,6 +1290,60 @@ fn an_apps_icon_shows_its_window_and_minimizes_it_when_in_front() {
     assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
 }
 
+/// DECISIONS D86 (asked for by the user: a picture dragged over WhatsApp on Windows'
+/// taskbar brings WhatsApp forward): a drag resting over an app's icon brings its window
+/// forward; a drag that moves on before the delay brings nothing.
+#[test]
+fn a_drag_resting_over_an_apps_icon_brings_its_window_forward() {
+    use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_DRAG_APP};
+    use kabuk_win::msgloop::{post_message, Msg};
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    let _shell = sandbox.shell_with_bar_and_wm();
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let w = TestWindow::open(&["--title", &title("apps-drag")]);
+    let managed = format!("managing window hwnd={}", w.hwnd.0);
+    assert!(wait_until(SETTLE, || sandbox.log_lines(&managed) == 1).is_some());
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
+    // Over the app (its window), or over nothing (0).
+    let drag = |over: u64| {
+        post_message(
+            control,
+            Msg {
+                id: MSG_TEST_DRAG_APP,
+                wparam: over as usize,
+                lparam: 0,
+            },
+        )
+        .expect("post to the bar");
+    };
+    w.hwnd.minimize_async();
+    assert!(wait_until(SETTLE, || w.hwnd.is_minimized()).is_some(), "not minimized");
+
+    // Moved on at once: nothing comes forward.
+    drag(w.hwnd.0);
+    drag(0);
+    std::thread::sleep(Duration::from_secs(2));
+    assert!(w.hwnd.is_minimized(), "a passing drag brought the window forward");
+    assert_eq!(sandbox.log_lines("app shown for a drag"), 0);
+
+    // Resting: the window comes forward.
+    drag(w.hwnd.0);
+    assert!(
+        wait_until(SETTLE, || !w.hwnd.is_minimized()).is_some(),
+        "a resting drag did not bring the window forward"
+    );
+    assert_eq!(sandbox.log_lines("app shown for a drag"), 1);
+
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
+}
+
 /// DECISIONS D45 (asked for by the user: Windows' taskbar on a right click): an app's menu opens
 /// and closes; pin keeps the program in Kabuk's own pins, dragged to the front it stays
 /// first, unpin takes it off again, and "close" closes its window. Its own rule (D63):

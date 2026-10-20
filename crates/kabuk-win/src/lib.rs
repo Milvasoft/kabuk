@@ -9,6 +9,7 @@ pub mod cursors;
 pub mod desk_owner;
 pub mod desktop;
 pub mod dpi;
+pub mod droptarget;
 pub mod events;
 pub mod handle;
 pub mod http;
