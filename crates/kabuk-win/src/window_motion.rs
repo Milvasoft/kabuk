@@ -948,6 +948,9 @@ fn run(rx: &mpsc::Receiver<Order>, ease: fn(f32) -> f32, pictured: &Pictured, tx
     let mut making = false;
     let mut last_used = Instant::now();
     let keep = std::cell::Cell::new(false);
+    // The renderer being made was let go before it came (game mode came as Kabuk started
+    // under a game: found in the user's log, it then stayed a minute beside the game; D87).
+    let unwanted = std::cell::Cell::new(false);
     // Takes one order: a scene starts (or goes on from the one over the same area);
     // false to stop.
     let take = |o: Order,
@@ -958,6 +961,7 @@ fn run(rx: &mpsc::Receiver<Order>, ease: fn(f32) -> f32, pictured: &Pictured, tx
         Order::Play(s) => {
             if s.genie.is_some() {
                 *last_used = Instant::now();
+                unwanted.set(false);
                 if renderer.is_none() && !*making {
                     *making = true;
                     make_renderer(tx);
@@ -975,6 +979,7 @@ fn run(rx: &mpsc::Receiver<Order>, ease: fn(f32) -> f32, pictured: &Pictured, tx
             *last_used = Instant::now();
             // A genie may come: its wallpapers decoded ahead.
             backdrop::refresh();
+            unwanted.set(false);
             if renderer.is_none() && !*making {
                 *making = true;
                 make_renderer(tx);
@@ -983,6 +988,7 @@ fn run(rx: &mpsc::Receiver<Order>, ease: fn(f32) -> f32, pictured: &Pictured, tx
         }
         Order::Keep(on) => {
             keep.set(on);
+            unwanted.set(!on && *making);
             if on && renderer.is_none() && !*making {
                 *making = true;
                 make_renderer(tx);
@@ -996,8 +1002,15 @@ fn run(rx: &mpsc::Receiver<Order>, ease: fn(f32) -> f32, pictured: &Pictured, tx
             *making = false;
             // Pictures kept from another renderer are not this one's.
             PICTURES.with(|p| p.borrow_mut().clear());
-            *renderer = Some(r);
-            *last_used = Instant::now();
+            if unwanted.replace(false) {
+                drop(r);
+                tracing::info!("genie renderer let go");
+            } else {
+                *renderer = Some(r);
+                *last_used = Instant::now();
+            }
+            #[cfg(test)]
+            tests::renderer_came(renderer.is_some());
             true
         }
         Order::Stop => false,
@@ -1108,6 +1121,15 @@ mod tests {
     thread_local! {
         /// Every thumbnail registered (`true`) or let go (`false`) on this thread.
         pub(super) static HANDOVER: RefCell<Vec<(bool, isize)>> = const { RefCell::new(Vec::new()) };
+    }
+
+    /// Renderers that came to the mover's thread, and whether the last one was kept.
+    static CAME: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    static HELD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+    pub(super) fn renderer_came(held: bool) {
+        HELD.store(held, std::sync::atomic::Ordering::SeqCst);
+        CAME.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
 
     const A: Rect = Rect {
@@ -1293,6 +1315,26 @@ mod tests {
         assert_eq!(genie_strips(660), 30);
         assert_eq!(genie_strips(100), GENIE_STRIPS.0);
         assert_eq!(genie_strips(-5), GENIE_STRIPS.0);
+    }
+
+    /// D87, found in the user's log: Kabuk started under a game, the window manager asked
+    /// for the renderer and let it go as game mode came, before it was made; it came
+    /// afterwards and stayed a minute beside the game. One let go while it is being made
+    /// is let go as it comes.
+    #[test]
+    fn a_renderer_let_go_while_being_made_is_not_kept() {
+        use std::sync::atomic::Ordering;
+        let m = Mover::start(|u| u).unwrap();
+        let before = CAME.load(Ordering::SeqCst);
+        m.keep_renderer(true);
+        m.keep_renderer(false);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while CAME.load(Ordering::SeqCst) == before && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(CAME.load(Ordering::SeqCst) > before, "no renderer was made (no GPU?)");
+        assert!(!HELD.load(Ordering::SeqCst), "the renderer let go was kept");
+        drop(m);
     }
 
     #[test]

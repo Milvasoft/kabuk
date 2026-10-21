@@ -74,7 +74,7 @@ pub(super) struct AppGridState {
     backdrops: HashMap<BackdropKey, Backdrop>,
     blurring: HashSet<BackdropKey>,
     blurred: Blurred,
-    /// Takes the screen's picture as the grid opens (made once, at start).
+    /// Takes the screen's picture as the grid opens (made at start, let go during a game; D87).
     capture: Option<kabuk_win::screen_picture::ScreenCapture>,
 }
 
@@ -191,10 +191,7 @@ impl Shared {
         for m in kabuk_win::shell::monitors() {
             self.app_grid_backdrop(&m);
         }
-        self.app_grid.capture = kabuk_win::screen_picture::ScreenCapture::new();
-        if self.app_grid.capture.is_none() {
-            tracing::warn!("the screen cannot be taken; the app grid shows the wallpaper under it");
-        }
+        self.app_grid_capture(true);
         // The first pages' icons, loaded ahead off the thread (found trying the grid:
         // opened soon after Kabuk started, it showed tiles until they came); a while after
         // the start, once the apps' list has been read.
@@ -292,6 +289,24 @@ impl Shared {
             tracing::warn!(error = %e, "app grid wallpaper not blurred");
         }
         None
+    }
+
+    /// Makes the screen taking (a GPU device) or lets it go: let go while a game is in
+    /// front, so no device of Kabuk's lives beside it (D87).
+    pub(super) fn app_grid_capture(&mut self, on: bool) {
+        if !on {
+            if self.app_grid.capture.take().is_some() {
+                tracing::info!("app grid screen taking let go for the game");
+            }
+            return;
+        }
+        if self.app_grid.capture.is_some() {
+            return;
+        }
+        self.app_grid.capture = kabuk_win::screen_picture::ScreenCapture::new();
+        if self.app_grid.capture.is_none() {
+            tracing::warn!("the screen cannot be taken; the app grid shows the wallpaper under it");
+        }
     }
 
     /// The monitor's screen as it is now, small, blurred and darkened: the grid's

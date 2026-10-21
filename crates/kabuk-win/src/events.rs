@@ -11,8 +11,9 @@ use std::cell::RefCell;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetWindowThreadProcessId, CHILDID_SELF, EVENT_OBJECT_NAMECHANGE, EVENT_SYSTEM_FOREGROUND,
-    EVENT_SYSTEM_MENUPOPUPSTART, OBJID_WINDOW, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
+    GetForegroundWindow, GetWindowThreadProcessId, CHILDID_SELF, EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE,
+    EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_SHOW, EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MENUPOPUPSTART,
+    EVENT_SYSTEM_MINIMIZESTART, OBJID_WINDOW, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
 };
 
 use crate::window::Hwnd;
@@ -181,6 +182,80 @@ impl Drop for MenuWatch {
         MENU_SINK.with(|s| {
             if let Ok(mut s) = s.try_borrow_mut() {
                 *s = None;
+            }
+        });
+    }
+}
+
+type GoneSink = Box<dyn FnMut(Hwnd)>;
+
+thread_local! {
+    /// The windows watched and what to call when one goes.
+    static GONE: RefCell<Option<(Vec<Hwnd>, GoneSink)>> = const { RefCell::new(None) };
+}
+
+/// Calls the sink when one of some windows is destroyed, hidden or minimised
+/// (`EVENT_OBJECT_DESTROY`, `EVENT_OBJECT_HIDE`, `EVENT_SYSTEM_MINIMIZESTART`), from hooks
+/// limited to their processes, until dropped: the games holding game mode, so their going
+/// ends it at once whatever comes in front after (DECISIONS D87). One per thread: drop
+/// the old watch before starting the next.
+pub struct GoneWatch {
+    hooks: Vec<HWINEVENTHOOK>,
+}
+
+unsafe extern "system" fn on_gone(_: HWINEVENTHOOK, event: u32, hwnd: HWND, object: i32, child: i32, _: u32, _: u32) {
+    if object != OBJID_WINDOW.0 || child != CHILDID_SELF as i32 || event == EVENT_OBJECT_SHOW {
+        return;
+    }
+    let h = Hwnd::from_raw(hwnd);
+    crate::msgloop::contain((), || {
+        GONE.with(|g| {
+            let Ok(mut g) = g.try_borrow_mut() else { return };
+            if let Some((windows, sink)) = g.as_mut() {
+                if windows.contains(&h) {
+                    sink(h);
+                }
+            }
+        });
+    });
+}
+
+impl GoneWatch {
+    pub fn start(windows: Vec<Hwnd>, sink: impl FnMut(Hwnd) + 'static) -> std::io::Result<GoneWatch> {
+        let mut pids: Vec<u32> = windows.iter().filter_map(|w| w.pid()).collect();
+        pids.sort_unstable();
+        pids.dedup();
+        let mut hooks = Vec::new();
+        for pid in pids {
+            for (first, last) in [
+                (EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE),
+                (EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZESTART),
+            ] {
+                // SAFETY: out-of-context hook limited to one process (no DLL injection);
+                // the callback only touches this thread's GONE. Unhooked in Drop.
+                let h = unsafe { SetWinEventHook(first, last, None, Some(on_gone), pid, 0, FLAGS) };
+                if h.is_invalid() {
+                    // Whatever was hooked goes with the watch.
+                    drop(GoneWatch { hooks });
+                    return Err(std::io::Error::other("SetWinEventHook failed"));
+                }
+                hooks.push(h);
+            }
+        }
+        GONE.with(|g| *g.borrow_mut() = Some((windows, Box::new(sink))));
+        Ok(GoneWatch { hooks })
+    }
+}
+
+impl Drop for GoneWatch {
+    fn drop(&mut self) {
+        for h in self.hooks.drain(..) {
+            // SAFETY: unhooks a hook installed in `start`.
+            let _ = unsafe { UnhookWinEvent(h) };
+        }
+        GONE.with(|g| {
+            if let Ok(mut g) = g.try_borrow_mut() {
+                *g = None;
             }
         });
     }

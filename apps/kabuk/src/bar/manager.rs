@@ -192,6 +192,8 @@ mod timer {
     pub const RESERVE: usize = 35;
     /// A drag has rested over an app long enough: its window comes forward (D86).
     pub const DRAG_REVEAL: usize = 36;
+    /// Something else has been in front of a held game a while: game mode looked at again (D87).
+    pub const GAME_LEAVE: usize = 37;
 }
 
 /// An auto-hiding bar (SPEC §2.1): how much of it stays on screen for the mouse to reach
@@ -210,6 +212,8 @@ const MSG_VOLUME_KEY: u32 = msgloop::msg::APP + 42;
 /// A drag over a bar or the dock (`wparam`: [`kabuk_win::droptarget::OVER`] with the
 /// screen point in `lparam`, or [`kabuk_win::droptarget::LEFT`]; D86).
 const MSG_DRAG: u32 = msgloop::msg::APP + 55;
+/// A game holding game mode was closed, hidden or minimised: game mode looked at again (D87).
+const MSG_GAME_GONE: u32 = msgloop::msg::APP + 57;
 /// A frame of the screen while an auto-hiding bar slides ([`kabuk_win::ticker`]).
 const MSG_SLIDE_FRAME: u32 = msgloop::msg::APP + 53;
 /// A frame of the screen while the dock's tiles grow or settle ([`kabuk_win::ticker`]).
@@ -279,6 +283,10 @@ pub const STATS_INTERVAL: Duration = Duration::from_secs(2);
 pub const GPU_INTERVAL: Duration = Duration::from_secs(5);
 /// How often a full-screen program that keeps renaming itself is looked at again (D85).
 const GAME_RECHECK: Duration = Duration::from_secs(2);
+/// How long something else may stay in front of a full-screen game before game mode ends
+/// (D87): a launcher, a notice or an overlay passes; the user going to another window
+/// stays.
+const GAME_LEAVE_AFTER: Duration = Duration::from_secs(3);
 pub const CONFIG_DEBOUNCE: Duration = Duration::from_millis(100);
 pub const DISPLAY_DEBOUNCE: Duration = Duration::from_millis(500);
 /// The bar is small and redraws only on change: the CPU rasteriser is cheap and saves
@@ -560,6 +568,12 @@ struct Shared {
     notices: notify_host::NotifyState,
     /// The monitors in game mode (SPEC §2.4).
     game_devices: Vec<String>,
+    /// The games holding their monitors in game mode (D87).
+    held_games: Vec<kabuk_core::fullscreen::Held>,
+    /// Tells of a held game going (D87).
+    game_watch: Option<kabuk_win::events::GoneWatch>,
+    /// The look's change came during a game: made once it is over (D87).
+    look_after_game: bool,
     /// The window in front at the last foreground or title event, and when a renaming
     /// full-screen program was last looked at (D85).
     last_front: Option<u64>,
@@ -838,6 +852,9 @@ impl BarManager {
                 colors_turn: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
                 notices: notify_host::NotifyState::default(),
                 game_devices: Vec::new(),
+                held_games: Vec::new(),
+                game_watch: None,
+                look_after_game: false,
                 last_front: None,
                 last_game_check: std::time::Instant::now(),
                 idle: idle_host::IdleState::default(),
@@ -1331,7 +1348,14 @@ impl Shared {
                     }
                     timer::REBUILD => self.rebuild_when_free(),
                     timer::MODE => {
-                        self.refresh_look();
+                        // A new look recolours Windows and every window: not under a game
+                        // (D87); it comes once the game is over.
+                        if self.game_devices.is_empty() {
+                            self.refresh_look();
+                        } else {
+                            tracing::info!("look change waits for the game");
+                            self.look_after_game = true;
+                        }
                         self.schedule_mode_flip();
                     }
                     timer::EXPLORER => self.explorer_back(),
@@ -1353,6 +1377,10 @@ impl Shared {
                     timer::APP_GROW => self.step_app_growth(),
                     timer::APP_PREVIEW => self.preview_due(),
                     timer::DRAG_REVEAL => self.drag_reveal_due(),
+                    timer::GAME_LEAVE => {
+                        self.kill(timer::GAME_LEAVE);
+                        self.step_aside_for_fullscreen();
+                    }
                     timer::APP_PREVIEW_HIDE => self.hide_app_preview(),
                     timer::DRIFT => self.drift_step(false),
                     timer::AUTOHIDE => self.autohide_due(),
@@ -1374,6 +1402,13 @@ impl Shared {
                             // icons back and closed the tray menu open on screen (Chrome's,
                             // while a submenu was being chosen). Asked once it has closed.
                             tracing::info!("tray was behind Explorer's; a menu is open, programs asked later");
+                            if let Some(c) = &self.control {
+                                c.set_timer(timer::TRAY_AGAIN, TRAY_ASK_AGAIN);
+                            }
+                        } else if !self.game_devices.is_empty() {
+                            // Every program would put its icons back at once, under a game
+                            // (D87): asked once it is over.
+                            tracing::info!("tray was behind Explorer's; a game is in front, programs asked later");
                             if let Some(c) = &self.control {
                                 c.set_timer(timer::TRAY_AGAIN, TRAY_ASK_AGAIN);
                             }
@@ -1422,6 +1457,10 @@ impl Shared {
             #[cfg(feature = "integration")]
             MSG_TEST_APP_CLICK => {
                 self.test_app_click(m.wparam as u64, m.lparam == 1);
+                Some(0)
+            }
+            MSG_GAME_GONE => {
+                self.step_aside_for_fullscreen();
                 Some(0)
             }
             #[cfg(feature = "integration")]
@@ -1645,28 +1684,72 @@ impl Shared {
                 monitors.push((b.monitor.device.clone(), now_rect(b)));
             }
         }
-        let devices = kabuk_core::fullscreen::game_devices(
-            &front,
-            monitors.iter().map(|(d, r)| (d.as_str(), *r)),
-            g.detect,
-            g.other_monitors_normal,
-        );
-        // Which window turned a monitor's game mode on, for the log (found by the user:
-        // the shortcuts stopped, and nothing said which window looked full screen).
-        for (device, rect) in monitors
-            .iter()
-            .filter(|(d, _)| devices.contains(d) && !self.game_devices.contains(d))
-        {
-            let w = kabuk_core::fullscreen::front_on(front.iter().map(|(r, _)| *r), *rect).and_then(|i| windows.get(i));
-            if let Some((h, r, _)) = w {
-                let exe = h
-                    .pid()
-                    .and_then(|p| kabuk_win::process::Process::query(p).ok())
-                    .and_then(|p| p.image_name())
-                    .unwrap_or_default();
-                tracing::info!(device = %device, hwnd = h.0, class = %h.class_name(), exe, rect = ?r, "full screen by window");
+        let fronts: Vec<(String, u64)> = if g.detect {
+            kabuk_core::fullscreen::full_screen_fronts(&front, monitors.iter().map(|(d, r)| (d.as_str(), *r)))
+                .into_iter()
+                .filter_map(|(d, i)| windows.get(i).map(|(h, _, _)| (d, h.0)))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        // Game mode belongs to the game's window (D87): it holds its monitor through a
+        // moment of something else in front.
+        let now = std::time::Instant::now();
+        let still_covers = |game: u64, device: &str| {
+            let h = kabuk_win::window::Hwnd(game);
+            g.detect
+                && h.is_visible()
+                && !h.is_minimized()
+                && !h.is_cloaked()
+                && monitors.iter().find(|(d, _)| d == device).is_some_and(|(_, m)| {
+                    h.window_rect()
+                        .is_some_and(|r| kabuk_core::fullscreen::is_fullscreen_front([(r, h.is_maximized())], *m))
+                })
+        };
+        let held = kabuk_core::fullscreen::hold_games(&self.held_games, &fronts, still_covers, now, GAME_LEAVE_AFTER);
+        for h in &held {
+            let before = self.held_games.iter().find(|b| b.device == h.device);
+            if h.away_since.is_some() && before.is_some_and(|b| b.away_since.is_none()) {
+                tracing::info!(device = %h.device, game = h.game, "game mode kept: another window in front of the game");
             }
         }
+        for b in self
+            .held_games
+            .iter()
+            .filter(|b| !held.iter().any(|h| h.device == b.device))
+        {
+            tracing::info!(device = %b.device, game = b.game, away = b.away_since.is_some(), "game let go");
+        }
+        // Which window turned a monitor's game mode on, for the log (found by the user:
+        // the shortcuts stopped, and nothing said which window looked full screen).
+        for (device, game) in fronts
+            .iter()
+            .filter(|(d, game)| !self.held_games.iter().any(|b| b.device == *d && b.game == *game))
+        {
+            let h = kabuk_win::window::Hwnd(*game);
+            let exe = h
+                .pid()
+                .and_then(|p| kabuk_win::process::Process::query(p).ok())
+                .and_then(|p| p.image_name())
+                .unwrap_or_default();
+            tracing::info!(device = %device, hwnd = h.0, class = %h.class_name(), exe, rect = ?h.window_rect(), "full screen by window");
+        }
+        let games = |h: &[kabuk_core::fullscreen::Held]| h.iter().map(|g| g.game).collect::<Vec<_>>();
+        if games(&held) != games(&self.held_games) {
+            self.watch_games(&games(&held));
+        }
+        self.held_games = held;
+        self.kill(timer::GAME_LEAVE);
+        if let Some(at) = kabuk_core::fullscreen::next_hold_check(&self.held_games, GAME_LEAVE_AFTER) {
+            if let Some(c) = &self.control {
+                c.set_timer(timer::GAME_LEAVE, at.saturating_duration_since(now));
+            }
+        }
+        let devices = kabuk_core::fullscreen::held_devices(
+            &self.held_games,
+            monitors.iter().map(|(d, _)| d.as_str()),
+            g.other_monitors_normal,
+        );
         tracing::debug!(?devices, front = ?front.iter().take(FRONT_LOGGED).collect::<Vec<_>>(), "full-screen check");
         for bar in self.bars.iter_mut() {
             let game = devices.contains(&bar.monitor.device);
@@ -1706,12 +1789,43 @@ impl Shared {
             if was != now {
                 self.notices_game_mode(now);
                 self.apply_animated();
+                // No GPU device of Kabuk's lives beside the game (D87): the app grid's
+                // screen taking is made again once the game is over.
+                self.app_grid_capture(!now);
+                if !now && std::mem::take(&mut self.look_after_game) {
+                    self.refresh_look();
+                }
             }
             if !now && std::mem::take(&mut self.rebuild_after_game) {
                 tracing::info!("full-screen program gone; bars made again for the display change");
                 self.schedule_rebuild();
             }
         }
+    }
+
+    /// Watches the games holding game mode: one closed, hidden or minimised ends it at once,
+    /// though nothing else comes in front after it (D87, found by a full run: a game seen
+    /// still on screen as it closed held game mode, and no event came after).
+    fn watch_games(&mut self, games: &[u64]) {
+        // One watch per thread: the old one goes first.
+        self.game_watch = None;
+        let Some(control) = self.control.as_ref().map(Window::hwnd).filter(|_| !games.is_empty()) else {
+            return;
+        };
+        let windows = games.iter().map(|g| kabuk_win::window::Hwnd(*g)).collect();
+        self.game_watch = kabuk_win::events::GoneWatch::start(windows, move |h| {
+            tracing::debug!(hwnd = h.0, "a held game went");
+            let _ = msgloop::post_message(
+                control,
+                Msg {
+                    id: MSG_GAME_GONE,
+                    wparam: 0,
+                    lparam: 0,
+                },
+            );
+        })
+        .map_err(|e| tracing::warn!(error = %e, "held games not watched"))
+        .ok();
     }
 
     /// A display change settled: the bars are made again, unless a full-screen program

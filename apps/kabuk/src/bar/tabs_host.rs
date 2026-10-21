@@ -57,7 +57,9 @@ impl Shared {
         for v in views {
             let current = self.tabs.strips.get(&v.group);
             if current.is_some_and(|s| s.drawn == v) {
-                if let Some(s) = current {
+                // Not raised over a game (D87): a window brought over it makes the
+                // compositor draw the game again with it.
+                if let Some(s) = current.filter(|_| self.game_devices.is_empty()) {
                     s.window.place_on_top(px(v.rect));
                 }
                 continue;

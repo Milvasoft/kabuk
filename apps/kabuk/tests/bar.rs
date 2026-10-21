@@ -1154,10 +1154,25 @@ fn a_game_running_before_kabuk_starts_is_stepped_back_for() {
         wait_until(SETTLE, || sandbox.log_lines("keyboard hook off") == 1).is_some(),
         "the keyboard hook stayed on over the game"
     );
-    drop(game);
+    // D87, found in the user's log: Kabuk started under a game made the genie's GPU
+    // renderer as game mode came, and kept it a minute beside the game. None is left.
     assert!(
-        wait_until(SETTLE, || sandbox.log_lines("keyboard hook back") == 1).is_some(),
-        "the keyboard hook did not come back after the game"
+        wait_until(SETTLE, || sandbox.log_lines("genie renderer made")
+            == sandbox.log_lines("genie renderer let go"))
+        .is_some(),
+        "the genie's renderer stayed beside the game: made {}, let go {}",
+        sandbox.log_lines("genie renderer made"),
+        sandbox.log_lines("genie renderer let go")
+    );
+    drop(game);
+    // Seen still on screen as it closes, the game keeps game mode as long as a window in
+    // front of it may (D87, 3 s), then lets it go (found by a full run: a slow machine
+    // took a moment more than SETTLE).
+    let hold = Duration::from_secs(3);
+    assert!(
+        wait_until(SETTLE + hold, || sandbox.log_lines("keyboard hook back") == 1).is_some(),
+        "the keyboard hook did not come back after the game: {:?}",
+        sandbox.last_log_line(&["kabuk::bar::manager: game"])
     );
     assert_eq!(sandbox.restore().0, 0);
     assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
@@ -3374,6 +3389,160 @@ fn a_display_change_under_a_full_screen_game_waits_for_it() {
         sandbox.log_lines("full-screen program gone; bars made again for the display change"),
         1
     );
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}
+
+/// DECISIONS D87, found by the user: a game still stuttered now and then for about a
+/// second. A moment of another window in front of it (a launcher, a notice) ended game
+/// mode and began it again, and Kabuk brought everything back and took it away under the
+/// game. Game mode belongs to the game's window: a window in front of it for a moment
+/// keeps it; one staying in front (the user went to it) ends it.
+#[test]
+fn a_window_in_front_of_a_game_for_a_moment_keeps_game_mode() {
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("bars built") == 1).is_some());
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let (main_bar, notify) = main_bar_and_notify(pid);
+    let game = TestWindow::open(&["--fullscreen", "--title", &title("held-game")]);
+    assert!(wait_until(SETTLE, || game.hwnd.is_visible()).is_some());
+    assert!(
+        wait_until(SETTLE, || game.hwnd.focus()).is_some(),
+        "the game could not come to the front"
+    );
+    notify(true);
+    assert!(
+        wait_until(SETTLE, || !main_bar.is_visible()).is_some(),
+        "the bar stayed over the game"
+    );
+    // Nothing of Kabuk's busies the GPU or every program beside the game: the app grid's
+    // screen taking (a GPU device) goes, and programs are not asked to put their tray
+    // icons back until the game is over.
+    assert!(
+        wait_until(SETTLE, || sandbox
+            .log_lines("app grid screen taking let go for the game")
+            == 1)
+        .is_some(),
+        "the app grid kept its GPU device beside the game"
+    );
+    {
+        use kabuk::bar::manager::{CONTROL_CLASS, MSG_TRAY_BEHIND};
+        let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+            .into_iter()
+            .find(|h| h.pid() == Some(pid))
+            .expect("bar control window");
+        kabuk_win::msgloop::post_message(
+            control,
+            kabuk_win::msgloop::Msg {
+                id: MSG_TRAY_BEHIND,
+                wparam: 0,
+                lparam: 0,
+            },
+        )
+        .unwrap();
+        assert!(
+            wait_until(SETTLE, || sandbox.log_lines("a game is in front, programs asked later")
+                >= 1)
+            .is_some(),
+            "programs were asked for their tray icons under the game"
+        );
+        assert_eq!(sandbox.log_lines("programs asked to register again"), 0);
+    }
+    let came_back = || sandbox.log_lines("bar back after a full-screen program");
+    // The shell's lines about game mode, for a failure's message.
+    let game_lines = || -> String {
+        std::fs::read_dir(sandbox.state_dir().join("logs"))
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with("kabuk."))
+            .filter_map(|e| std::fs::read_to_string(e.path()).ok())
+            .flat_map(|t| t.lines().map(str::to_string).collect::<Vec<_>>())
+            .filter(|l| {
+                ["game", "full screen", "full-screen", "bar back", "steps aside"]
+                    .iter()
+                    .any(|k| l.contains(k))
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    // A window in front of the game for a moment.
+    let other = TestWindow::open(&["--topmost", "--title", &title("a-moment")]);
+    assert!(wait_until(SETTLE, || other.hwnd.is_visible()).is_some());
+    assert!(wait_until(SETTLE, || other.hwnd.focus()).is_some());
+    notify(true);
+    assert!(
+        wait_until(SETTLE, || sandbox
+            .log_lines("game mode kept: another window in front of the game")
+            == 1)
+        .is_some(),
+        "game mode was not kept for the game: {:?}",
+        game_lines()
+    );
+    assert!(
+        !main_bar.is_visible() && came_back() == 0,
+        "the bar came back over the game"
+    );
+    other.close();
+    assert!(wait_until(SETTLE, || game.hwnd.focus()).is_some());
+    notify(true);
+    // Back in front: game mode stays, past the time a window in front may stay.
+    std::thread::sleep(Duration::from_secs(4));
+    assert!(
+        !main_bar.is_visible() && came_back() == 0 && sandbox.log_lines("game let go") == 0,
+        "game mode ended with the game back in front: {:?}",
+        game_lines()
+    );
+
+    // A window staying in front: the user went to it, and the bar comes back.
+    let stays = TestWindow::open(&["--topmost", "--title", &title("stays")]);
+    assert!(wait_until(SETTLE, || stays.hwnd.is_visible()).is_some());
+    assert!(wait_until(SETTLE, || stays.hwnd.focus()).is_some());
+    notify(true);
+    assert!(
+        wait_until(Duration::from_secs(10), || main_bar.is_visible()).is_some(),
+        "the bar did not come back with another window staying in front of the game"
+    );
+    assert_eq!(sandbox.log_lines("away=true"), 1);
+    drop(stays);
+    drop(game);
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}
+
+/// DECISIONS D87, found by a full run: a game seen still on screen as it closed kept game
+/// mode, and no event came after it. The game holding game mode is watched: hidden (or
+/// closed, or minimised) it lets game mode go at once, though nothing else comes in front.
+#[test]
+fn a_game_going_away_ends_game_mode_with_nothing_else_in_front() {
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("bars built") == 1).is_some());
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let (main_bar, notify) = main_bar_and_notify(pid);
+    let game = TestWindow::open(&["--fullscreen", "--title", &title("hidden-game")]);
+    assert!(wait_until(SETTLE, || game.hwnd.is_visible()).is_some());
+    assert!(
+        wait_until(SETTLE, || game.hwnd.focus()).is_some(),
+        "the game could not come to the front"
+    );
+    notify(true);
+    assert!(
+        wait_until(SETTLE, || !main_bar.is_visible()).is_some(),
+        "the bar stayed over the game"
+    );
+    // Hidden, it stays the window in front: no foreground event comes.
+    assert!(game.hwnd.hide_async());
+    assert!(
+        wait_until(Duration::from_secs(2), || main_bar.is_visible()).is_some(),
+        "game mode stayed after the game went: {:?}",
+        sandbox.last_log_line(&["kabuk::bar::manager: game"])
+    );
+    assert_eq!(sandbox.log_lines("game let go"), 1);
+    drop(game);
     assert_eq!(sandbox.restore().0, 0);
     assert!(wait_until(SETTLE, || restored(&before)).is_some());
 }

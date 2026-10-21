@@ -33,6 +33,8 @@
 //!   --splash               small borderless popup, like a splash screen
 //!   --dialog               also open an owned dialog-like window
 //!   --tool                 tool window (WS_EX_TOOLWINDOW)
+//!   --topmost              an ordinary window above the others, as a launcher or an app
+//!                          keeping itself on top comes up over a game
 //!   --app-window           asks for a taskbar button (WS_EX_APPWINDOW), as many games do
 //!   --dpi-unaware          create the window DPI unaware (scaled by Windows), like
 //!                          older programs
@@ -97,6 +99,7 @@ struct Options {
     splash: bool,
     dialog: bool,
     tool: bool,
+    topmost: bool,
     app_window: bool,
     dpi_unaware: bool,
 }
@@ -151,6 +154,7 @@ fn parse() -> Result<Options, String> {
             "--splash" => o.splash = true,
             "--dialog" => o.dialog = true,
             "--tool" => o.tool = true,
+            "--topmost" => o.topmost = true,
             "--app-window" => o.app_window = true,
             "--dpi-unaware" => o.dpi_unaware = true,
             _ => return Err(format!("unknown argument {a}")),
@@ -216,6 +220,9 @@ fn run(o: &Options) {
         }
         if o.tool {
             ex_style |= WS_EX_TOOLWINDOW;
+        }
+        if o.topmost {
+            ex_style |= WS_EX_TOPMOST;
         }
         if o.app_window {
             ex_style |= WS_EX_APPWINDOW;

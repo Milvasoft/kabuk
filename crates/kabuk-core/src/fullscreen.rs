@@ -47,31 +47,88 @@ pub fn front_on(windows: impl IntoIterator<Item = Rect>, monitor: Rect) -> Optio
     windows.into_iter().position(|w| on_monitor(&w))
 }
 
-/// The monitors in game mode (SPEC §2.4): each of `monitors` (device, rectangle) whose
-/// front window is full screen, or every monitor when one is and the others do not stay
-/// normal. Every monitor is looked at, not only those with a bar (found on the user's
-/// machine: with the bar on the main monitor only, a game on Monitor 2 was never seen,
-/// and nothing stepped aside for it; D85). `windows` as for [`is_fullscreen_front`].
-pub fn game_devices<'a>(
+/// The monitors whose front window is full screen, each with that window's place in
+/// `windows` (front first, as for [`is_fullscreen_front`]). Every monitor is looked at,
+/// not only those with a bar (found on the user's machine: with the bar on the main
+/// monitor only, a game on Monitor 2 was never seen, and nothing stepped aside for it;
+/// D85).
+pub fn full_screen_fronts<'a>(
     windows: &[(Rect, bool)],
     monitors: impl IntoIterator<Item = (&'a str, Rect)>,
-    detect: bool,
+) -> Vec<(String, usize)> {
+    monitors
+        .into_iter()
+        .filter(|(_, r)| is_fullscreen_front(windows.iter().copied(), *r))
+        .filter_map(|(d, r)| front_on(windows.iter().map(|(w, _)| *w), r).map(|i| (d.to_string(), i)))
+        .collect()
+}
+
+/// A game holding its monitor in game mode (DECISIONS D87): the window that was full
+/// screen in front there, and since when something else has been in front of it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Held {
+    pub device: String,
+    pub game: u64,
+    pub away_since: Option<std::time::Instant>,
+}
+
+/// The games holding monitors after a check (D87). Game mode belongs to the game's
+/// window, not to whatever is in front at the moment: a monitor whose front window is
+/// full screen now (`fronts`: device and window) is held by it; a monitor held before
+/// stays held while its game still covers it (`still_covers`: alive, shown, not
+/// minimised, the whole monitor), even with something else in front, until that has
+/// lasted `leave_after` (the user went to another window). A game gone, minimised or out
+/// of full screen lets its monitor go at once. Found by the user: a moment of anything
+/// else in front of a game (a launcher, a notice, an overlay) ended game mode and began it
+/// again, and the game stuttered while Kabuk brought everything back and took it away.
+pub fn hold_games(
+    held: &[Held],
+    fronts: &[(String, u64)],
+    still_covers: impl Fn(u64, &str) -> bool,
+    now: std::time::Instant,
+    leave_after: std::time::Duration,
+) -> Vec<Held> {
+    let mut out: Vec<Held> = fronts
+        .iter()
+        .map(|(device, game)| Held {
+            device: device.clone(),
+            game: *game,
+            away_since: None,
+        })
+        .collect();
+    for h in held {
+        if out.iter().any(|o| o.device == h.device) || !still_covers(h.game, &h.device) {
+            continue;
+        }
+        let away_since = h.away_since.unwrap_or(now);
+        if now.saturating_duration_since(away_since) < leave_after {
+            out.push(Held {
+                away_since: Some(away_since),
+                ..h.clone()
+            });
+        }
+    }
+    out
+}
+
+/// When the held games must be looked at again: the first moment one of them, away
+/// from the front, has been away `leave_after`.
+pub fn next_hold_check(held: &[Held], leave_after: std::time::Duration) -> Option<std::time::Instant> {
+    held.iter().filter_map(|h| h.away_since).map(|t| t + leave_after).min()
+}
+
+/// The monitors in game mode while `held` hold theirs: those, or every monitor when one
+/// is held and the others do not stay normal.
+pub fn held_devices<'a>(
+    held: &[Held],
+    monitors: impl IntoIterator<Item = &'a str>,
     other_monitors_normal: bool,
 ) -> Vec<String> {
-    if !detect {
-        return Vec::new();
-    }
-    let monitors: Vec<(&str, Rect)> = monitors.into_iter().collect();
-    let full: Vec<bool> = monitors
-        .iter()
-        .map(|(_, r)| is_fullscreen_front(windows.iter().copied(), *r))
-        .collect();
-    let any = full.iter().any(|f| *f);
+    let any = !held.is_empty();
     monitors
-        .iter()
-        .zip(full)
-        .filter(|(_, f)| *f || (any && !other_monitors_normal))
-        .map(|((d, _), _)| (*d).to_string())
+        .into_iter()
+        .filter(|d| held.iter().any(|h| h.device == *d) || (any && !other_monitors_normal))
+        .map(str::to_string)
         .collect()
 }
 
@@ -295,26 +352,102 @@ mod tests {
         ));
     }
 
-    /// D72: a game at 1920 x 1080 on a 2560 x 1440 monitor covers it as Windows gives it
-    /// now, not as the bar was made; a monitor Windows no longer lists keeps its old size.
+    /// D85: a game on any monitor is seen; the others follow when they do not stay normal.
     #[test]
     fn every_monitor_is_looked_at_for_game_mode() {
         let game = |r: Rect| vec![(r, false)];
         let both = [("M1", M1), ("M2", M2)];
+        let devices = |windows: &[(Rect, bool)], other_monitors_normal: bool| {
+            let held: Vec<Held> = full_screen_fronts(windows, both)
+                .into_iter()
+                .map(|(device, i)| Held {
+                    device,
+                    game: i as u64,
+                    away_since: None,
+                })
+                .collect();
+            held_devices(&held, both.map(|(d, _)| d), other_monitors_normal)
+        };
         // A game on Monitor 2 is seen, though it may have no bar.
-        assert_eq!(game_devices(&game(M2), both, true, true), vec!["M2".to_string()]);
-        assert_eq!(game_devices(&game(M1), both, true, true), vec!["M1".to_string()]);
+        assert_eq!(devices(&game(M2), true), vec!["M2".to_string()]);
+        assert_eq!(devices(&game(M1), true), vec!["M1".to_string()]);
         // The others follow when they do not stay normal.
-        assert_eq!(
-            game_devices(&game(M2), both, true, false),
-            vec!["M1".to_string(), "M2".to_string()]
-        );
-        // Nothing full screen, or detection off: none.
-        assert!(game_devices(&[(NORMAL, false)], both, true, false).is_empty());
-        assert!(game_devices(&game(M1), both, false, true).is_empty());
-        assert!(game_devices(&[], both, true, true).is_empty());
+        assert_eq!(devices(&game(M2), false), vec!["M1".to_string(), "M2".to_string()]);
+        // Nothing full screen: none.
+        assert!(devices(&[(NORMAL, false)], false).is_empty());
+        assert!(devices(&[], true).is_empty());
     }
 
+    /// D87: a moment of something else in front keeps the game's hold; a while of it, or
+    /// the game minimised, closed or out of full screen, lets the monitor go.
+    #[test]
+    fn a_game_keeps_its_monitor_through_a_moment_of_something_else_in_front() {
+        use std::time::{Duration, Instant};
+        const GAME: u64 = 7;
+        let leave = Duration::from_secs(3);
+        let t0 = Instant::now();
+        let covers = |_: u64, _: &str| true;
+        let gone = |_: u64, _: &str| false;
+        let fronts = vec![("M1".to_string(), GAME)];
+        // Full screen in front: held, not away.
+        let held = hold_games(&[], &fronts, covers, t0, leave);
+        assert_eq!(
+            held,
+            vec![Held {
+                device: "M1".into(),
+                game: GAME,
+                away_since: None
+            }]
+        );
+        assert_eq!(next_hold_check(&held, leave), None);
+        // Something else in front: still held, away since now, looked at again later.
+        let t1 = t0 + Duration::from_secs(10);
+        let away = hold_games(&held, &[], covers, t1, leave);
+        assert_eq!(away.len(), 1);
+        assert_eq!(away[0].away_since, Some(t1));
+        assert_eq!(next_hold_check(&away, leave), Some(t1 + leave));
+        // Still away a moment later: the first moment is kept.
+        let t2 = t1 + Duration::from_secs(1);
+        let still = hold_games(&away, &[], covers, t2, leave);
+        assert_eq!(still[0].away_since, Some(t1));
+        // The game back in front: no longer away.
+        let back = hold_games(&still, &fronts, covers, t2, leave);
+        assert_eq!(back[0].away_since, None);
+        // Away for `leave`: let go.
+        assert!(hold_games(&away, &[], covers, t1 + leave, leave).is_empty());
+        // The game minimised, closed or out of full screen: let go at once.
+        assert!(hold_games(&held, &[], gone, t1, leave).is_empty());
+        // Another game in front on the monitor takes the hold.
+        let other = hold_games(&away, &[("M1".to_string(), 9)], covers, t2, leave);
+        assert_eq!(other.len(), 1);
+        assert_eq!((other[0].game, other[0].away_since), (9, None));
+    }
+
+    #[test]
+    fn the_held_monitors_and_the_others_follow_as_set() {
+        let held = vec![Held {
+            device: "M2".into(),
+            game: 1,
+            away_since: None,
+        }];
+        assert_eq!(held_devices(&held, ["M1", "M2"], true), vec!["M2".to_string()]);
+        assert_eq!(
+            held_devices(&held, ["M1", "M2"], false),
+            vec!["M1".to_string(), "M2".to_string()]
+        );
+        assert!(held_devices(&[], ["M1", "M2"], false).is_empty());
+        // A monitor no longer there is not in game mode.
+        assert!(held_devices(&held, ["M1"], true).is_empty());
+        // The full-screen fronts name their windows.
+        let windows = [(NORMAL, false), (M2, false)];
+        assert_eq!(
+            full_screen_fronts(&windows, [("M1", M1), ("M2", M2)]),
+            vec![("M2".to_string(), 1)]
+        );
+    }
+
+    /// D72: a game at 1920 x 1080 on a 2560 x 1440 monitor covers it as Windows gives it
+    /// now, not as the bar was made; a monitor Windows no longer lists keeps its old size.
     #[test]
     fn a_monitors_rectangle_is_the_one_windows_gives_now() {
         let made = Rect {
