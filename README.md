@@ -4,7 +4,7 @@ A desktop shell for Windows built from scratch: a bar on every monitor, dynamic 
 
 Open source under the Apache License 2.0 (see `LICENSE`).
 
-> Status: version 1.0.4. `docs/PLAN.md` has each milestone's results and what is left.
+> Status: version 1.0.5. `docs/PLAN.md` has each milestone's results and what is left.
 
 ## Installing
 
