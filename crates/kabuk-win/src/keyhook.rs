@@ -114,6 +114,21 @@ impl VolumeKey {
 
 /// Where the volume keys go while taken: (window, message).
 static VOLUME_SINK: Mutex<Option<(isize, u32)>> = Mutex::new(None);
+/// Where a chord that switches the input language is told (window, message; D88).
+static LANGUAGE_SINK: Mutex<Option<(isize, u32)>> = Mutex::new(None);
+
+/// `VK_SPACE`.
+const SPACE: u16 = 0x20;
+
+/// Whether `event` ends one of Windows' input-language chords: Win+Space, Alt+Shift or
+/// Ctrl+Shift (whichever key is let go last), with `mods` the keys held then.
+fn language_switch(event: Event, mods: Mods) -> bool {
+    let Event::Up(vk) = event else { return false };
+    let is = |keys: &[windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY]| keys.iter().any(|k| k.0 == vk);
+    (vk == SPACE && mods.win)
+        || (is(&[VK_SHIFT, VK_LSHIFT, VK_RSHIFT]) && (mods.alt || mods.ctrl))
+        || (is(&[VK_MENU, VK_LMENU, VK_RMENU, VK_CONTROL, VK_LCONTROL, VK_RCONTROL]) && mods.shift)
+}
 
 /// What the hook remembers between events.
 #[derive(Debug, Default)]
@@ -330,6 +345,13 @@ unsafe extern "system" fn on_key(code: i32, wparam: WPARAM, lparam: LPARAM) -> L
         WM_KEYUP | WM_SYSKEYUP => Event::Up(vk),
         _ => return pass(),
     };
+    // Only watched, never taken: the chord goes on to Windows, which switches.
+    if let Some((hwnd, message)) = LANGUAGE_SINK.lock().ok().and_then(|s| *s) {
+        if crate::msgloop::contain(false, || language_switch(event, mods_now())) {
+            // SAFETY: a message to a window of Kabuk's; a gone window makes it fail.
+            let _ = unsafe { PostMessageW(Some(HWND(hwnd as *mut _)), message, WPARAM(0), LPARAM(0)) };
+        }
+    }
     let sink = VOLUME_SINK.lock().ok().and_then(|s| *s);
     if let Some((hwnd, message)) = sink {
         let volume = crate::msgloop::contain(None, || STATE.with(|s| decide_volume(event, &mut s.borrow_mut())));
@@ -601,6 +623,32 @@ impl Drop for VolumeKeys {
     }
 }
 
+/// Tells `window` with `message` each time one of Windows' input-language chords ends
+/// (Win+Space, Alt+Shift, Ctrl+Shift), until dropped; the keys go on to Windows (D88:
+/// the bar's keyboard language follows a switch made in another program, which Windows
+/// tells nobody else of).
+#[derive(Debug)]
+pub struct LanguageKeys(());
+
+impl LanguageKeys {
+    pub fn watch(window: crate::window::Hwnd, message: u32) -> std::io::Result<LanguageKeys> {
+        ensure_hook().map_err(std::io::Error::other)?;
+        let mut sink = LANGUAGE_SINK
+            .lock()
+            .map_err(|_| std::io::Error::other("language key sink poisoned"))?;
+        *sink = Some((window.0 as isize, message));
+        Ok(LanguageKeys(()))
+    }
+}
+
+impl Drop for LanguageKeys {
+    fn drop(&mut self) {
+        if let Ok(mut s) = LANGUAGE_SINK.lock() {
+            *s = None;
+        }
+    }
+}
+
 /// A chord bound by the hook, or, when the hook cannot be installed, registered with
 /// `RegisterHotKey` as before D40.
 #[derive(Debug)]
@@ -641,6 +689,31 @@ mod tests {
     //! pass; bindings come and go with their `Shortcut`.
     use super::*;
     use kabuk_core::config::shortcut::Key;
+
+    /// D88: the end of Win+Space, Alt+Shift or Ctrl+Shift tells of a language switch,
+    /// whichever key goes last; typing a capital, a key's press, or Space alone does not.
+    #[test]
+    fn the_end_of_a_language_chord_is_seen() {
+        let held = |ctrl, alt, shift, win| Mods { ctrl, alt, shift, win };
+        assert!(language_switch(Event::Up(SPACE), held(false, false, false, true)));
+        assert!(!language_switch(Event::Up(SPACE), held(false, false, false, false)));
+        assert!(!language_switch(Event::Down(SPACE), held(false, false, false, true)));
+        assert!(language_switch(Event::Up(VK_LSHIFT.0), held(false, true, true, false)));
+        assert!(language_switch(Event::Up(VK_LMENU.0), held(false, true, true, false)));
+        assert!(language_switch(
+            Event::Up(VK_RCONTROL.0),
+            held(true, false, true, false)
+        ));
+        assert!(language_switch(Event::Up(VK_SHIFT.0), held(true, false, true, false)));
+        assert!(
+            !language_switch(Event::Up(VK_LSHIFT.0), held(false, false, true, false)),
+            "a capital"
+        );
+        assert!(!language_switch(
+            Event::Up(u16::from(b'A')),
+            held(false, true, true, false)
+        ));
+    }
 
     const WIN: Mods = Mods {
         ctrl: false,

@@ -78,6 +78,11 @@ impl Shared {
         self.close_app_menu();
         self.close_power_menu();
         self.close_volume_panel();
+        self.close_quick_panel();
+        self.close_calendar_panel();
+        self.close_privacy_panel();
+        self.close_keyboard_panel();
+        self.close_network_panel();
         let weak = self.me.clone();
         // Drawn again while open: it does not enter again, and keeps the program it is held for.
         let mut held_for = None;

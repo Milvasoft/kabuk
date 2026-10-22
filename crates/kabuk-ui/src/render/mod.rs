@@ -13,7 +13,7 @@ mod text;
 mod wall;
 
 pub use device::{Gpu, Images, Raster};
-pub use draw::Palette;
+pub use draw::{Palette, ICON_VIEWBOX};
 pub use fonts::FONT_FILES;
 pub use offscreen::Pixels;
 pub use scene::{SceneCache, SceneCanvas};

@@ -766,6 +766,23 @@ pub struct Modules {
     pub power: bool,
     /// The button that opens the grid of every app (DECISIONS D56).
     pub app_grid: bool,
+    /// Windows' network indicator: Wi-Fi signal, Ethernet or none (DECISIONS D88).
+    pub network: bool,
+    /// The battery's charge, on a computer with one (D88).
+    pub battery: bool,
+    /// The input language, with more than one installed (D88).
+    pub keyboard: bool,
+    /// An icon while a program uses the microphone, the camera or the location (D88).
+    pub privacy: bool,
+    /// A thin corner at the bar's end: every window down, a second click brings them back
+    /// (D88).
+    pub show_desktop: bool,
+    /// A click on the clock or the bell opens Kabuk's calendar and notifications (D88);
+    /// off, Windows' notification centre.
+    pub calendar: bool,
+    /// The quick settings button: Wi-Fi, Bluetooth, airplane mode, brightness, volume
+    /// (D88).
+    pub quick_settings: bool,
 }
 
 impl Default for Modules {
@@ -785,6 +802,13 @@ impl Default for Modules {
             notif: true,
             power: true,
             app_grid: true,
+            network: true,
+            battery: true,
+            keyboard: true,
+            privacy: true,
+            show_desktop: true,
+            calendar: true,
+            quick_settings: true,
         }
     }
 }

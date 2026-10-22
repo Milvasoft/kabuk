@@ -13,7 +13,7 @@ use kabuk_ui::geom::{Insets, Point, Rect, Size};
 use kabuk_ui::node::{
     layout, Align, Axis, Draw, FontRole, Kind, Layout, Node, Paint, Role, Span, TextMeasure, TextSpec,
 };
-use kabuk_ui::render::CSS_LINE_HEIGHT;
+use kabuk_ui::render::{CSS_LINE_HEIGHT, ICON_VIEWBOX};
 
 use super::style::{Arrangement, Between, Group, LayoutIndicator, Style, Typo, Ws, MEDIA_BAR_HEIGHTS};
 
@@ -45,6 +45,18 @@ pub mod hit {
     pub const STAT_RAM: u32 = 1;
     pub const STAT_GPU: u32 = 2;
     pub const STAT_NET: u32 = 3;
+    /// Windows' network indicator (DECISIONS D88): opens the network panel.
+    pub const NETWORK: &str = "network";
+    /// The battery (D88).
+    pub const BATTERY: &str = "battery";
+    /// The input language (D88): opens the list of languages.
+    pub const KEYBOARD: &str = "keyboard";
+    /// A privacy indicator (D88); the value is its place among them.
+    pub const PRIVACY: &str = "privacy";
+    /// The show-desktop corner at the bar's end (D88).
+    pub const SHOW_DESKTOP: &str = "show-desktop";
+    /// The quick settings button (D88).
+    pub const QUICK_SETTINGS: &str = "quick-settings";
 }
 
 /// Konsol names its first workspaces like tmux windows (`1:code`).
@@ -128,6 +140,14 @@ pub struct BarData {
     pub apps: Vec<AppIcon>,
     /// Notices in Windows' notification centre; `None` when it cannot be read (D32).
     pub notif_count: Option<u32>,
+    /// How the computer reaches the network; `None` until it is known (D88).
+    pub network: Option<kabuk_core::network::Link>,
+    /// The battery; `None` on a computer without one (D88).
+    pub battery: Option<kabuk_core::battery::Battery>,
+    /// The input language's short code; `None` with a single language (D88).
+    pub keyboard: Option<String>,
+    /// What programs use now: the microphone, the camera, the location (D88).
+    pub privacy: Vec<kabuk_core::privacy::Kind>,
 }
 
 /// An app of the apps module as the bar draws it.
@@ -806,6 +826,150 @@ fn tray(d: &BarData, s: &Style, i18n: &I18n) -> Option<Node> {
 const BADGE: (f32, f32, f32, f32) = (14.0, 14.0, 10.0, 3.0);
 const BADGE_GAP: f32 = 2.0;
 
+/// Windows' system indicators (`.grp.inds`, DECISIONS D88), primary monitor only, as
+/// Windows keeps them together at the taskbar's end.
+fn indicators(d: &BarData, s: &Style, i18n: &I18n) -> Option<Node> {
+    if !d.primary {
+        return None;
+    }
+    let mut parts = Vec::new();
+    if d.modules.privacy {
+        for (i, kind) in d.privacy.iter().enumerate() {
+            parts.push(
+                Node::icon(kind.icon(), s.tray_icon, Role::Accent).hit(hit::PRIVACY, u32::try_from(i).unwrap_or(0)),
+            );
+        }
+    }
+    if let (true, Some(code)) = (d.modules.keyboard, &d.keyboard) {
+        // `.inds .kb`: the code in the figures' font inside a thin outline.
+        let (pad_h, pad_v) = KEYBOARD_CHIP_PAD;
+        parts.push(
+            text(
+                vec![span(code.clone(), Role::Fg, 600)],
+                FontRole::Num,
+                s.size(KEYBOARD_CHIP_TEXT),
+            )
+            .padding(Insets::symmetric(pad_h, pad_v))
+            .paint(Paint {
+                fill: Role::Clear,
+                border: Some((Role::Faint, 1.0)),
+                radius: KEYBOARD_CHIP_RADIUS,
+            })
+            .hit(hit::KEYBOARD, 0),
+        );
+    }
+    if let (true, Some(link)) = (d.modules.network, &d.network) {
+        parts.push(Node::icon(kabuk_core::network::icon(link), s.tray_icon, s.mod_icon_color).hit(hit::NETWORK, 0));
+    }
+    if let (true, Some(b)) = (d.modules.battery, &d.battery) {
+        parts.push(battery(b, d, s, i18n).hit(hit::BATTERY, 0));
+    }
+    if d.modules.quick_settings {
+        parts.push(Node::icon("qs", s.tray_icon, s.mod_icon_color).hit(hit::QUICK_SETTINGS, 0));
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    let list = if d.vertical() {
+        Node::column(parts)
+    } else {
+        Node::row(parts)
+    };
+    Some(list.gap(s.tray_gap).align(Align::Center))
+}
+
+/// `.desk-corner`: the show-desktop corner's width (its line on the leading side) and
+/// how far it is from the group before it; the line is as long as the bar's icons are
+/// tall this many times.
+const DESK_CORNER: (f32, f32) = (6.0, 6.0);
+const DESK_CORNER_LINE: f32 = 1.5;
+
+/// `.desk-corner`: a thin line at the bar's end, outside the groups, clickable.
+fn show_desktop(d: &BarData, s: &Style) -> Node {
+    let (width, away) = DESK_CORNER;
+    let long = s.tray_icon * DESK_CORNER_LINE;
+    let line = if d.vertical() {
+        Node::spacer(long, 1.0)
+    } else {
+        Node::spacer(1.0, long)
+    }
+    .paint(Paint {
+        fill: Role::Faint,
+        border: None,
+        radius: 0.0,
+    });
+    let (w, h, pad) = if d.vertical() {
+        (
+            long,
+            width,
+            Insets {
+                top: away,
+                ..Insets::default()
+            },
+        )
+    } else {
+        (
+            width,
+            long,
+            Insets {
+                left: away,
+                ..Insets::default()
+            },
+        )
+    };
+    Node::row(vec![line])
+        .align(Align::Start)
+        .size(Some(w + pad.horizontal()), Some(h + pad.vertical()))
+        .padding(pad)
+        .hit(hit::SHOW_DESKTOP, 0)
+}
+
+/// `.inds .kb`: the input language chip's text size, padding (sides, top and bottom) and
+/// corner radius.
+const KEYBOARD_CHIP_TEXT: f32 = 11.5;
+const KEYBOARD_CHIP_PAD: (f32, f32) = (5.0, 3.0);
+const KEYBOARD_CHIP_RADIUS: f32 = 5.0;
+
+/// The design's `batt` icon: its body's inside in the 24-unit view box (left edge,
+/// width, height), where the charge's level is drawn.
+const BATTERY_BODY: (f32, f32, f32) = (4.5, 13.0, 6.0);
+
+/// `.ind[data-m="battery"]`: the battery icon filled to its charge (in the warning colour
+/// when low), the bolt over it while charging, and the percentage beside it.
+fn battery(b: &kabuk_core::battery::Battery, d: &BarData, s: &Style, i18n: &I18n) -> Node {
+    let unit = s.tray_icon / ICON_VIEWBOX;
+    let (left, width, height) = BATTERY_BODY;
+    let w = width * b.fill() * unit;
+    let level = Node::spacer(w, height * unit)
+        .paint(Paint {
+            fill: if b.low() { Role::Warning } else { s.mod_icon_color },
+            border: None,
+            radius: unit,
+        })
+        // A layer centres its children: the level starts at the body's left edge.
+        .offset((left - ICON_VIEWBOX / 2.0) * unit + w / 2.0, 0.0);
+    let mut layers = vec![Node::icon("batt", s.tray_icon, s.mod_icon_color), level];
+    if b.charging {
+        layers.push(Node::icon("bolt", s.tray_icon, Role::Accent));
+    }
+    let icon = Node::layer(layers).size(Some(s.tray_icon), Some(s.tray_icon));
+    let value = text(
+        vec![span(
+            i18n.tr_args("bar-percent", &[("value", u32::from(b.percent).into())]),
+            Role::Fg,
+            s.mod_value_weight,
+        )],
+        FontRole::Num,
+        s.size(if d.vertical() { s.mod_size_vertical } else { s.mod_size }),
+    );
+    let items = vec![icon, value];
+    if d.vertical() {
+        Node::column(items).gap(s.mod_gap_vertical)
+    } else {
+        Node::row(items).gap(s.mod_gap).align(Align::Center)
+    }
+}
+
 /// The last group (`.grp` with `.bell` and the power icon), primary monitor only.
 fn bell_and_power(d: &BarData, s: &Style) -> Option<Node> {
     if !d.primary || !(d.modules.notif || d.modules.power) {
@@ -1063,8 +1227,14 @@ pub fn regions(d: &BarData, s: &Style, i18n: &I18n, thickness: f32) -> Regions {
     if let Some(t) = tray(d, s, i18n) {
         end.push(g(vec![t]));
     }
+    if let Some(i) = indicators(d, s, i18n) {
+        end.push(g(vec![i]));
+    }
     if let Some(a) = bell_and_power(d, s) {
         end.push(g(vec![a]));
+    }
+    if d.primary && d.modules.show_desktop {
+        end.push(show_desktop(d, s));
     }
     if s.arrangement == Arrangement::ClockLast {
         let mut end = end;
@@ -1434,6 +1604,13 @@ mod tests {
             tray_more: 0,
             apps: Vec::new(),
             notif_count: None,
+            network: Some(kabuk_core::network::Link::Wifi {
+                ssid: "milva-5g".into(),
+                signal: 90,
+            }),
+            battery: None,
+            keyboard: None,
+            privacy: Vec::new(),
             volume: Some(Volume {
                 percent: 40,
                 muted: false,
@@ -1509,7 +1686,7 @@ mod tests {
         // The app grid's button leads (DECISIONS D56; the design page predates it).
         assert_eq!(
             icons(&l),
-            vec!["app", "tile", "music", "cpu", "mem", "temp", "down", "vol", "bell", "power"]
+            vec!["app", "tile", "music", "cpu", "mem", "temp", "down", "vol", "wifi", "qs", "bell", "power"]
         );
     }
 
@@ -1556,6 +1733,171 @@ mod tests {
         let mut off = d.clone();
         off.modules.app_grid = false;
         assert!(!render(&off, &tr).hits.iter().any(|(_, h)| h.module == hit::APP_GRID));
+    }
+
+    /// DECISIONS D88: the network indicator shows the link as Windows' taskbar does
+    /// (Wi-Fi by its signal, Ethernet, none), takes clicks, stays on the primary bar and
+    /// goes with its module or while the link is not known yet.
+    #[test]
+    fn the_network_indicator_shows_the_link_and_takes_clicks() {
+        use kabuk_core::network::Link;
+        let tr = I18n::new(Lang::Tr);
+        let with = |link: Option<Link>| BarData {
+            network: link,
+            ..data(&tr)
+        };
+        let shown = |d: &BarData| {
+            let l = render(d, &tr);
+            let is = icons(&l);
+            let net = ["wifi", "wifi-2", "wifi-1", "wifi-off", "eth"]
+                .into_iter()
+                .find(|n| is.contains(n));
+            (net, l.hits.iter().any(|(_, h)| h.module == hit::NETWORK))
+        };
+        let wifi = |signal| {
+            Some(Link::Wifi {
+                ssid: "milva".into(),
+                signal,
+            })
+        };
+        assert_eq!(shown(&with(wifi(90))), (Some("wifi"), true));
+        assert_eq!(shown(&with(wifi(50))), (Some("wifi-2"), true));
+        assert_eq!(shown(&with(wifi(5))), (Some("wifi-1"), true));
+        assert_eq!(shown(&with(Some(Link::Ethernet))), (Some("eth"), true));
+        assert_eq!(shown(&with(Some(Link::None))), (Some("wifi-off"), true));
+        assert_eq!(shown(&with(None)), (None, false));
+        let mut off = with(wifi(90));
+        off.modules.network = false;
+        assert_eq!(shown(&off), (None, false));
+        let secondary = BarData {
+            primary: false,
+            ..with(wifi(90))
+        };
+        assert_eq!(shown(&secondary), (None, false));
+        let side = BarData {
+            edge: Edge::Left,
+            ..with(Some(Link::Ethernet))
+        };
+        assert_eq!(shown(&side), (Some("eth"), true));
+    }
+
+    /// DECISIONS D88: the quick settings button ends the indicators and the show-desktop
+    /// corner the bar, both clickable, on the primary bar only, each with its module.
+    #[test]
+    fn the_quick_settings_button_and_the_desktop_corner() {
+        let tr = I18n::new(Lang::Tr);
+        let has = |d: &BarData, module: &str| render(d, &tr).hits.iter().any(|(_, h)| h.module == module);
+        let d = data(&tr);
+        assert!(has(&d, hit::QUICK_SETTINGS) && has(&d, hit::SHOW_DESKTOP));
+        // At a side bar the corner lies across it, at the bottom end.
+        let side = BarData {
+            edge: Edge::Left,
+            ..data(&tr)
+        };
+        let l = render(&side, &tr);
+        let corner = l.hits.iter().find(|(_, h)| h.module == hit::SHOW_DESKTOP).unwrap().0;
+        assert!(corner.w > corner.h, "{corner:?}");
+        let mut off = data(&tr);
+        off.modules.quick_settings = false;
+        off.modules.show_desktop = false;
+        assert!(!has(&off, hit::QUICK_SETTINGS) && !has(&off, hit::SHOW_DESKTOP));
+        let secondary = BarData {
+            primary: false,
+            ..data(&tr)
+        };
+        assert!(!has(&secondary, hit::QUICK_SETTINGS) && !has(&secondary, hit::SHOW_DESKTOP));
+    }
+
+    /// DECISIONS D88: the input language's code shows in its outlined chip before the
+    /// network, takes clicks, and is gone with one language or the module off.
+    #[test]
+    fn the_keyboard_language_shows_its_code() {
+        let tr = I18n::new(Lang::Tr);
+        let with = |code: Option<&str>| BarData {
+            keyboard: code.map(str::to_string),
+            ..data(&tr)
+        };
+        let l = render(&with(Some("TR")), &tr);
+        assert!(texts(&l).contains(&"TR".to_string()));
+        assert!(l.hits.iter().any(|(_, h)| h.module == hit::KEYBOARD));
+        let chip = l.hits.iter().find(|(_, h)| h.module == hit::KEYBOARD).unwrap().0;
+        let wifi = l
+            .draws
+            .iter()
+            .find_map(|d| match d {
+                Draw::Icon { rect, spec } if spec.name == "wifi" => Some(*rect),
+                _ => None,
+            })
+            .unwrap();
+        assert!(chip.right() <= wifi.x, "before the network");
+        assert!(l
+            .draws
+            .iter()
+            .any(|d| matches!(d, Draw::Panel { rect, paint } if *rect == chip && paint.border.is_some())));
+        assert!(!texts(&render(&with(None), &tr)).contains(&"TR".to_string()));
+        let mut off = with(Some("TR"));
+        off.modules.keyboard = false;
+        assert!(!texts(&render(&off, &tr)).contains(&"TR".to_string()));
+    }
+
+    /// DECISIONS D88: the battery shows its charge beside its icon, filled to it from the
+    /// body's left edge, in the warning colour when low, with the bolt while charging; none
+    /// without a battery or with the module off; after the network, as on Windows.
+    #[test]
+    fn the_battery_shows_its_charge() {
+        use kabuk_core::battery::Battery;
+        let tr = I18n::new(Lang::Tr);
+        let with = |percent: u8, charging: bool| BarData {
+            battery: Some(Battery {
+                percent,
+                charging,
+                plugged: charging,
+                seconds_left: None,
+            }),
+            ..data(&tr)
+        };
+        let l = render(&with(82, false), &tr);
+        let is = icons(&l);
+        let (net, batt) = (
+            is.iter().position(|i| *i == "wifi").unwrap(),
+            is.iter().position(|i| *i == "batt").unwrap(),
+        );
+        assert!(net < batt && !is.contains(&"bolt"), "{is:?}");
+        assert!(texts(&l).contains(&"82%".to_string()));
+        assert!(l.hits.iter().any(|(_, h)| h.module == hit::BATTERY));
+        // The level: inside the icon, from the body's left edge, 82% of its width.
+        let icon = l
+            .draws
+            .iter()
+            .find_map(|d| match d {
+                Draw::Icon { rect, spec } if spec.name == "batt" => Some(*rect),
+                _ => None,
+            })
+            .unwrap();
+        let level = |l: &Layout| {
+            l.draws
+                .iter()
+                .find_map(|d| match d {
+                    Draw::Panel { rect, paint }
+                        if rect.x >= icon.x && rect.right() <= icon.right() + 0.01 && rect.h < icon.h =>
+                    {
+                        Some((*rect, paint.fill))
+                    }
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let unit = icon.w / 24.0;
+        let (r, fill) = level(&l);
+        assert!((r.x - (icon.x + 4.5 * unit)).abs() < 0.01, "{r:?} in {icon:?}");
+        assert!((r.w - 13.0 * 0.82 * unit).abs() < 0.01);
+        assert_ne!(fill, Role::Warning);
+        assert_eq!(level(&render(&with(10, false), &tr)).1, Role::Warning);
+        assert!(icons(&render(&with(50, true), &tr)).contains(&"bolt"));
+        let mut off = with(82, false);
+        off.modules.battery = false;
+        assert!(!icons(&render(&off, &tr)).contains(&"batt"));
+        assert!(!icons(&render(&data(&tr), &tr)).contains(&"batt"), "no battery");
     }
 
     /// DECISIONS D32: the bell carries the notification count when there is one; both it
@@ -1779,7 +2121,9 @@ mod tests {
         let d = BarData { apps, ..data(&tr) };
         let l = render_look(Look::Pano, &d, &tr);
         let names: Vec<String> = texts(&l).into_iter().filter(|t| t.starts_with("Program")).collect();
-        assert!(names.len() > 5 && names.len() < 16, "{names:?}");
+        // Several keep their names beside the end's groups (the system indicators, D88,
+        // took one task's room), the rest are behind the "+n".
+        assert!(names.len() >= 4 && names.len() < 16, "{names:?}");
         for n in &names {
             let spec = spec_of(&l, n);
             assert!(
@@ -2120,6 +2464,8 @@ mod tests {
         d.modules.ram = false;
         d.modules.vol = false;
         d.modules.notif = false;
+        d.modules.network = false;
+        d.modules.quick_settings = false;
         assert_eq!(icons(&render(&d, &tr)), vec!["app", "tile", "power"]);
         d.modules.power = false;
         assert_eq!(icons(&render(&d, &tr)), vec!["app", "tile"]);
@@ -2189,13 +2535,16 @@ mod tests {
                 _ => None,
             })
             .collect();
-        // Workspaces, title, clock, media, stats, tray, and the bell with the power
-        // button (the design's last `.grp`).
-        assert_eq!(panels.len(), 7);
+        // Workspaces, title, clock, media, stats, tray, the system indicators (D88), and
+        // the bell with the power button (the design's last `.grp`).
+        assert_eq!(panels.len(), 8);
         assert_eq!(panels[0].x, 0.0);
         let clock = panels[2];
         assert!((clock.x + clock.w / 2.0 - 1892.0 / 2.0).abs() < 0.01);
-        assert!((panels[6].right() - 1892.0).abs() < 0.01);
+        // The show-desktop corner (D88) closes the bar's end, after the last group.
+        let corner = l.hits.iter().find(|(_, h)| h.module == hit::SHOW_DESKTOP).unwrap().0;
+        assert!((corner.right() - 1892.0).abs() < 0.01, "{corner:?}");
+        assert!(panels[7].right() < corner.x);
         assert!(panels.iter().all(|p| p.h == 38.0 && p.y == 0.0));
     }
 
@@ -2309,7 +2658,7 @@ mod tests {
             !t.iter().any(|s| s.contains("Milva")) && !t.contains(&"12%".to_string()),
             "{t:?}"
         );
-        assert_eq!(icons(&l), vec!["app", "vol", "bell", "power"]);
+        assert_eq!(icons(&l), vec!["app", "vol", "wifi", "qs", "bell", "power"]);
     }
 
     #[test]

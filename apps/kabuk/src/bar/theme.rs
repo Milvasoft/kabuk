@@ -5,7 +5,7 @@ use kabuk_ui::node::Role;
 use kabuk_ui::render::{Families, Palette};
 
 /// Which token each colour role reads.
-const ROLE_TOKENS: [(Role, &str); 17] = [
+const ROLE_TOKENS: [(Role, &str); 18] = [
     (Role::Fg, "fg-s"),
     (Role::Dim, "dim"),
     (Role::Faint, "faint"),
@@ -13,6 +13,7 @@ const ROLE_TOKENS: [(Role, &str); 17] = [
     (Role::AccentFill, "accent-fill"),
     (Role::OnAccent, "on-accent"),
     (Role::Accent2, "accent2"),
+    (Role::Warning, "err-fg"),
     (Role::Surface, "surf"),
     (Role::SurfaceSel, "surf-sel"),
     (Role::SurfaceLine, "surf-line"),

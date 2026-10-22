@@ -48,6 +48,11 @@ impl Shared {
         self.close_tray_panel();
         self.close_app_menu();
         self.close_volume_panel();
+        self.close_quick_panel();
+        self.close_calendar_panel();
+        self.close_privacy_panel();
+        self.close_keyboard_panel();
+        self.close_network_panel();
         let weak = self.me.clone();
         let window = match Window::input_surface(MENU_CLASS, "", PxRect::default(), move |m| {
             let rc = weak.upgrade()?;

@@ -94,6 +94,13 @@ tray = true
 notif = true
 power = true
 app_grid = true           # the button that opens the grid of every app
+network = true            # the network: Wi-Fi signal, Ethernet or none; a click lists the networks
+battery = true            # the battery's charge (only on a computer with one)
+keyboard = true           # the input language (only with more than one); a click switches it
+privacy = true            # an icon while a program uses the microphone, the camera or the location
+show_desktop = true       # a thin corner at the bar's end: every window down, a second click brings them back
+calendar = true           # a click on the clock or the bell: Kabuk's calendar and notifications (off: Windows')
+quick_settings = true     # the quick settings button: Wi-Fi, Bluetooth, airplane mode, brightness, volume
 
 [windows]
 workspaces = 9            # per monitor, 1-9

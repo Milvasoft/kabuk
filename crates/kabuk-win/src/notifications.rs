@@ -40,6 +40,118 @@ pub fn count() -> Option<u32> {
         .ok()
 }
 
+/// A notice in Windows' notification centre, as the calendar panel lists it (DECISIONS
+/// D88).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Notice {
+    /// Windows' id for it, to remove it.
+    pub id: u32,
+    /// The app that sent it, as Windows names it.
+    pub app: String,
+    /// Its first line (the title) and the rest.
+    pub title: String,
+    pub body: String,
+    /// When it came, local time.
+    pub when: kabuk_core::clock::WallTime,
+}
+
+/// `DateTime.UniversalTime` (100 ns since 1601) as local time.
+fn local(ticks: i64) -> Option<kabuk_core::clock::WallTime> {
+    use windows::Win32::Foundation::{FILETIME, SYSTEMTIME};
+    use windows::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificLocalTime};
+    let ticks = u64::try_from(ticks).ok()?;
+    let ft = FILETIME {
+        dwLowDateTime: (ticks & 0xFFFF_FFFF) as u32,
+        dwHighDateTime: (ticks >> 32) as u32,
+    };
+    let (mut utc, mut t) = (SYSTEMTIME::default(), SYSTEMTIME::default());
+    // SAFETY: valid in and out structures.
+    unsafe {
+        FileTimeToSystemTime(&ft, &mut utc).ok()?;
+        SystemTimeToTzSpecificLocalTime(None, &utc, &mut t).ok()?;
+    }
+    Some(kabuk_core::clock::WallTime {
+        year: t.wYear,
+        month: u8::try_from(t.wMonth).unwrap_or(1),
+        day: u8::try_from(t.wDay).unwrap_or(1),
+        weekday: u8::try_from(t.wDayOfWeek).unwrap_or(0),
+        hour: u8::try_from(t.wHour).unwrap_or(0),
+        minute: u8::try_from(t.wMinute).unwrap_or(0),
+        second: u8::try_from(t.wSecond).unwrap_or(0),
+        millisecond: t.wMilliseconds,
+    })
+}
+
+fn listener() -> Option<UserNotificationListener> {
+    let listener = UserNotificationListener::Current().ok()?;
+    (listener.GetAccessStatus().ok()? == UserNotificationListenerAccessStatus::Allowed).then_some(listener)
+}
+
+/// The notices in Windows' notification centre, newest first; `None` when Windows does not
+/// let Kabuk read them. Blocks for tens of milliseconds: call it off the bar's thread.
+pub fn list() -> Option<Vec<Notice>> {
+    use windows::UI::Notifications::KnownNotificationBindings;
+    let all = listener()?
+        .GetNotificationsAsync(NotificationKinds::Toast)
+        .ok()?
+        .join()
+        .ok()?;
+    let mut out = Vec::new();
+    for n in all {
+        let app = n
+            .AppInfo()
+            .and_then(|a| a.DisplayInfo())
+            .and_then(|d| d.DisplayName())
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        let texts: Vec<String> = n
+            .Notification()
+            .and_then(|t| t.Visual())
+            .and_then(|v| v.GetBinding(&KnownNotificationBindings::ToastGeneric()?))
+            .and_then(|b| b.GetTextElements())
+            .map(|els| {
+                els.into_iter()
+                    .filter_map(|e| e.Text().ok())
+                    .map(|t| t.to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let Some(when) = n.CreationTime().ok().and_then(|t| local(t.UniversalTime)) else {
+            continue;
+        };
+        out.push(Notice {
+            id: n.Id().unwrap_or(0),
+            app,
+            title: texts.first().cloned().unwrap_or_default(),
+            body: texts.get(1..).map(|r| r.join(" ")).unwrap_or_default(),
+            when,
+        });
+    }
+    out.sort_by_key(|n| {
+        std::cmp::Reverse((
+            n.when.year,
+            n.when.month,
+            n.when.day,
+            n.when.hour,
+            n.when.minute,
+            n.when.second,
+        ))
+    });
+    Some(out)
+}
+
+/// Removes notice `id` from Windows' notification centre.
+pub fn remove(id: u32) -> std::io::Result<()> {
+    let l = listener().ok_or_else(|| std::io::Error::from(std::io::ErrorKind::PermissionDenied))?;
+    l.RemoveNotification(id).map_err(crate::sync::io_error)
+}
+
+/// Empties Windows' notification centre.
+pub fn clear() -> std::io::Result<()> {
+    let l = listener().ok_or_else(|| std::io::Error::from(std::io::ErrorKind::PermissionDenied))?;
+    l.ClearNotifications().map_err(crate::sync::io_error)
+}
+
 /// The folder of Windows' notification database (`wpndatabase.db`).
 pub fn database_folder() -> Option<PathBuf> {
     let local = std::env::var_os("LOCALAPPDATA")?;

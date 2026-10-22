@@ -57,6 +57,10 @@ pub use launcher_host::{LAUNCHER_CLASS, MSG_TEST_LAUNCHER};
 mod appgrid_host;
 #[path = "apps_host.rs"]
 mod apps_host;
+#[path = "battery_host.rs"]
+mod battery_host;
+#[path = "calendar_host.rs"]
+mod calendar_host;
 #[path = "cursors_host.rs"]
 pub mod cursors_host;
 #[path = "gesture_host.rs"]
@@ -65,6 +69,24 @@ mod gesture_host;
 mod idle_host;
 #[path = "motion_host.rs"]
 mod motion_host;
+pub use calendar_host::MSG_TEST_CALENDAR_PANEL;
+#[path = "keyboard_host.rs"]
+mod keyboard_host;
+#[path = "privacy_host.rs"]
+mod privacy_host;
+#[path = "quick_host.rs"]
+mod quick_host;
+pub use keyboard_host::MSG_TEST_KEYBOARD_PANEL;
+pub use privacy_host::MSG_TEST_PRIVACY_PANEL;
+pub use quick_host::MSG_TEST_QUICK_PANEL;
+#[path = "network_host.rs"]
+mod network_host;
+#[path = "network_panel_host.rs"]
+mod network_panel_host;
+pub use network_panel_host::{
+    MSG_TEST_NETWORK_PANEL, TEST_CLICK as NETWORK_PANEL_CLICK, TEST_CLOSE as NETWORK_PANEL_CLOSE,
+    TEST_OPEN as NETWORK_PANEL_OPEN,
+};
 #[path = "notify_host.rs"]
 mod notify_host;
 #[path = "overview_host.rs"]
@@ -194,6 +216,8 @@ mod timer {
     pub const DRAG_REVEAL: usize = 36;
     /// Something else has been in front of a held game a while: game mode looked at again (D87).
     pub const GAME_LEAVE: usize = 37;
+    /// A language chord ended a moment ago: the input language is read (D88).
+    pub const KEYBOARD_READ: usize = 38;
 }
 
 /// An auto-hiding bar (SPEC §2.1): how much of it stays on screen for the mouse to reach
@@ -362,6 +386,21 @@ fn surface_proc(
 
 /// Application messages.
 const MSG_AUDIO: u32 = msg::APP + 1;
+/// The network changed (`wparam`: [`kabuk_win::network::CHANGED`] or
+/// [`kabuk_win::network::SCANNED`]; D88).
+const MSG_NETWORK: u32 = msg::APP + 58;
+/// The battery's charge or the power source changed (D88).
+const MSG_BATTERY: u32 = msg::APP + 60;
+/// One of Windows' input-language chords ended (D88).
+const MSG_LANGUAGE_KEYS: u32 = msg::APP + 62;
+/// Windows' capability access store changed (D88).
+const MSG_PRIVACY: u32 = msg::APP + 64;
+/// Integration tests: a click on the show-desktop corner (D88).
+pub const MSG_TEST_SHOW_DESKTOP: u32 = msg::APP + 65;
+/// The notices for the calendar panel were read (D88).
+const MSG_NOTICES_READ: u32 = msg::APP + 67;
+/// The quick settings' slow parts were read (D88).
+const MSG_QUICK_READ: u32 = msg::APP + 69;
 const MSG_MEDIA: u32 = msg::APP + 2;
 /// `kabuk msg launcher`: open the launcher (posted to the control window).
 pub const MSG_OPEN_LAUNCHER: u32 = msg::APP + 9;
@@ -509,6 +548,14 @@ struct Live {
     time: Option<WallTime>,
     /// Workspaces are fake until the window manager (M3).
     active_ws: u32,
+    /// How the computer reaches the network (D88).
+    network: Option<kabuk_core::network::Link>,
+    /// The battery, on a computer with one (D88).
+    battery: Option<kabuk_core::battery::Battery>,
+    /// The input language's short code, with more than one language (D88).
+    keyboard: Option<String>,
+    /// What programs use the microphone, the camera, the location now (D88).
+    privacy: Vec<kabuk_core::privacy::Use>,
 }
 
 struct Shared {
@@ -544,6 +591,27 @@ struct Shared {
     live: Live,
     sampler: Sampler,
     audio: Option<Audio>,
+    /// Network and Wi-Fi changes (D88), while the network module is on.
+    network_watch: Option<kabuk_win::network::Watch>,
+    /// Battery changes (D88), while the battery module is on and there is a battery.
+    battery_watch: Option<kabuk_win::power::BatteryWatch>,
+    /// Windows' language chords seen (D88), while the keyboard module is on.
+    language_keys: Option<kabuk_win::keyhook::LanguageKeys>,
+    /// The input language panel, while open (D88).
+    keyboard_panel: Option<keyboard_host::KeyboardPanel>,
+    /// Changes of Windows' capability access store (D88), while the privacy module is on.
+    privacy_watch: Option<kabuk_win::privacy::Watch>,
+    /// The privacy panel, while open (D88).
+    privacy_panel: Option<privacy_host::PrivacyPanel>,
+    /// The calendar and notifications panel, while open, and the notices read for it on
+    /// their thread (D88).
+    calendar_panel: Option<calendar_host::CalendarPanel>,
+    notices_slot: calendar_host::NoticesSlot,
+    /// The quick settings panel, while open, and what its slow reads found (D88).
+    quick_panel: Option<quick_host::QuickPanel>,
+    quick_slot: quick_host::QuickSlot,
+    /// The network panel, while open (D88).
+    network_panel: Option<network_panel_host::NetworkPanel>,
     /// The volume keys, taken so Windows' flyout does not show beside Kabuk's OSD.
     volume_keys: Option<kabuk_win::keyhook::VolumeKeys>,
     media: Option<Media>,
@@ -839,6 +907,17 @@ impl BarManager {
                 },
                 sampler: Sampler::default(),
                 audio: None,
+                network_watch: None,
+                battery_watch: None,
+                language_keys: None,
+                keyboard_panel: None,
+                privacy_watch: None,
+                privacy_panel: None,
+                calendar_panel: None,
+                notices_slot: calendar_host::NoticesSlot::default(),
+                quick_panel: None,
+                quick_slot: quick_host::QuickSlot::default(),
+                network_panel: None,
                 volume_keys: None,
                 media: None,
                 shift_step: 0,
@@ -942,6 +1021,10 @@ impl BarManager {
                     .ok();
             s.control = Some(control);
             s.count_notifications();
+            s.watch_network();
+            s.watch_battery();
+            s.watch_keyboard();
+            s.watch_privacy();
             s.create_launcher();
             // The app menus' names and ids, read ahead (it takes a few hundred ms).
             kabuk_win::shellitems::refresh_installed_apps();
@@ -1000,6 +1083,8 @@ impl BarManager {
                     }
                     s.live.title = fg.and_then(|h| Title::split(&h.title()));
                     s.tray_panel_foreground(fg);
+                    // Each window types in its own language (D88).
+                    s.read_keyboard();
                     s.step_aside_for_fullscreen();
                     s.keep_bars_on_top();
                     s.refresh_apps();
@@ -1207,6 +1292,25 @@ impl Shared {
         match m.id {
             MSG_NOTIF_CHANGED => {
                 self.count_notifications();
+                self.calendar_notices_changed();
+                Some(0)
+            }
+            MSG_NOTICES_READ => {
+                self.notices_read();
+                Some(0)
+            }
+            MSG_QUICK_READ => {
+                self.quick_read();
+                Some(0)
+            }
+            #[cfg(feature = "integration")]
+            MSG_TEST_QUICK_PANEL => {
+                self.test_quick_panel(m.wparam, m.lparam as u32);
+                Some(0)
+            }
+            #[cfg(feature = "integration")]
+            MSG_TEST_CALENDAR_PANEL => {
+                self.test_calendar_panel(m.wparam, m.lparam as u32);
                 Some(0)
             }
             overview_host::MSG_OVERVIEW_FLOWN => {
@@ -1245,6 +1349,11 @@ impl Shared {
             #[cfg(feature = "integration")]
             MSG_TEST_APP_MENU => {
                 self.test_app_menu(m.wparam, m.lparam as u64);
+                Some(0)
+            }
+            #[cfg(feature = "integration")]
+            MSG_TEST_NETWORK_PANEL => {
+                self.test_network_panel(m.wparam, m.lparam as u32);
                 Some(0)
             }
             #[cfg(feature = "integration")]
@@ -1377,6 +1486,7 @@ impl Shared {
                     timer::APP_GROW => self.step_app_growth(),
                     timer::APP_PREVIEW => self.preview_due(),
                     timer::DRAG_REVEAL => self.drag_reveal_due(),
+                    timer::KEYBOARD_READ => self.keyboard_read_due(),
                     timer::GAME_LEAVE => {
                         self.kill(timer::GAME_LEAVE);
                         self.step_aside_for_fullscreen();
@@ -1429,6 +1539,37 @@ impl Shared {
                 }
                 Some(0)
             }
+            MSG_NETWORK => {
+                self.network_changed(m.wparam);
+                Some(0)
+            }
+            MSG_BATTERY => {
+                self.battery_changed();
+                Some(0)
+            }
+            MSG_LANGUAGE_KEYS => {
+                self.language_chord();
+                Some(0)
+            }
+            MSG_PRIVACY => {
+                self.privacy_changed();
+                Some(0)
+            }
+            #[cfg(feature = "integration")]
+            MSG_TEST_SHOW_DESKTOP => {
+                self.toggle_desktop();
+                Some(0)
+            }
+            #[cfg(feature = "integration")]
+            MSG_TEST_PRIVACY_PANEL => {
+                self.test_privacy_panel(m.wparam == 1);
+                Some(0)
+            }
+            #[cfg(feature = "integration")]
+            MSG_TEST_KEYBOARD_PANEL => {
+                self.test_keyboard_panel(m.wparam == 1);
+                Some(0)
+            }
             MSG_AUDIO => {
                 if m.wparam == audio::SESSIONS_CHANGED {
                     // An app's level or session: the mixer only, no OSD.
@@ -1443,6 +1584,7 @@ impl Shared {
                 self.live.volume = self.audio.as_ref().and_then(Audio::volume);
                 let v = self.live.volume;
                 self.volume_seen(v);
+                self.quick_volume_changed();
                 self.render_all(false);
                 Some(0)
             }
@@ -1939,6 +2081,18 @@ impl Shared {
         }
         if before.bar.modules.taskbar != after.bar.modules.taskbar {
             self.refresh_apps();
+        }
+        if before.bar.modules.network != after.bar.modules.network {
+            self.watch_network();
+        }
+        if before.bar.modules.battery != after.bar.modules.battery {
+            self.watch_battery();
+        }
+        if before.bar.modules.keyboard != after.bar.modules.keyboard {
+            self.watch_keyboard();
+        }
+        if before.bar.modules.privacy != after.bar.modules.privacy {
+            self.watch_privacy();
         }
         self.schedule_mode_flip();
         if self.hides_taskbar && after.bar.modules.tray != before.bar.modules.tray {
@@ -3406,8 +3560,22 @@ impl Shared {
 
     /// One of the bar's or the dock's popups is open: an auto-hiding bar stays while it
     /// is (found by the user: it slid off as the mouse went into the panel it opened).
+    /// The show-desktop corner (D88): the window manager puts every window down, or
+    /// brings them back.
+    fn toggle_desktop(&mut self) {
+        match &self.wm {
+            Some(link) => link.send(crate::wm::Command::ToggleDesktop),
+            None => tracing::info!("show desktop needs the window manager"),
+        }
+    }
+
     fn bar_popup_open(&self) -> bool {
         self.volume_panel.is_some()
+            || self.network_panel.is_some()
+            || self.keyboard_panel.is_some()
+            || self.privacy_panel.is_some()
+            || self.calendar_panel.is_some()
+            || self.quick_panel.is_some()
             || self.tray_panel.is_some()
             || self.power_menu.is_some()
             || self.app_menu.is_some()
@@ -3682,6 +3850,35 @@ impl Shared {
             self.toggle_volume_panel(index, button == Click::Left);
             return;
         }
+        if let (Click::Left, Some((view::hit::NETWORK, _))) = (button, hit) {
+            self.toggle_network_panel(index, true);
+            return;
+        }
+        if let (Click::Left, Some((view::hit::SHOW_DESKTOP, _))) = (button, hit) {
+            self.toggle_desktop();
+            return;
+        }
+        if let (Click::Left, Some((view::hit::PRIVACY, _))) = (button, hit) {
+            self.toggle_privacy_panel(index, true);
+            return;
+        }
+        if let (Click::Left, Some((view::hit::KEYBOARD, _))) = (button, hit) {
+            self.toggle_keyboard_panel(index, true);
+            return;
+        }
+        if let (Click::Left, Some((view::hit::QUICK_SETTINGS, _))) = (button, hit) {
+            self.toggle_quick_panel(index, (view::hit::QUICK_SETTINGS, 0), true);
+            return;
+        }
+        if let (Click::Left, Some((view::hit::BATTERY, _))) = (button, hit) {
+            // As Windows' taskbar: the battery opens the quick settings.
+            if self.config().bar.modules.quick_settings {
+                self.toggle_quick_panel(index, (view::hit::BATTERY, 0), true);
+            } else {
+                self.toggle_system_menu(index, volume_panel::Menu::Battery, false, (view::hit::BATTERY, 0));
+            }
+            return;
+        }
         if let (Click::Right, Some((view::hit::MEDIA, _))) = (button, hit) {
             self.toggle_media_card(index);
             return;
@@ -3698,7 +3895,10 @@ impl Shared {
             let menu = match hit {
                 Some((view::hit::CLOCK, _)) => Some(volume_panel::Menu::Clock),
                 Some((view::hit::NOTIF, _)) => Some(volume_panel::Menu::Notifications),
-                Some((view::hit::STATS, view::hit::STAT_NET)) => Some(volume_panel::Menu::Network),
+                Some((view::hit::STATS, view::hit::STAT_NET)) | Some((view::hit::NETWORK, _)) => {
+                    Some(volume_panel::Menu::Network)
+                }
+                Some((view::hit::BATTERY, _)) => Some(volume_panel::Menu::Battery),
                 Some((view::hit::STATS, _)) => Some(volume_panel::Menu::Stats),
                 _ => None,
             };
@@ -3741,6 +3941,10 @@ impl Shared {
                         tracing::warn!(error = %e, target, "not opened");
                     }
                 });
+            }
+            Some((module @ (view::hit::NOTIF | view::hit::CLOCK), value)) if self.config().bar.modules.calendar => {
+                // Kabuk's calendar and notifications in place of Windows' centre (D88).
+                self.toggle_calendar_panel(index, (module, value), true);
             }
             Some((view::hit::NOTIF, _)) | Some((view::hit::CLOCK, _)) => {
                 // Windows' notification centre; the count is read again once it closes.
@@ -3832,6 +4036,10 @@ impl Shared {
             },
             apps: self.app_icons(),
             notif_count: if primary { self.notif_count } else { None },
+            network: self.live.network.clone(),
+            battery: self.live.battery,
+            keyboard: self.live.keyboard.clone(),
+            privacy: kabuk_core::privacy::kinds(&self.live.privacy),
         }
     }
 

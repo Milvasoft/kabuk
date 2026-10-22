@@ -375,7 +375,7 @@
   }
 
   // The design's order, with the apps after the title (DECISIONS D25).
-  const MODULES = ["app_grid", "title", "taskbar", "clock", "date", "media", "cpu", "ram", "gpu", "net", "vol", "tray", "notif", "power"];
+  const MODULES = ["app_grid", "title", "taskbar", "clock", "date", "calendar", "media", "cpu", "ram", "gpu", "net", "vol", "tray", "privacy", "keyboard", "network", "battery", "quick_settings", "notif", "power", "show_desktop"];
   function barPage() {
     const b = cfg().bar;
     const own = A.lookPos[code()];

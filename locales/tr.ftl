@@ -63,6 +63,8 @@ decimal-separator = {","}
 
 bar-net-rate = { $value } MB/s
 bar-percent = { $value }%
+# The battery's time left in the quick settings panel (DECISIONS D88).
+qs-hours-minutes = { $hours } sa { $minutes } dk
 bar-ram = { $value }G
 bar-temp = { $value }°
 bar-tray-more = +{ $value }

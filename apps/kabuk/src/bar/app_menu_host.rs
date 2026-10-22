@@ -134,6 +134,11 @@ impl Shared {
         self.close_tray_panel();
         self.close_power_menu();
         self.close_volume_panel();
+        self.close_quick_panel();
+        self.close_calendar_panel();
+        self.close_privacy_panel();
+        self.close_keyboard_panel();
+        self.close_network_panel();
         let Some(app) = self.apps.list.get(index).cloned() else {
             return;
         };

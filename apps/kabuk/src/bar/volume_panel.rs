@@ -124,6 +124,7 @@ pub enum Menu {
     Notifications,
     Stats,
     Network,
+    Battery,
 }
 
 /// The volume's entries.
@@ -144,6 +145,7 @@ const STATS: [Entry; 2] = [
     ("cpu", "stats-task-manager", "taskmgr.exe"),
     ("mem", "stats-resource-monitor", "resmon.exe"),
 ];
+const BATTERY: [Entry; 1] = [("batt", "batt-settings", "ms-settings:batterysaver")];
 const NETWORK: [Entry; 2] = [
     ("down", "net-settings", "ms-settings:network"),
     ("app", "net-troubleshoot", "ms-settings:troubleshoot"),
@@ -157,6 +159,7 @@ impl Menu {
             Menu::Notifications => &NOTIFICATIONS,
             Menu::Stats => &STATS,
             Menu::Network => &NETWORK,
+            Menu::Battery => &BATTERY,
         }
     }
 }

@@ -18,6 +18,8 @@ pub enum Role {
     OnAccent,
     /// The look's second accent (`accent2`), e.g. Konsol's layout tag.
     Accent2,
+    /// The warning colour (`err-fg`), e.g. a low battery's level (DECISIONS D88).
+    Warning,
     Surface,
     SurfaceSel,
     SurfaceLine,

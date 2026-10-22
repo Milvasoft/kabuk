@@ -16,7 +16,7 @@ use crate::svg::{self, Seg, Shape};
 /// The SVG stroke width of the icons in view-box units (`svg.i { stroke-width: 1.7 }`).
 const ICON_STROKE: f32 = 1.7;
 /// Icon view box edge (`viewBox="0 0 24 24"`).
-const ICON_VIEWBOX: f32 = 24.0;
+pub const ICON_VIEWBOX: f32 = 24.0;
 
 /// Role → colour for one look and mode; some roles fill with a gradient instead.
 #[derive(Clone, Debug, Default)]

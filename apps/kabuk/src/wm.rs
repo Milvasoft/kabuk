@@ -237,6 +237,8 @@ pub enum Command {
     AppIcons(Vec<(u64, state::Rect)>),
     /// The mouse is on an app's icon: a genie may come soon (its renderer is made ahead).
     WarmGenie,
+    /// The bar's show-desktop corner (DECISIONS D88): every window down, or back.
+    ToggleDesktop,
     /// An auto-hiding bar reserves its strip or gives it back a moment from now: the work
     /// area of monitor `device` becomes `to` (DECISIONS D75).
     WorkAreaComing {
@@ -456,6 +458,11 @@ struct Wm {
     genie: std::collections::HashSet<u64>,
     icons: std::collections::HashMap<u64, state::Rect>,
     pending_genie: Option<kabuk_win::window_motion::Genie>,
+    /// The windows the show-desktop corner put down, to bring back with its next click
+    /// (D88), and those of them still to minimise without a genie (a whole desk of genies
+    /// at once is no help).
+    desktop_shown: Vec<u64>,
+    quiet_minimize: std::collections::HashSet<u64>,
     /// A genie Kabuk started before minimising or restoring the window itself, and when;
     /// the event that follows goes on with it instead of starting another.
     own_genie: Option<(kabuk_win::window_motion::Genie, std::time::Instant)>,
@@ -511,6 +518,8 @@ fn run(
         genie: std::collections::HashSet::new(),
         icons: std::collections::HashMap::new(),
         pending_genie: None,
+        desktop_shown: Vec::new(),
+        quiet_minimize: std::collections::HashSet::new(),
         own_genie: None,
         renderer_kept: false,
         notices: VecDeque::new(),
@@ -943,6 +952,7 @@ impl Wm {
             }
             Command::Grab(order) => self.grab(order),
             Command::Minimize(hwnd) => self.minimize(hwnd),
+            Command::ToggleDesktop => self.toggle_desktop(),
             Command::OpenProfile(name) => self.open_profile(&name),
             Command::AppIcons(icons) => {
                 tracing::debug!(icons = icons.len(), "app icons known");
@@ -1296,6 +1306,36 @@ impl Wm {
     }
 
     /// A click on the bar minimises `hwnd`: with the genie, once its genie is on screen.
+    /// The show-desktop corner (D88), as Windows' own: the windows it put down come back
+    /// while any of them is still down; otherwise every window in front goes down.
+    fn toggle_desktop(&mut self) {
+        let back: Vec<u64> = std::mem::take(&mut self.desktop_shown)
+            .into_iter()
+            .filter(|h| Hwnd(*h).is_minimized())
+            .collect();
+        if !back.is_empty() {
+            for h in &back {
+                Hwnd(*h).restore_async();
+            }
+            tracing::info!(windows = back.len(), "desktop windows back");
+            return;
+        }
+        // Windows the last one put down without a genie but never told of are forgotten.
+        self.quiet_minimize.clear();
+        let me = std::process::id();
+        let down: Vec<u64> = kabuk_win::window::front_windows(me)
+            .into_iter()
+            .map(|(h, _, _)| h.0)
+            .filter(|h| self.manage_class.as_ref().is_none_or(|c| Hwnd(*h).class_name() == *c))
+            .collect();
+        for h in &down {
+            self.quiet_minimize.insert(*h);
+            Hwnd(*h).minimize_async();
+        }
+        tracing::info!(windows = down.len(), "desktop shown");
+        self.desktop_shown = down;
+    }
+
     fn minimize(&mut self, hwnd: u64) {
         let h = Hwnd(hwnd);
         if !self.lead_genie(h, true) {
@@ -1686,10 +1726,15 @@ impl Wm {
             WindowEvent::MinimizeStart(h) => {
                 if self.desk.contains(h.0) && !self.desk.is_parked(h.0) {
                     tracing::info!(hwnd = h.0, "window minimized");
-                    // Where it was, before parking forgets it.
-                    self.pending_genie = match self.own_genie_for(h, true) {
-                        Some(own) => own,
-                        None => self.genie_of(h, true, false),
+                    // Where it was, before parking forgets it; none for the show-desktop
+                    // corner's (D88).
+                    self.pending_genie = if self.quiet_minimize.remove(&h.0) {
+                        None
+                    } else {
+                        match self.own_genie_for(h, true) {
+                            Some(own) => own,
+                            None => self.genie_of(h, true, false),
+                        }
                     };
                     let effects = self.desk.park(h.0);
                     self.apply(effects);

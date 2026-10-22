@@ -1882,6 +1882,231 @@ fn the_apps_module_follows_its_setting_live() {
     assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
 }
 
+/// DECISIONS D88 (asked for by the user: the bar had no network icon): Windows' network
+/// indicator shows the link on the primary bar and follows its setting live, its watch
+/// with it; a click opens Kabuk's network panel, which closes again.
+#[test]
+fn the_network_indicator_follows_its_setting_and_opens_its_panel() {
+    use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_NETWORK_PANEL, NETWORK_PANEL_CLOSE, NETWORK_PANEL_OPEN};
+    use kabuk_win::msgloop::{post_message, Msg};
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let device = primary_device();
+    let link_icons = ["\"wifi\"", "\"wifi-2\"", "\"wifi-1\"", "\"wifi-off\"", "\"eth\""];
+    let drawn = || {
+        let line = sandbox.last_log_line(&["bar drawn", &device]).unwrap_or_default();
+        let icons = line
+            .split("icons=[")
+            .nth(1)
+            .and_then(|r| r.split(']').next())
+            .unwrap_or_default()
+            .to_string();
+        link_icons.iter().any(|i| icons.contains(i))
+    };
+    assert!(
+        wait_until(SETTLE, drawn).is_some(),
+        "no network indicator: {:?} {}",
+        sandbox.last_log_line(&["network"]),
+        sandbox.last_log_line(&["bar drawn", &device]).unwrap_or_default()
+    );
+    assert_eq!(sandbox.log_lines("network watched"), 1);
+
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
+    let post = |what: usize| {
+        post_message(
+            control,
+            Msg {
+                id: MSG_TEST_NETWORK_PANEL,
+                wparam: what,
+                lparam: 0,
+            },
+        )
+        .unwrap();
+    };
+    let panel = || {
+        kabuk_win::window::windows_of_class("Kabuk.NetworkPanel")
+            .into_iter()
+            .any(|h| h.pid() == Some(pid) && h.is_visible())
+    };
+    post(NETWORK_PANEL_OPEN);
+    assert!(wait_until(SETTLE, panel).is_some(), "the network panel did not open");
+    assert_eq!(sandbox.log_lines("network panel opened"), 1);
+    post(NETWORK_PANEL_CLOSE);
+    assert!(
+        wait_until(SETTLE, || !panel()).is_some(),
+        "the network panel did not close"
+    );
+
+    std::fs::write(sandbox.config_file(), "schema = 1\n[bar.modules]\nnetwork = false\n").unwrap();
+    assert!(
+        wait_until(SETTLE, || !drawn()).is_some(),
+        "the network indicator stayed"
+    );
+    assert_eq!(sandbox.log_lines("network no longer watched"), 1);
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    assert!(
+        wait_until(SETTLE, drawn).is_some(),
+        "the network indicator did not come back"
+    );
+    assert_eq!(sandbox.log_lines("network watched"), 2);
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
+}
+
+/// DECISIONS D88: the system indicators' panels (calendar and notifications, quick
+/// settings, privacy, keyboard language) each open under the bar and close again, and one
+/// opening closes the one open, as the volume panel and the power menu do.
+#[test]
+fn the_system_panels_open_and_close_each_other() {
+    use kabuk::bar::manager::{
+        CONTROL_CLASS, MSG_TEST_CALENDAR_PANEL, MSG_TEST_KEYBOARD_PANEL, MSG_TEST_PRIVACY_PANEL, MSG_TEST_QUICK_PANEL,
+    };
+    use kabuk_win::msgloop::{post_message, Msg};
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
+    let post = |id: u32, what: usize| {
+        post_message(
+            control,
+            Msg {
+                id,
+                wparam: what,
+                lparam: 0,
+            },
+        )
+        .unwrap();
+    };
+    let open = |class: &str| {
+        kabuk_win::window::windows_of_class(class)
+            .into_iter()
+            .any(|h| h.pid() == Some(pid) && h.is_visible())
+    };
+    let panels = [
+        (MSG_TEST_CALENDAR_PANEL, "Kabuk.CalendarPanel", "calendar panel opened"),
+        (MSG_TEST_QUICK_PANEL, "Kabuk.QuickPanel", "quick settings opened"),
+        (MSG_TEST_PRIVACY_PANEL, "Kabuk.PrivacyPanel", "privacy panel opened"),
+        (MSG_TEST_KEYBOARD_PANEL, "Kabuk.KeyboardPanel", "keyboard panel opened"),
+    ];
+    for (i, (id, class, line)) in panels.iter().enumerate() {
+        post(*id, 1);
+        assert!(wait_until(SETTLE, || open(class)).is_some(), "{class} did not open");
+        assert_eq!(sandbox.log_lines(line), 1, "{line}");
+        // The one open before gave way.
+        if i > 0 {
+            let (_, prev, _) = panels[i - 1];
+            assert!(
+                wait_until(SETTLE, || !open(prev)).is_some(),
+                "{prev} stayed open under {class}"
+            );
+        }
+    }
+    let (id, class, _) = panels[panels.len() - 1];
+    post(id, 0);
+    assert!(wait_until(SETTLE, || !open(class)).is_some(), "{class} did not close");
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
+}
+
+/// DECISIONS D88: the show-desktop corner puts every window down without a genie, and its
+/// next click brings them back; the quick settings button follows its setting live.
+#[test]
+fn the_show_desktop_corner_puts_windows_down_and_back() {
+    use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_SHOW_DESKTOP};
+    use kabuk_win::msgloop::{post_message, Msg};
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    let _shell = sandbox.shell_with_bar_and_wm();
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let a = TestWindow::open(&["--title", &title("desk-a")]);
+    let b = TestWindow::open(&["--title", &title("desk-b")]);
+    for w in [&a, &b] {
+        let managed = format!("managing window hwnd={}", w.hwnd.0);
+        assert!(wait_until(SETTLE, || sandbox.log_lines(&managed) == 1).is_some());
+    }
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
+    let click = || {
+        post_message(
+            control,
+            Msg {
+                id: MSG_TEST_SHOW_DESKTOP,
+                wparam: 0,
+                lparam: 0,
+            },
+        )
+        .unwrap();
+    };
+    let genies = sandbox.log_lines("genie hwnd=");
+    click();
+    assert!(
+        wait_until(SETTLE, || a.hwnd.is_minimized() && b.hwnd.is_minimized()).is_some(),
+        "the windows stayed: {:?}",
+        sandbox.last_log_line(&["desktop"])
+    );
+    assert_eq!(sandbox.log_lines("desktop shown windows=2"), 1);
+    assert_eq!(
+        sandbox.log_lines("genie hwnd="),
+        genies,
+        "a genie played for the desktop"
+    );
+    click();
+    assert!(
+        wait_until(SETTLE, || !a.hwnd.is_minimized() && !b.hwnd.is_minimized()).is_some(),
+        "the windows did not come back"
+    );
+    assert_eq!(sandbox.log_lines("desktop windows back windows=2"), 1);
+
+    // The quick settings button goes with its setting and comes back.
+    let device = primary_device();
+    let drawn = || {
+        sandbox
+            .last_log_line(&["bar drawn", &device])
+            .unwrap_or_default()
+            .split("icons=[")
+            .nth(1)
+            .and_then(|r| r.split(']').next())
+            .unwrap_or_default()
+            .contains("\"qs\"")
+    };
+    assert!(wait_until(SETTLE, drawn).is_some(), "no quick settings button");
+    std::fs::write(
+        sandbox.config_file(),
+        "schema = 1\n[bar.modules]\nquick_settings = false\n",
+    )
+    .unwrap();
+    assert!(
+        wait_until(SETTLE, || !drawn()).is_some(),
+        "the quick settings button stayed"
+    );
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    assert!(
+        wait_until(SETTLE, drawn).is_some(),
+        "the quick settings button did not come back"
+    );
+    drop(a);
+    drop(b);
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
+}
+
 /// Found by a flaky run of the genie test: the window manager took over the open windows
 /// and published them before the bars listened, nothing changed afterwards, and the bar
 /// never showed their programs nor told the window manager where their icons are (a

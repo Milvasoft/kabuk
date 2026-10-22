@@ -220,6 +220,13 @@ fn main() {
             .collect(),
         tray_more: number("--tray-more"),
         notif_count: arg("--notif").and_then(|v| v.parse().ok()),
+        network: Some(kabuk_core::network::Link::Wifi {
+            ssid: "milva-5g".into(),
+            signal: 90,
+        }),
+        battery: None,
+        keyboard: None,
+        privacy: Vec::new(),
         apps: (0..number("--apps"))
             .map(|i| AppIcon {
                 // The design's window names, which Pano's task list shows.

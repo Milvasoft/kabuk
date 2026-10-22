@@ -81,6 +81,124 @@ pub fn on_battery() -> bool {
     unsafe { GetSystemPowerStatus(&mut s) }.is_ok() && s.ACLineStatus == 0
 }
 
+/// `SYSTEM_POWER_STATUS.BatteryFlag`: charging, no battery, unknown.
+const BATTERY_CHARGING: u8 = 8;
+const NO_BATTERY: u8 = 128;
+const BATTERY_UNKNOWN: u8 = 255;
+/// `SYSTEM_POWER_STATUS` values Windows gives when it does not know.
+const PERCENT_UNKNOWN: u8 = 255;
+const SECONDS_UNKNOWN: u32 = u32::MAX;
+
+/// The battery now (DECISIONS D88); `None` on a computer without one.
+pub fn battery() -> Option<kabuk_core::battery::Battery> {
+    use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+    let mut s = SYSTEM_POWER_STATUS::default();
+    // SAFETY: a valid out struct.
+    unsafe { GetSystemPowerStatus(&mut s) }.ok()?;
+    if s.BatteryFlag == NO_BATTERY || s.BatteryFlag == BATTERY_UNKNOWN || s.BatteryLifePercent == PERCENT_UNKNOWN {
+        return None;
+    }
+    Some(kabuk_core::battery::Battery {
+        percent: s.BatteryLifePercent.min(100),
+        charging: s.BatteryFlag & BATTERY_CHARGING != 0,
+        plugged: s.ACLineStatus == 1,
+        seconds_left: (s.BatteryLifeTime != SECONDS_UNKNOWN).then_some(s.BatteryLifeTime),
+    })
+}
+
+/// `GUID_BATTERY_PERCENTAGE_REMAINING` and `GUID_ACDC_POWER_SOURCE`.
+const BATTERY_PERCENT: windows::core::GUID = windows::core::GUID::from_u128(0xa7ad8041_b45a_4cae_87a3_eecbb468a9e1);
+const POWER_SOURCE: windows::core::GUID = windows::core::GUID::from_u128(0x5d3e9a59_e9d5_4b00_a6bd_ff34ff516548);
+
+/// Where a battery watch's notices go.
+struct BatteryNotify {
+    window: crate::window::Hwnd,
+    message: u32,
+}
+
+unsafe extern "system" fn on_battery_change(
+    context: *const core::ffi::c_void,
+    kind: u32,
+    _setting: *const core::ffi::c_void,
+) -> u32 {
+    if kind != SETTING_CHANGED || context.is_null() {
+        return 0;
+    }
+    // SAFETY: `context` is the BatteryNotify the watch keeps alive while registered.
+    let n = unsafe { &*(context as *const BatteryNotify) };
+    let _ = crate::msgloop::post_message(
+        n.window,
+        crate::msgloop::Msg {
+            id: n.message,
+            wparam: 0,
+            lparam: 0,
+        },
+    );
+    0
+}
+
+/// Tells `window` with `message` whenever the battery's charge or the power source
+/// changes (DECISIONS D88), from Windows' power-setting notifications on a thread of
+/// their own, until dropped. Windows also tells once at the start.
+pub struct BatteryWatch {
+    handles: Vec<windows::Win32::System::Power::HPOWERNOTIFY>,
+    // Read by the callback until the registrations end; kept here for that long.
+    _params: Box<windows::Win32::System::Power::DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS>,
+    _notify: Box<BatteryNotify>,
+}
+
+impl BatteryWatch {
+    pub fn start(window: crate::window::Hwnd, message: u32) -> std::io::Result<BatteryWatch> {
+        use windows::Win32::Foundation::HANDLE;
+        use windows::Win32::System::Power::{
+            PowerSettingRegisterNotification, DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS, HPOWERNOTIFY,
+        };
+        use windows::Win32::UI::WindowsAndMessaging::DEVICE_NOTIFY_CALLBACK;
+        let notify = Box::new(BatteryNotify { window, message });
+        let params = Box::new(DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS {
+            Callback: Some(on_battery_change),
+            Context: (&*notify as *const BatteryNotify).cast_mut().cast(),
+        });
+        let mut watch = BatteryWatch {
+            handles: Vec::new(),
+            _params: params,
+            _notify: notify,
+        };
+        for setting in [BATTERY_PERCENT, POWER_SOURCE] {
+            let mut handle: *mut core::ffi::c_void = std::ptr::null_mut();
+            // SAFETY: the parameters and the notice they point to are boxed in the watch
+            // and live as long as the registrations, which `Drop` ends.
+            let r = unsafe {
+                PowerSettingRegisterNotification(
+                    &setting,
+                    DEVICE_NOTIFY_CALLBACK,
+                    HANDLE(
+                        (&*watch._params as *const DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS)
+                            .cast_mut()
+                            .cast(),
+                    ),
+                    &mut handle,
+                )
+            };
+            if r.is_err() {
+                return Err(std::io::Error::from_raw_os_error(r.0 as i32));
+            }
+            watch.handles.push(HPOWERNOTIFY(handle as isize));
+        }
+        Ok(watch)
+    }
+}
+
+impl Drop for BatteryWatch {
+    fn drop(&mut self) {
+        for h in self.handles.drain(..) {
+            // SAFETY: our registrations, each ended once; the callback is not called
+            // after them.
+            let _ = unsafe { windows::Win32::System::Power::PowerSettingUnregisterNotification(h) };
+        }
+    }
+}
+
 /// The console's display state (`GUID_CONSOLE_DISPLAY_STATE`): 0 off, 1 on, 2 dimmed.
 const DISPLAY_STATE: windows::core::GUID = windows::core::GUID::from_u128(0x6fe69556_704a_47a0_8f24_c28d936fda47);
 const DISPLAY_OFF: u32 = 0;
@@ -194,5 +312,31 @@ mod tests {
         // Whatever the displays are doing now, the answer is a plain bool.
         let _ = w.displays_on();
         drop(w);
+    }
+
+    /// D88: the battery reads on any computer (none on a desktop), and a watch on it
+    /// starts, tells the window once as Windows does at the start, and stops.
+    #[test]
+    fn the_battery_reads_and_a_watch_tells_its_window() {
+        if let Some(b) = battery() {
+            assert!(b.percent <= 100);
+        }
+        const MSG: u32 = crate::msgloop::msg::APP + 902;
+        let told = std::rc::Rc::new(std::cell::Cell::new(0));
+        let t = told.clone();
+        let w = crate::msgloop::MessageWindow::new("Kabuk.Test.Battery", "", move |m| {
+            (m.id == MSG).then(|| {
+                t.set(t.get() + 1);
+                0
+            })
+        })
+        .unwrap();
+        let watch = BatteryWatch::start(w.hwnd(), MSG).expect("registered");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while told.get() == 0 && std::time::Instant::now() < deadline {
+            crate::msgloop::run_until(&[], Some(std::time::Duration::from_millis(100)));
+        }
+        assert!(told.get() > 0, "Windows tells the current state at the start");
+        drop(watch);
     }
 }

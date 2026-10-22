@@ -419,10 +419,11 @@ Kabuk as a free MSIX on the Microsoft Store (DECISIONS D84), beside the GitHub s
 
 ---
 
-## M18 · Windows' system indicators (requested by the user on 2026-10-22) `[ ]`
+## M18 · Windows' system indicators (requested by the user on 2026-10-22) `[~]`
 
 What Windows' taskbar shows at its right, on Kabuk's bar, each a module that turns on and off, on by default, with Kabuk's own panels (DECISIONS D88). In this order:
 
+- *Design done and approved by the user on 2026-10-22 (design page: the bar's indicators and the three panels in every look).*
 - Design first: the indicators' icons (network: Wi-Fi signal levels, Ethernet, none, airplane; battery levels and charging; the language chip; microphone, camera and location in use; the quick-settings button; the show-desktop corner) and the three panels (network list with the password field, quick settings, calendar with notifications) drawn on the design page in every look's tokens, and shown to the user before any code.
 - Each module end to end: configuration key, reading, applying, the bar's drawing and hit test, its panel, Settings → Bar → Modules (tr, en), live reload, tests.
 - Network status, then the network panel (scan, connect with a password, disconnect, Wi-Fi on and off).

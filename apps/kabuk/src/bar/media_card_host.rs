@@ -72,6 +72,11 @@ impl Shared {
         self.close_power_menu();
         self.close_app_menu();
         self.close_volume_panel();
+        self.close_quick_panel();
+        self.close_calendar_panel();
+        self.close_privacy_panel();
+        self.close_keyboard_panel();
+        self.close_network_panel();
         self.media_card = None;
         let weak = self.me.clone();
         let window = match Window::input_surface(CARD_CLASS, "", PxRect::default(), move |m| {
