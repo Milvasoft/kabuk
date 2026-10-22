@@ -515,9 +515,9 @@ store-listing-description =
 
     Pencerelerin yan yana döşenir ya da bıraktığın yerde yüzer; tüm monitörlerine yayılan dokuz çalışma alanı vardır. Onları klavyeden taşı, boyutlandır ve değiştir ya da Alt'a basılı tutup herhangi bir yerinden tut. Küçültülen pencereler bardaki simgelerine akar.
 
-    Bar çalışma alanlarını, uygulamalarını, sistem tepsisini, bildirimleri, medyayı, sesi, ağı, pili, saati ve bilgisayarın yükünü gösterir. Başlatıcı yazdıkça uygulamaları, açık pencereleri, dosyaları ve yer imlerini bulur, hesap da yapar; uygulama ızgarası kurulu her şeyi listeler.
+    Bar çalışma alanlarını, uygulamalarını, sistem tepsisini, bildirimleri, medyayı, sesi, ağı, pili, saati ve bilgisayarın yükünü gösterir; Wi-Fi, hızlı ayarlar, takvim ve bildirimler için kendi panelleri vardır. Başlatıcı yazdıkça uygulamaları, açık pencereleri, dosyaları ve yer imlerini bulur, hesap da yapar; uygulama ızgarası kurulu her şeyi listeler.
 
-    Her görünüm barı, renkleri, imleçleri ve duvar kâğıdını birlikte değiştirir; koyu ya da açık. Hareketli duvar kâğıtları ve ekran koruyucular OLED ekranlar için çizilir: gerçek siyah, yerinde duran parlak hiçbir şey yok. İstersen bir duvar kâğıdını anlat, seçtiğin bir yapay zekâ modeli çizsin.
+    Her görünüm barı, panellerini ve duvar kâğıdını birlikte değiştirir; koyu ya da açık. Hareketli duvar kâğıtları OLED ekranlar için çizilir: gerçek siyah, yerinde duran parlak hiçbir şey yok. İstersen bir duvar kâğıdını anlat, seçtiğin bir yapay zekâ modeli çizsin.
 
     Oyun modu, tam ekran bir oyun açıkken kenara çekilir. Bir şey ters giderse Ctrl+Alt+Shift+End her pencereyi ve Windows görev çubuğunu bir anda geri getirir.
 

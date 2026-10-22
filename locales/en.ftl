@@ -516,9 +516,9 @@ store-listing-description =
 
     Your windows tile themselves side by side, or float where you put them, on nine workspaces that span all your monitors. Move, resize and switch them from the keyboard, or hold Alt and grab them anywhere. Minimised windows pour into their icon on the bar.
 
-    The bar shows your workspaces, your apps, the system tray, notifications, media, volume, network, battery, the clock and the computer's load. The launcher finds apps, open windows, files and bookmarks as you type, and counts too; the app grid lists everything you have installed.
+    The bar shows your workspaces, your apps, the system tray, notifications, media, volume, network, battery, the clock and the computer's load, with panels of its own for Wi-Fi, quick settings, the calendar and your notifications. The launcher finds apps, open windows, files and bookmarks as you type, and counts too; the app grid lists everything you have installed.
 
-    Each look changes the bar, the colours, the cursors and the wallpaper together, in dark or light. Animated wallpapers and screen savers are drawn for OLED screens: true black, nothing bright that stays put. You can even describe a wallpaper and let an AI model of your choice draw it.
+    Each look changes the bar, its panels and the wallpaper together, in dark or light. Animated wallpapers are drawn for OLED screens: true black, nothing bright that stays put. You can even describe a wallpaper and let an AI model of your choice draw it.
 
     Game mode steps aside when a game is in full screen. If anything ever goes wrong, Ctrl+Alt+Shift+End brings back every window and the Windows taskbar at once.
 
