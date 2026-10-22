@@ -118,6 +118,18 @@ impl Shared {
     /// Lays the panel out, places it under the indicator and draws it; `again` keeps the
     /// window it has (it changed size) without entering again.
     fn show_network_panel(&mut self, bar: usize, panel: Panel, again: bool, activate: bool) {
+        if again {
+            if let Some((layout, rect, scale)) = self.network_place(bar, &panel) {
+                if let Some(p) = self.network_panel.as_mut() {
+                    p.shown.redraw(&self.gpu, rect, &layout, &self.look.palette, scale);
+                    let _ = self.gpu.commit();
+                    p.layout = layout;
+                    p.scale = scale;
+                    p.panel = panel;
+                    return;
+                }
+            }
+        }
         let (window, joining_new, surrogate) = match self.network_panel.take() {
             Some(p) => (p.shown.into_window(), p.joining_new, p.surrogate),
             None => {
@@ -135,23 +147,9 @@ impl Shared {
                 }
             }
         };
-        let Some(b) = self.bars.get(bar) else { return };
-        let scale = b.scale;
-        let node = network_panel::view(&panel, &self.i18n, self.look.style.text_scale, &TIP);
-        let layout = kabuk_ui::node::layout(&node, Point::default(), &self.gpu.text);
-        let size = (
-            (layout.size.w * scale.0).ceil() as i32,
-            (layout.size.h * scale.0).ceil() as i32,
-        );
-        let button = self.hit_rect(bar, hit::NETWORK, 0).unwrap_or(b.rect);
-        let rect = tooltip::place(
-            b.edge,
-            b.rect,
-            button,
-            size,
-            scale.px(TIP.gap),
-            super::px_rect(b.monitor.rect),
-        );
+        let Some((layout, rect, scale)) = self.network_place(bar, &panel) else {
+            return;
+        };
         window.set_rect(rect);
         let mut surface = WindowSurface::new(&self.gpu, window.hwnd().0 as isize, rect.w as u32, rect.h as u32)
             .map_err(|e| tracing::warn!(error = %e, "network panel surface failed"))
@@ -187,6 +185,28 @@ impl Shared {
             joining_new,
             surrogate,
         });
+    }
+
+    /// The panel laid out for `panel` and its place under the indicator on bar `bar`.
+    fn network_place(&self, bar: usize, panel: &Panel) -> Option<(Layout, PxRect, Scale)> {
+        let b = self.bars.get(bar)?;
+        let scale = b.scale;
+        let node = network_panel::view(panel, &self.i18n, self.look.style.text_scale, &TIP);
+        let layout = kabuk_ui::node::layout(&node, Point::default(), &self.gpu.text);
+        let size = (
+            (layout.size.w * scale.0).ceil() as i32,
+            (layout.size.h * scale.0).ceil() as i32,
+        );
+        let button = self.hit_rect(bar, hit::NETWORK, 0).unwrap_or(b.rect);
+        let rect = tooltip::place(
+            b.edge,
+            b.rect,
+            button,
+            size,
+            scale.px(TIP.gap),
+            super::px_rect(b.monitor.rect),
+        );
+        Some((layout, rect, scale))
     }
 
     /// Draws the panel again after a change of its own state or of Windows'.

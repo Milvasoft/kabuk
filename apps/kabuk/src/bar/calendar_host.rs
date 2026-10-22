@@ -148,6 +148,18 @@ impl Shared {
         again: bool,
         activate: bool,
     ) {
+        if again {
+            if let Some((layout, rect, scale)) = self.calendar_place(bar, anchor, &panel) {
+                if let Some(p) = self.calendar_panel.as_mut() {
+                    p.shown.redraw(&self.gpu, rect, &layout, &self.look.palette, scale);
+                    let _ = self.gpu.commit();
+                    p.layout = layout;
+                    p.scale = scale;
+                    p.panel = panel;
+                    return;
+                }
+            }
+        }
         let window = match self.calendar_panel.take() {
             Some(p) => p.shown.into_window(),
             None => {
@@ -165,24 +177,9 @@ impl Shared {
                 }
             }
         };
-        let Some(b) = self.bars.get(bar) else { return };
-        let scale = b.scale;
-        let node = calendar_panel::view(&panel, &self.i18n, self.look.style.text_scale, &TIP);
-        let layout = kabuk_ui::node::layout(&node, Point::default(), &self.gpu.text);
-        let size = (
-            (layout.size.w * scale.0).ceil() as i32,
-            (layout.size.h * scale.0).ceil() as i32,
-        );
-        let (module, value) = anchor;
-        let at = self.hit_rect(bar, module, value).unwrap_or(b.rect);
-        let rect = tooltip::place(
-            b.edge,
-            b.rect,
-            at,
-            size,
-            scale.px(TIP.gap),
-            super::px_rect(b.monitor.rect),
-        );
+        let Some((layout, rect, scale)) = self.calendar_place(bar, anchor, &panel) else {
+            return;
+        };
         window.set_rect(rect);
         let mut surface = WindowSurface::new(&self.gpu, window.hwnd().0 as isize, rect.w as u32, rect.h as u32)
             .map_err(|e| tracing::warn!(error = %e, "calendar panel surface failed"))
@@ -211,6 +208,34 @@ impl Shared {
             anchor,
             panel,
         });
+    }
+
+    /// The panel laid out for `panel` and its place under `anchor` on bar `bar`.
+    fn calendar_place(
+        &self,
+        bar: usize,
+        anchor: (&'static str, u32),
+        panel: &Panel,
+    ) -> Option<(Layout, PxRect, Scale)> {
+        let b = self.bars.get(bar)?;
+        let scale = b.scale;
+        let node = calendar_panel::view(panel, &self.i18n, self.look.style.text_scale, &TIP);
+        let layout = kabuk_ui::node::layout(&node, Point::default(), &self.gpu.text);
+        let size = (
+            (layout.size.w * scale.0).ceil() as i32,
+            (layout.size.h * scale.0).ceil() as i32,
+        );
+        let (module, value) = anchor;
+        let at = self.hit_rect(bar, module, value).unwrap_or(b.rect);
+        let rect = tooltip::place(
+            b.edge,
+            b.rect,
+            at,
+            size,
+            scale.px(TIP.gap),
+            super::px_rect(b.monitor.rect),
+        );
+        Some((layout, rect, scale))
     }
 
     fn reshow_calendar_panel(&mut self, panel: Panel) {

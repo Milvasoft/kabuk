@@ -2131,6 +2131,50 @@ fn the_system_panels_open_and_close_each_other() {
     assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
 }
 
+/// Found by a user with a video: dragging a level in the quick settings made the panel
+/// flicker, every drawing making a new surface that entered again. Drawn again (here as
+/// Windows' answers come in), the open panel keeps its surface and enters only once.
+#[test]
+fn an_open_panel_is_drawn_again_in_place() {
+    use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_QUICK_PANEL};
+    use kabuk_win::msgloop::{post_message, Msg};
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
+    let entered = sandbox.log_lines("popup enters");
+    post_message(
+        control,
+        Msg {
+            id: MSG_TEST_QUICK_PANEL,
+            wparam: 1,
+            lparam: 0,
+        },
+    )
+    .unwrap();
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("quick settings read") == 1).is_some(),
+        "Windows' answers did not come"
+    );
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("popup drawn again") == 1).is_some(),
+        "the panel was not drawn again in place"
+    );
+    assert_eq!(
+        sandbox.log_lines("popup enters"),
+        entered + 1,
+        "the panel entered again"
+    );
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
+}
+
 /// DECISIONS D88: the show-desktop corner puts every window down without a genie, and its
 /// next click brings them back; the quick settings button follows its setting live.
 #[test]

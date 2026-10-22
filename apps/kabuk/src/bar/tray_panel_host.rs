@@ -8,7 +8,6 @@
 
 use kabuk_core::tray::Click;
 use kabuk_ui::geom::{Point, Scale};
-use kabuk_ui::motion::Level;
 use kabuk_ui::node::Layout;
 use kabuk_ui::render::WindowSurface;
 use kabuk_win::msgloop::{msg, vk, Msg, PxRect, Window};
@@ -86,17 +85,18 @@ impl Shared {
         let weak = self.me.clone();
         // Drawn again while open: it does not enter again, and keeps the program it is held for.
         let mut held_for = None;
-        let (window, again) = match self.tray_panel.take() {
+        // Open already: drawn again in place (`Ok`), else a new window (`Err`).
+        let held = match self.tray_panel.take() {
             Some(p) => {
                 held_for = p.held_for;
-                (p.shown.into_window(), true)
+                Ok(p.shown)
             }
             None => match Window::input_surface(PANEL_CLASS, "", PxRect::default(), move |m| {
                 let rc = weak.upgrade()?;
                 let mut s = rc.try_borrow_mut().ok()?;
                 s.on_tray_panel(m)
             }) {
-                Ok(w) => (w, false),
+                Ok(w) => Err(w),
                 Err(e) => {
                     tracing::warn!(error = %e, "tray panel window failed");
                     return;
@@ -123,17 +123,24 @@ impl Shared {
             scale.px(TIP.gap),
             super::px_rect(b.monitor.rect),
         );
-        window.set_rect(rect);
-        let mut surface = WindowSurface::new(&self.gpu, window.hwnd().0 as isize, rect.w as u32, rect.h as u32)
-            .map_err(|e| tracing::warn!(error = %e, "tray panel surface failed"))
-            .ok();
-        if let Some(s) = surface.as_mut() {
-            if let Err(e) = s.render(&self.gpu, &layout, &self.look.palette, scale, (0.0, 0.0), None) {
-                tracing::warn!(error = %e, "tray panel not drawn");
+        let shown = match held {
+            Ok(mut shown) => {
+                shown.redraw(&self.gpu, rect, &layout, &self.look.palette, scale);
+                shown
             }
-        }
-        let level = if again { Level::Off } else { self.motion_level() };
-        let shown = Shown::enter(&self.gpu, surface, window, (TIP.entrance, scale), level);
+            Err(window) => {
+                window.set_rect(rect);
+                let mut surface = WindowSurface::new(&self.gpu, window.hwnd().0 as isize, rect.w as u32, rect.h as u32)
+                    .map_err(|e| tracing::warn!(error = %e, "tray panel surface failed"))
+                    .ok();
+                if let Some(s) = surface.as_mut() {
+                    if let Err(e) = s.render(&self.gpu, &layout, &self.look.palette, scale, (0.0, 0.0), None) {
+                        tracing::warn!(error = %e, "tray panel not drawn");
+                    }
+                }
+                Shown::enter(&self.gpu, surface, window, (TIP.entrance, scale), self.motion_level())
+            }
+        };
         let _ = self.gpu.commit();
         if activate {
             shown.window().activate();

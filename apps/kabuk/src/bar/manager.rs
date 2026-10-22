@@ -3245,11 +3245,14 @@ impl Shared {
             (layout.size.w * d.scale.0).ceil() as i32 + 2 * room,
             (layout.size.h * d.scale.0).ceil() as i32 + 2 * room,
         );
+        // The window moves once its new size is drawn, just before the commit (found by
+        // the user with a video: the dock blinked and jumped as its tiles began to grow).
+        let mut moved = None;
         if size != (d.rect.w, d.rect.h) {
             let distance = d.scale.px(dock::STYLE.distance) - room;
             let rect = dock::window_rect(d.edge, px_rect(d.monitor.rect), d.strip, size, distance);
             d.rect = rect;
-            d.window.set_rect(match d.peek {
+            moved = Some(match d.peek {
                 Some(p) => appbar::slid_to_edge(d.edge, rect, px_rect(d.monitor.rect), peek_px(d.scale), p.now()),
                 None => rect,
             });
@@ -3262,6 +3265,9 @@ impl Shared {
             }
         }
         let Some(surface) = d.surface.as_mut() else {
+            if let Some(r) = moved {
+                d.window.set_rect(r);
+            }
             return Ok(false);
         };
         let origin = Point {
@@ -3276,6 +3282,9 @@ impl Shared {
             (origin.x, origin.y),
             None,
         )?;
+        if let Some(r) = moved {
+            d.window.set_rect(r);
+        }
         tracing::debug!(apps = apps.len(), rect = ?d.rect, grown = ?grown, "dock drawn");
         d.drawn = Some(shift);
         d.drawn_grow = grown;

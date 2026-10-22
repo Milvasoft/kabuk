@@ -184,7 +184,9 @@ impl WindowSurface {
         Ok(())
     }
 
-    /// Resizes (physical pixels). The next render must be full.
+    /// Resizes (physical pixels). The next render must be full. Nothing changes until
+    /// [`Gpu::commit`]: the new surface is shown with what is drawn on it, never empty
+    /// (found by users with videos: a resized popup or dock blinked for a frame).
     pub fn resize(&mut self, gpu: &Gpu, width: u32, height: u32) -> Result<()> {
         if (width, height) == (self.width, self.height) {
             return Ok(());
@@ -195,7 +197,6 @@ impl WindowSurface {
             self.visual.SetContent(&surface).ctx("visual content")?;
             self.zoom.SetCenterX2(width as f32 / 2.0).ctx("scale centre")?;
             self.zoom.SetCenterY2(height as f32 / 2.0).ctx("scale centre")?;
-            gpu.dcomp.Commit().ctx("commit")?;
         }
         self.surface = surface;
         self.width = width;

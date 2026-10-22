@@ -9,8 +9,9 @@ use std::time::Instant;
 use kabuk_core::config::Animations;
 use kabuk_ui::geom::Scale;
 use kabuk_ui::motion::{Entrance, Level, Motion, Pose};
-use kabuk_ui::render::{Gpu, WindowSurface};
-use kabuk_win::msgloop::Window;
+use kabuk_ui::node::Layout;
+use kabuk_ui::render::{Gpu, Palette, WindowSurface};
+use kabuk_win::msgloop::{PxRect, Window};
 
 use super::{timer, Shared};
 
@@ -69,6 +70,23 @@ impl Shown {
 
     pub(super) fn surface(&self) -> Option<&WindowSurface> {
         self.surface.as_ref()
+    }
+
+    /// Draws the popup again in place at `rect` (physical pixels): its surface is resized
+    /// and drawn, its window moved, and nothing enters again (found by a user with a
+    /// video: the quick settings flickered while a level was dragged, each drawing
+    /// making a new surface). The caller commits.
+    pub(super) fn redraw(&mut self, gpu: &Gpu, rect: PxRect, layout: &Layout, palette: &Palette, scale: Scale) {
+        if let Some(s) = self.surface.as_mut() {
+            let drawn = s
+                .resize(gpu, rect.w.max(1) as u32, rect.h.max(1) as u32)
+                .and_then(|()| s.render(gpu, layout, palette, scale, (0.0, 0.0), None));
+            if let Err(e) = drawn {
+                tracing::warn!(error = %e, "popup not drawn again");
+            }
+        }
+        self.window.set_rect(rect);
+        tracing::debug!(?rect, "popup drawn again");
     }
 
     /// Plays the exit from where the entrance is; `None` when there is nothing to play
