@@ -419,6 +419,29 @@ Kabuk as a free MSIX on the Microsoft Store (DECISIONS D84), beside the GitHub s
 
 ---
 
+## M18 · Windows' system indicators (requested by the user on 2026-10-22) `[ ]`
+
+What Windows' taskbar shows at its right, on Kabuk's bar, each a module that turns on and off, on by default, with Kabuk's own panels (DECISIONS D88). In this order:
+
+- Design first: the indicators' icons (network: Wi-Fi signal levels, Ethernet, none, airplane; battery levels and charging; the language chip; microphone, camera and location in use; the quick-settings button; the show-desktop corner) and the three panels (network list with the password field, quick settings, calendar with notifications) drawn on the design page in every look's tokens, and shown to the user before any code.
+- Each module end to end: configuration key, reading, applying, the bar's drawing and hit test, its panel, Settings → Bar → Modules (tr, en), live reload, tests.
+- Network status, then the network panel (scan, connect with a password, disconnect, Wi-Fi on and off).
+- Battery (hidden without one).
+- Keyboard language (hidden with one input language; a click switches, the panel lists them).
+- Privacy indicators (microphone, camera, location in use, from the capability access store).
+- Calendar and notifications panel (on the clock and date).
+- Quick settings panel (Wi-Fi, Bluetooth, airplane mode, brightness, volume, links to Windows' settings for the rest).
+- Show desktop corner.
+
+**Done criteria**
+- [ ] Every new module turns on and off live from Settings and from `kabuk.toml`, in every look, at every bar position.
+- [ ] Every indicator follows its state without polling: idle CPU stays near zero (`perf` tests).
+- [ ] The network panel lists networks, connects to an open and a protected one, and disconnects (tried by hand; the WLAN calls behind a tested wrapper).
+- [ ] Every panel opens, works with the keyboard and the mouse, and closes as the volume panel does; integration tests for each.
+- [ ] Screenshots of each indicator and panel compared with the design page.
+
+---
+
 ## Realistic expectations
 
 The whole plan will not be finished in one session. A good first night: M0 and M1, maybe the start of M2. The window manager (M3) and the tray (M4) are the two hardest milestones; if rushed, they are where the bugs that will burn the user the most come from. The criteria are not loosened for speed.

@@ -96,6 +96,8 @@ p { margin: 0; max-width: 66ch; }
 .comp-stack { display: grid; gap: 14px; }
 @media (max-width: 860px) { .comps { grid-template-columns: 1fr; } }
 .comp .fit { transform-origin: center; }
+.comps-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 14px; }
+@media (max-width: 1100px) { .comps-3 { grid-template-columns: 1fr; } }
 
 .rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
 .rule { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; display: grid; gap: 6px; align-content: start; }
@@ -1070,6 +1072,55 @@ p { margin: 0; max-width: 66ch; }
 .screen[data-mode="light"] .theme-card .tp, .screen[data-mode="light"] .saver .sp { border-color: #d0d4da; }
 .comp:has(.screen[data-mode="light"]) { background: #eef0f3; }
 
+/* Windows' system indicators on the bar and their panels (DECISIONS D88) */
+.inds .ind { display: inline-flex; align-items: center; gap: 5px; }
+.inds .kb { font: 600 11.5px/1 var(--num); letter-spacing: .04em; padding: 3px 5px; border: 1px solid var(--faint); border-radius: 5px; }
+.inds .priv .i { color: var(--accent-s); }
+.batt { position: relative; display: inline-flex; }
+.batt .fill { position: absolute; left: 18%; top: 37.5%; height: 25%; border-radius: 1px; background: currentColor; }
+.batt .fill.low { background: var(--err-fg); }
+.batt .bolt { position: absolute; left: 0; top: 0; width: 100%; height: 100%; color: var(--accent-s); }
+.desk-corner { align-self: stretch; width: 6px; margin-left: 6px; border-left: 1px solid var(--faint); }
+.screen[data-dir] .toast.kpanel { position: relative; right: auto; top: auto; bottom: auto; display: grid; grid-template-columns: none; align-content: start; gap: 8px; width: 380px; padding: 12px; color: var(--fg-s); font-size: 13px; }
+.kpanel .kp-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px; }
+.kpanel .kp-head b { font-size: 13.5px; }
+.kpanel .kp-list { display: grid; gap: 2px; }
+.kpanel .kp-row, .kpanel .kp-note { display: grid; grid-template-columns: 20px 1fr auto; align-items: center; gap: 10px; padding: 8px; border-radius: 8px; }
+.kpanel .kp-row.sel, .kpanel .kp-row:hover { background: var(--surf-sel); }
+.kpanel .kp-row.on .i:first-child { color: var(--accent-s); }
+.kpanel .kp-txt { display: grid; gap: 1px; min-width: 0; }
+.kpanel .kp-txt > b { color: var(--fg-s); }
+.kpanel .kp-txt > span, .kpanel .kp-txt b span { color: var(--dim); font-weight: 400; font-size: 12px; }
+.kpanel .kp-txt > span b { color: var(--fg-s); font-weight: 600; }
+.kpanel .kp-end { color: var(--dim); width: 14px; height: 14px; }
+.kpanel .kp-key { display: grid; gap: 8px; padding: 0 8px 8px 38px; }
+.kpanel .kp-key input { font: inherit; color: var(--fg-s); background: var(--surf-alt, var(--surf)); border: 1px solid var(--surf-line); border-radius: 6px; padding: 7px 9px; }
+.kpanel .kp-acts { display: flex; justify-content: flex-end; gap: 8px; }
+.kpanel .kp-btn { font: inherit; font-size: 12px; color: var(--fg-s); background: transparent; border: 1px solid var(--surf-line); border-radius: 6px; padding: 5px 10px; }
+.kpanel .kp-btn.pri { background: var(--accent-fill); color: var(--on-accent); border-color: transparent; }
+.kpanel .kp-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 4px 2px; border-top: 1px solid var(--surf-line); color: var(--dim); font-size: 12px; }
+.kpanel .kp-foot > span { display: inline-flex; align-items: center; gap: 6px; }
+.kpanel .kp-link { display: inline-flex; align-items: center; gap: 6px; color: var(--accent-s); font-size: 12px; }
+.kpanel .kp-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.kpanel .kp-tile { display: grid; justify-items: center; align-content: start; gap: 6px; text-align: center; font: inherit; color: var(--fg-s); background: transparent; border: 1px solid var(--surf-line); border-radius: 8px; padding: 10px 6px 8px; min-width: 0; }
+.kpanel .kp-tile .i { width: 18px; height: 18px; }
+.kpanel .kp-tile.on, .kpanel .kp-tile.on b, .kpanel .kp-tile.on span { background: var(--accent-fill); color: var(--on-accent); border-color: transparent; opacity: 1; }
+.kpanel .kp-tile > span { display: grid; gap: 1px; min-width: 0; }
+.kpanel .kp-tile b { font-size: 12px; font-weight: 600; line-height: 1.2; }
+.kpanel .kp-tile > span > span { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kpanel .kp-slider { display: grid; grid-template-columns: 20px 1fr 30px; align-items: center; gap: 10px; padding: 4px; }
+.kpanel .kp-slider .track { position: relative; height: 4px; border-radius: 2px; background: var(--faint); }
+.kpanel .kp-slider .track i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background: var(--accent-s); }
+.kpanel .kp-slider .track b { position: absolute; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: var(--accent-s); }
+.kpanel .kp-slider .v { font-family: var(--num); color: var(--dim); text-align: right; }
+.kpanel .kp-note { grid-template-columns: 20px 1fr 14px; align-items: start; background: var(--surf-sel); }
+.kpanel .kp-arrows { display: inline-flex; gap: 6px; color: var(--dim); }
+.kpanel .kp-arrows .i { width: 16px; height: 16px; }
+.kpanel .kp-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; font-family: var(--num); }
+.kpanel .kp-dn { color: var(--dim); font-family: var(--ui); font-size: 11.5px; padding: 4px 0; }
+.kpanel .kp-d { padding: 6px 0; border-radius: 6px; }
+.kpanel .kp-d.today { background: var(--accent-fill); color: var(--on-accent); font-weight: 600; }
+
 @media (prefers-reduced-motion: reduce) {
   .win, .media .bars i, .term .cur { animation: none !important; }
   .bar, .ws, .toast { transition: none !important; }
@@ -1101,6 +1152,30 @@ p { margin: 0; max-width: 66ch; }
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
   <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></symbol>
   <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V5l11-2v13"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/></symbol>
+  <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M2.5 9a14 14 0 0 1 19 0"/><path d="M5.5 12.5a9.5 9.5 0 0 1 13 0"/><path d="M8.6 16a5 5 0 0 1 6.8 0"/><path d="M12 19.5h.01"/></symbol>
+  <symbol id="i-wifi-2" viewBox="0 0 24 24"><path d="M5.5 12.5a9.5 9.5 0 0 1 13 0"/><path d="M8.6 16a5 5 0 0 1 6.8 0"/><path d="M12 19.5h.01"/></symbol>
+  <symbol id="i-wifi-1" viewBox="0 0 24 24"><path d="M8.6 16a5 5 0 0 1 6.8 0"/><path d="M12 19.5h.01"/></symbol>
+  <symbol id="i-wifi-off" viewBox="0 0 24 24"><path d="M2.5 9a14 14 0 0 1 5-3M11 4.8a14 14 0 0 1 10.5 4.2"/><path d="M5.5 12.5a9.5 9.5 0 0 1 4-2.3M14.5 10.3a9.5 9.5 0 0 1 4 2.2"/><path d="M8.6 16a5 5 0 0 1 6.8 0"/><path d="M12 19.5h.01"/><path d="M3 3l18 18"/></symbol>
+  <symbol id="i-eth" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></symbol>
+  <symbol id="i-plane" viewBox="0 0 24 24"><path d="M12 3c.8 0 1.4.7 1.4 1.5V9l7.6 4.5v2l-7.6-2.3v4.3l2.2 1.6V21L12 20l-3.6 1v-1.9l2.2-1.6v-4.3L3 15.5v-2L10.6 9V4.5C10.6 3.7 11.2 3 12 3z"/></symbol>
+  <symbol id="i-batt" viewBox="0 0 24 24"><rect x="2.5" y="7" width="17" height="10" rx="2"/><path d="M21.5 10.5v3"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 3L5 13h6l-1 8 8-10h-6z"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6"/></symbol>
+  <symbol id="i-cam" viewBox="0 0 24 24"><rect x="3" y="6.5" width="13" height="11" rx="2"/><path d="M16 10.5l5-3v9l-5-3"/></symbol>
+  <symbol id="i-loc" viewBox="0 0 24 24"><path d="M12 21s-6.5-6-6.5-11a6.5 6.5 0 0 1 13 0c0 5-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/></symbol>
+  <symbol id="i-qs" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+  <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></symbol>
+  <symbol id="i-bt" viewBox="0 0 24 24"><path d="M7 7.5l10 9-5 4.5V3l5 4.5-10 9"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></symbol>
+  <symbol id="i-leaf" viewBox="0 0 24 24"><path d="M5 19c0-8 5-13 15-14-1 10-6 15-14 15"/><path d="M5 19l7-7"/></symbol>
+  <symbol id="i-access" viewBox="0 0 24 24"><circle cx="12" cy="4.5" r="1.5"/><path d="M5 8l7 1.5L19 8M12 9.5V15l-3 6M12 15l3 6"/></symbol>
+  <symbol id="i-hotspot" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1.5"/><path d="M8.5 15.5a5 5 0 0 1 0-7M15.5 8.5a5 5 0 0 1 0 7M5.6 18.4a9 9 0 0 1 0-12.8M18.4 5.6a9 9 0 0 1 0 12.8"/></symbol>
+  <symbol id="i-cast" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M10 20h4M12 16v4M9 10l3-3 3 3M12 7v6"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-left" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
 </svg>
 
 <main class="page">
@@ -1173,7 +1248,7 @@ p { margin: 0; max-width: 66ch; }
   <section class="section" aria-labelledby="comp-h">
     <header>
       <h2 id="comp-h">Bileşenler</h2>
-      <p>Başlatıcı, bildirim ve ses göstergesi gerçek boyutlarında, seçili yönle birlikte değişir.</p>
+      <p>Başlatıcı, bildirim, ses göstergesi ve sistem göstergelerinin panelleri (ağ, hızlı ayarlar, takvim ve bildirimler) gerçek boyutlarında, seçili yönle birlikte değişir.</p>
     </header>
     <div class="comps">
       <div class="comp" id="comp-launcher"><span class="comp-label">Başlatıcı, "mil" araması</span></div>
@@ -1181,6 +1256,11 @@ p { margin: 0; max-width: 66ch; }
         <div class="comp" id="comp-toast"><span class="comp-label">Bildirim</span></div>
         <div class="comp" id="comp-osd"><span class="comp-label">Ses göstergesi</span></div>
       </div>
+    </div>
+    <div class="comps comps-3">
+      <div class="comp" id="comp-net"><span class="comp-label">Ağ paneli, şifre sorarken</span></div>
+      <div class="comp" id="comp-qs"><span class="comp-label">Hızlı ayarlar</span></div>
+      <div class="comp" id="comp-cal"><span class="comp-label">Takvim ve bildirimler</span></div>
     </div>
   </section>
 
@@ -1309,7 +1389,14 @@ p { margin: 0; max-width: 66ch; }
       monitors: "Monitörler", monitorsH: "Barın görüneceği monitörler", allMon: "Tümü", mainMon: "Sadece ana",
       autohide: "Otomatik gizle", autohideH: "Fare barın olduğu kenara gelince açılır",
       modules: "Barda gösterilenler", modulesH: "Kapattığın modül bardan hemen kalkar",
-      mod: { title: "Pencere başlığı", clock: "Saat", date: "Tarih", media: "Medya", cpu: "CPU", ram: "RAM", gpu: "GPU sıcaklığı", net: "Ağ hızı", vol: "Ses", tray: "Sistem tepsisi", notif: "Bildirimler", power: "Güç menüsü" },
+      mod: { title: "Pencere başlığı", clock: "Saat", date: "Tarih", media: "Medya", cpu: "CPU", ram: "RAM", gpu: "GPU sıcaklığı", net: "Ağ hızı", vol: "Ses", tray: "Sistem tepsisi", notif: "Bildirimler", power: "Güç menüsü", network: "Ağ durumu", battery: "Pil", keyboard: "Klavye dili", privacy: "Gizlilik göstergeleri", quick_settings: "Hızlı ayarlar", calendar: "Takvim ve bildirimler", show_desktop: "Masaüstünü göster" },
+      netWifi: "Wi-Fi", netEthernet: "Ethernet", netConnected: "Bağlı", netNoInternet: "Bağlı, internet yok", netSecured: "Güvenli", netOpen: "Açık ağ", netConnect: "Bağlan", netDisconnect: "Bağlantıyı kes", netKey: "Ağ güvenlik anahtarı", netCancel: "Vazgeç", netNone: "Bağlantı yok", netScanning: "Ağlar aranıyor…", netSettings: "Ağ ve internet ayarları",
+      battCharging: "Şarj oluyor", battFull: "Tam dolu", battLeft: (v) => `${v} kaldı`, battSettings: "Pil ayarları",
+      kbTitle: "Giriş dili", kbSettings: "Dil ayarları",
+      privMic: (v) => `${v} mikrofonu kullanıyor`, privCam: (v) => `${v} kamerayı kullanıyor`, privLoc: (v) => `${v} konumunu kullanıyor`, privSettings: "Gizlilik ayarları",
+      qsBluetooth: "Bluetooth", qsAirplane: "Uçak modu", qsBrightness: "Parlaklık", qsVolume: "Ses", qsNight: "Gece ışığı", qsFocus: "Odak", qsSaver: "Pil tasarrufu", qsAccess: "Erişilebilirlik", qsHotspot: "Mobil etkin nokta", qsProject: "Yansıt", qsSettings: "Tüm ayarlar", qsOn: "Açık", qsOff: "Kapalı",
+      calToday: "Bugün", notifTitle: "Bildirimler", notifClear: "Tümünü temizle", notifNone: "Yeni bildirim yok", notifSettings: "Bildirim ayarları",
+      monthsLong: ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"],
       modeLbl: "Mod", modeH: "Saate göre: 07:00 ile 19:00 arası açık", dark: "Koyu", light: "Açık", modeSystem: "Windows'a göre", modeSun: "Saate göre",
       lightNote: "Açık mod OLED panelde çok daha fazla piksel yakar. Açık moddayken boşta karartma daha erken başlar.",
       sysTheme: "Sistem teması", sysColors: "Renkler", sysColorsH: "Windows'un modu ve vurgu rengi temayı izler",
@@ -1411,7 +1498,14 @@ p { margin: 0; max-width: 66ch; }
       monitors: "Monitors", monitorsH: "Monitors that show the bar", allMon: "All", mainMon: "Main only",
       autohide: "Auto-hide", autohideH: "Shows when the pointer reaches its edge",
       modules: "Shown on the bar", modulesH: "A module you turn off leaves the bar right away",
-      mod: { title: "Window title", clock: "Clock", date: "Date", media: "Media", cpu: "CPU", ram: "RAM", gpu: "GPU temperature", net: "Network speed", vol: "Volume", tray: "System tray", notif: "Notifications", power: "Power menu" },
+      mod: { title: "Window title", clock: "Clock", date: "Date", media: "Media", cpu: "CPU", ram: "RAM", gpu: "GPU temperature", net: "Network speed", vol: "Volume", tray: "System tray", notif: "Notifications", power: "Power menu", network: "Network status", battery: "Battery", keyboard: "Keyboard language", privacy: "Privacy indicators", quick_settings: "Quick settings", calendar: "Calendar and notifications", show_desktop: "Show desktop" },
+      netWifi: "Wi-Fi", netEthernet: "Ethernet", netConnected: "Connected", netNoInternet: "Connected, no internet", netSecured: "Secured", netOpen: "Open network", netConnect: "Connect", netDisconnect: "Disconnect", netKey: "Network security key", netCancel: "Cancel", netNone: "Not connected", netScanning: "Looking for networks…", netSettings: "Network and internet settings",
+      battCharging: "Charging", battFull: "Fully charged", battLeft: (v) => `${v} left`, battSettings: "Battery settings",
+      kbTitle: "Input language", kbSettings: "Language settings",
+      privMic: (v) => `${v} is using your microphone`, privCam: (v) => `${v} is using your camera`, privLoc: (v) => `${v} is using your location`, privSettings: "Privacy settings",
+      qsBluetooth: "Bluetooth", qsAirplane: "Airplane mode", qsBrightness: "Brightness", qsVolume: "Volume", qsNight: "Night light", qsFocus: "Focus", qsSaver: "Battery saver", qsAccess: "Accessibility", qsHotspot: "Mobile hotspot", qsProject: "Project", qsSettings: "All settings", qsOn: "On", qsOff: "Off",
+      calToday: "Today", notifTitle: "Notifications", notifClear: "Clear all", notifNone: "No new notifications", notifSettings: "Notification settings",
+      monthsLong: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
       modeLbl: "Mode", modeH: "By time of day: light from 07:00 to 19:00", dark: "Dark", light: "Light", modeSystem: "Follow Windows", modeSun: "By time of day",
       lightNote: "Light mode lights far more pixels on an OLED panel. In light mode, idle dimming starts sooner.",
       sysTheme: "System theme", sysColors: "Colours", sysColorsH: "Windows' mode and accent colour follow the theme",
@@ -1508,7 +1602,7 @@ p { margin: 0; max-width: 66ch; }
 
   const state = {
     dir: "a", pos: null, langSetting: "system", h12: false, mode: "dark",
-    modules: { title: true, clock: true, date: true, media: true, cpu: true, ram: true, gpu: true, net: true, vol: true, tray: true, notif: true, power: true },
+    modules: { title: true, clock: true, date: true, media: true, cpu: true, ram: true, gpu: true, net: true, vol: true, tray: true, notif: true, power: true, network: true, battery: true, keyboard: true, privacy: true, quick_settings: true, calendar: true, show_desktop: true },
     ws: 1, launcher: false, idle: false, gaming: false, accent: null, gap: null,
     saver: "milva", saverWait: 5, setPage: "look", dimAfter: 60, dimCustom: false,
     wall: { 1: "black", 2: "black" }, wallMon: "all", wallTab: "pick", wallBright: 60, wallImage: null, generated: [],
@@ -1827,7 +1921,9 @@ launcher   idle      Alt+Space
       primary && m.media ? `<div class="grp"><span class="media"><span class="bars"><i></i><i></i><i></i></span>${icon("music")}<span class="mt">${t("media")}</span></span></div>` : "",
       stats ? `<div class="grp">${stats}</div>` : "",
       primary && m.tray ? `<div class="grp"><span class="tray">${icon("cloud")}${icon("shield")}${icon("chat")}${icon("cube")}${icon("pad")}</span></div>` : "",
+      primary ? indicatorsHtml(m) : "",
       primary && (m.notif || m.power) ? `<div class="grp">${m.notif ? `<span class="bell">${icon("bell")}<span class="n">2</span></span>` : ""}${m.power ? icon("power") : ""}</div>` : "",
+      primary && m.show_desktop ? `<span class="desk-corner" title="${t("mod").show_desktop}" aria-hidden="true"></span>` : "",
     ].join("");
     const center = m.clock || (primary && m.date) ? `<div class="grp">${clockHtml(primary && m.date, m.clock)}</div>` : "";
 
@@ -1849,6 +1945,63 @@ launcher   idle      Alt+Space
       <main class="tiles" data-ws="${ws}">${wins}</main>
       ${primary ? dockHtml() : ""}
       ${primary && opts.interactive ? overlaysHtml() : ""}
+    </div>`;
+  }
+
+  /* Windows' system indicators (DECISIONS D88): privacy, keyboard language, network,
+     battery and the quick settings button, in one group, as Windows keeps them together. */
+  function batteryHtml(level, charging) {
+    const w = Math.max(4, Math.round(55 * level / 100));
+    return `<span class="batt">${icon("batt")}<i class="fill${level <= 15 && !charging ? " low" : ""}" style="width:${w}%"></i>${charging ? icon("bolt", "i bolt") : ""}</span>`;
+  }
+  function indicatorsHtml(m) {
+    const items = [
+      m.privacy ? `<span class="ind priv" data-m="privacy" title="${t("privMic")("Teams")}">${icon("mic")}</span>` : "",
+      m.keyboard ? `<span class="ind kb" data-m="keyboard" title="${t("kbTitle")}">TR</span>` : "",
+      m.network ? `<span class="ind" data-m="network" title="milva-5g">${icon("wifi")}</span>` : "",
+      m.battery ? `<span class="ind" data-m="battery" title="${t("battLeft")("3 sa 12 dk")}">${batteryHtml(82, false)}<span class="v">82%</span></span>` : "",
+      m.quick_settings ? `<span class="ind" data-m="quick_settings" title="${t("mod").quick_settings}">${icon("qs")}</span>` : "",
+    ].join("");
+    return items ? `<div class="grp inds">${items}</div>` : "";
+  }
+
+  /* The panels the indicators open, Kabuk's own (D88), drawn for the components sheet. */
+  function netPanelHtml() {
+    const nets = [["milva-5g", "wifi", true, true], ["milva", "wifi", true, false], ["Kafe_Misafir", "wifi-2", false, false], ["DIRECT-printer", "wifi-1", true, false]];
+    const rows = nets.map(([name, ic, secured, on], i) => `<div class="kp-row${on ? " on" : ""}${i === 1 ? " sel" : ""}">${icon(ic)}<span class="kp-txt"><b>${name}</b><span>${on ? t("netConnected") : secured ? t("netSecured") : t("netOpen")}</span></span>${on ? `<button type="button" class="kp-btn">${t("netDisconnect")}</button>` : icon(secured ? "lock" : "right", "i kp-end")}</div>
+      ${i === 1 ? `<div class="kp-key"><input type="password" value="••••••••" readonly tabindex="-1" aria-label="${t("netKey")}"><span class="kp-acts"><button type="button" class="kp-btn">${t("netCancel")}</button><button type="button" class="kp-btn pri">${t("netConnect")}</button></span></div>` : ""}`).join("");
+    return `<div class="toast kpanel kp-net">
+      <div class="kp-head"><b>${t("netWifi")}</b><button type="button" class="tgl" role="switch" aria-checked="true" aria-label="${t("netWifi")}"></button></div>
+      <div class="kp-list">${rows}</div>
+      <div class="kp-foot"><span>${icon("eth")}${t("netEthernet")} · ${t("netNone")}</span><span class="kp-link">${icon("gear")}${t("netSettings")}</span></div>
+    </div>`;
+  }
+  function qsPanelHtml() {
+    const tile = (ic, label, on, sub) => `<button type="button" class="kp-tile${on ? " on" : ""}">${icon(ic)}<span><b>${label}</b><span>${sub}</span></span></button>`;
+    const slider = (ic, label, v) => `<div class="kp-slider">${icon(ic)}<span class="track" aria-label="${label}"><i style="width:${v}%"></i><b style="left:${v}%"></b></span><span class="v">${v}</span></div>`;
+    return `<div class="toast kpanel kp-qs">
+      <div class="kp-tiles">
+        ${tile("wifi", t("netWifi"), true, "milva-5g")}${tile("bt", t("qsBluetooth"), true, t("qsOn"))}${tile("plane", t("qsAirplane"), false, t("qsOff"))}
+        ${tile("hotspot", t("qsHotspot"), false, t("qsOff"))}${tile("moon", t("qsNight"), false, t("qsOff"))}${tile("leaf", t("qsSaver"), false, t("qsOff"))}
+        ${tile("bell", t("qsFocus"), false, t("qsOff"))}${tile("access", t("qsAccess"), false, "")}${tile("cast", t("qsProject"), false, "")}
+      </div>
+      ${slider("sun", t("qsBrightness"), 70)}${slider("vol", t("qsVolume"), 40)}
+      <div class="kp-foot">${batteryHtml(82, false)}<span>82% · ${t("battLeft")("3 sa 12 dk")}</span><span class="kp-link">${icon("gear")}${t("qsSettings")}</span></div>
+    </div>`;
+  }
+  function calPanelHtml() {
+    const now = new Date(2026, 9, 22);
+    const first = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lead = (first.getDay() + 6) % 7;
+    const days = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const names = [1, 2, 3, 4, 5, 6, 0].map((d) => `<span class="kp-dn">${t("days")[d]}</span>`).join("");
+    const cells = Array.from({ length: lead }, () => `<span></span>`).concat(Array.from({ length: days }, (_, i) => `<span class="kp-d${i + 1 === now.getDate() ? " today" : ""}">${i + 1}</span>`)).join("");
+    const note = (app, ic, title, text, when) => `<div class="kp-note">${icon(ic)}<span class="kp-txt"><b>${app} · <span>${when}</span></b><span><b>${title}</b> ${text}</span></span>${icon("x", "i kp-end")}</div>`;
+    return `<div class="toast kpanel kp-cal">
+      <div class="kp-head"><b>${t("notifTitle")}</b><span class="kp-link">${t("notifClear")}</span></div>
+      ${note("WhatsApp", "chat", "Ayşe", "Akşam yemeğe geliyor musun?", "20:12")}${note("Outlook", "file", "Sprint planı", "Toplantı 10:00'a alındı.", "19:40")}
+      <div class="kp-head"><b>${t("monthsLong")[now.getMonth()]} ${now.getFullYear()}</b><span class="kp-arrows">${icon("left")}${icon("right")}</span></div>
+      <div class="kp-grid">${names}${cells}</div>
     </div>`;
   }
 
@@ -1936,7 +2089,7 @@ launcher   idle      Alt+Space
     main.classList.toggle("gaming", state.gaming);
     renderComponents();
     renderSettings();
-    [stage, mon1, mon2, document.getElementById("comp-launcher"), document.getElementById("comp-toast"), document.getElementById("comp-osd")].forEach(applyOverrides);
+    [stage, mon1, mon2, document.getElementById("comp-launcher"), document.getElementById("comp-toast"), document.getElementById("comp-osd"), document.getElementById("comp-net"), document.getElementById("comp-qs"), document.getElementById("comp-cal")].forEach(applyOverrides);
     syncPageControls();
     tickClock();
     if (state.launcher) openLauncher();
@@ -2213,7 +2366,12 @@ launcher   idle      Alt+Space
     lc.innerHTML = keep(lc) + `<div class="fit">${launcherStatic}</div>`;
     tc.innerHTML = keep(tc) + `<div class="fit">${toastStatic}</div>`;
     oc.innerHTML = keep(oc) + `<div class="fit">${osdStatic}</div>`;
-    [lc, tc, oc].forEach(scaleComp);
+    const panels = [["comp-net", netPanelHtml], ["comp-qs", qsPanelHtml], ["comp-cal", calPanelHtml]].map(([id, html]) => {
+      const el = document.getElementById(id);
+      el.innerHTML = keep(el) + `<div class="fit">${wrap(html())}</div>`;
+      return el;
+    });
+    [lc, tc, oc, ...panels].forEach(scaleComp);
   }
   function scaleComp(comp) {
     const f = comp.querySelector(".fit");
