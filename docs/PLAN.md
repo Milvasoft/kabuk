@@ -435,11 +435,11 @@ What Windows' taskbar shows at its right, on Kabuk's bar, each a module that tur
 - Show desktop corner.
 
 **Done criteria**
-- [ ] Every new module turns on and off live from Settings and from `kabuk.toml`, in every look, at every bar position.
-- [ ] Every indicator follows its state without polling: idle CPU stays near zero (`perf` tests).
-- [ ] The network panel lists networks, connects to an open and a protected one, and disconnects (tried by hand; the WLAN calls behind a tested wrapper).
-- [ ] Every panel opens, works with the keyboard and the mouse, and closes as the volume panel does; integration tests for each.
-- [ ] Screenshots of each indicator and panel compared with the design page.
+- [x] Every new module turns on and off live from Settings and from `kabuk.toml`, in every look, at every bar position. *Unit tests per module (`view` tests: shown, hidden with the module, side bars, secondary bars); integration tests for the network and quick settings keys live.*
+- [~] Every indicator follows its state without polling: idle CPU stays near zero (`perf` tests). *Event-driven by design (D88); the `perf` suite not yet run on it (the test VM is down: its evaluation licence expired).*
+- [x] The network panel lists networks, connects to an open and a protected one, and disconnects (tried by hand; the WLAN calls behind a tested wrapper). *Tried by the user on 2026-10-22: everything works.*
+- [x] Every panel opens, works with the keyboard and the mouse, and closes as the volume panel does; integration tests for each. *`the_network_indicator_follows_its_setting_and_opens_its_panel`, `the_system_panels_open_and_close_each_other`, `the_show_desktop_corner_puts_windows_down_and_back`; tried by the user.*
+- [~] Screenshots of each indicator and panel compared with the design page. *The bar's end compared (Defter); the panels' live screenshots still to take.*
 
 ---
 
