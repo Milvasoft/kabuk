@@ -17,7 +17,7 @@ use kabuk_win::msgloop::{self, msg, vk, Msg, PxRect, Window};
 use super::motion_host::Shown;
 use super::tooltip::{self, TIP};
 use super::{Shared, MSG_QUICK_READ};
-use crate::bar::quick_panel::{self, Action, Quick, Tile, BRIGHTNESS, VOLUME};
+use crate::bar::quick_panel::{self, Action, Quick, Screen, Tile, BRIGHTNESS, VOLUME};
 use crate::notify::style::NotifyStyle;
 
 const PANEL_CLASS: &str = "Kabuk.QuickPanel";
@@ -30,7 +30,27 @@ pub const MSG_TEST_QUICK_PANEL: u32 = msg::APP + 68;
 pub(super) struct QuickRead {
     radios: kabuk_win::radios::Radios,
     hotspot: Option<bool>,
-    brightness: Option<(brightness::Panel, u8)>,
+    screens: Vec<(Screen, brightness::Panel)>,
+}
+
+/// Every monitor whose brightness answers, in Windows' order (the main one first), and
+/// where each is set (DECISIONS D91). Slow: off the bar's thread.
+fn read_screens() -> Vec<(Screen, brightness::Panel)> {
+    kabuk_win::shell::monitors()
+        .into_iter()
+        .filter_map(|m| {
+            brightness::read(m.handle, &m.device).map(|(panel, percent)| {
+                (
+                    Screen {
+                        number: m.number,
+                        main: m.primary,
+                        percent,
+                    },
+                    panel,
+                )
+            })
+        })
+        .collect()
 }
 
 pub(super) type QuickSlot = Arc<Mutex<Option<QuickRead>>>;
@@ -42,12 +62,12 @@ pub(super) struct QuickPanel {
     bar: usize,
     anchor: (&'static str, u32),
     quick: Quick,
-    /// Where the brightness is set, once read.
-    panel: Option<brightness::Panel>,
+    /// Where each monitor's brightness is set (by its number), once read.
+    panels: Vec<(u32, brightness::Panel)>,
     /// The level held by a press, followed while the mouse moves.
     dragging: Option<u32>,
-    /// The brightness asked for while one is being set, and whether one is.
-    pending: Arc<Mutex<Option<u8>>>,
+    /// The brightness asked for (and where) while one is being set, and whether one is.
+    pending: Arc<Mutex<Option<(brightness::Panel, u8)>>>,
     setting: Arc<AtomicBool>,
 }
 
@@ -78,9 +98,9 @@ impl Shared {
         q
     }
 
-    /// Reads the radios, the hotspot and the brightness of the bar's monitor on a thread
-    /// of its own; [`MSG_QUICK_READ`] says they came.
-    fn read_quick(&self, monitor: isize) {
+    /// Reads the radios, the hotspot and every monitor's brightness on a thread of its
+    /// own; [`MSG_QUICK_READ`] says they came.
+    fn read_quick(&self) {
         let slot = self.quick_slot.clone();
         let control = self.control.as_ref().map(Window::hwnd);
         std::thread::spawn(move || {
@@ -88,7 +108,7 @@ impl Shared {
             let read = QuickRead {
                 radios: kabuk_win::radios::read(),
                 hotspot: kabuk_win::hotspot::state(),
-                brightness: brightness::read(monitor),
+                screens: read_screens(),
             };
             if let Ok(mut s) = slot.lock() {
                 *s = Some(read);
@@ -106,24 +126,25 @@ impl Shared {
         });
     }
 
-    fn quick_monitor(&self, bar: usize) -> isize {
-        self.bars
-            .get(bar)
-            .and_then(|b| b.window.hwnd().monitor_handle())
-            .unwrap_or(0)
-    }
-
     /// The slow parts came.
     pub(super) fn quick_read(&mut self) {
         let Some(read) = self.quick_slot.lock().ok().and_then(|mut s| s.take()) else {
             return;
         };
+        let Some(bar) = self.quick_panel.as_ref().map(|p| p.bar) else {
+            return;
+        };
+        // At first the level sets the monitor under the panel.
+        let home = self.bars.get(bar).map_or(0, |b| b.monitor.number);
         let Some(p) = self.quick_panel.as_mut() else { return };
+        let (screens, panels): (Vec<Screen>, Vec<(u32, brightness::Panel)>) = read
+            .screens
+            .into_iter()
+            .map(|(s, panel)| (s, (s.number, panel)))
+            .unzip();
         // A level being dragged keeps the value under the mouse.
-        if p.dragging != Some(BRIGHTNESS) {
-            p.quick.brightness = read.brightness.map(|(_, v)| v);
-        }
-        p.panel = read.brightness.map(|(panel, _)| panel);
+        p.quick.take_screens(screens, home, p.dragging == Some(BRIGHTNESS));
+        p.panels = panels;
         p.quick.wifi = read.radios.wifi;
         p.quick.bluetooth = read.radios.bluetooth;
         p.quick.airplane = read.radios.airplane();
@@ -146,12 +167,24 @@ impl Shared {
         self.close_media_card();
         let quick = self.quick_now(None);
         self.show_quick_panel(bar, anchor, quick, false, activate);
-        self.read_quick(self.quick_monitor(bar));
+        self.read_quick();
     }
 
     fn show_quick_panel(&mut self, bar: usize, anchor: (&'static str, u32), quick: Quick, again: bool, activate: bool) {
-        let (window, panel, dragging, pending, setting) = match self.quick_panel.take() {
-            Some(p) => (p.shown.into_window(), p.panel, p.dragging, p.pending, p.setting),
+        if again {
+            if let Some((layout, rect, scale)) = self.quick_place(bar, anchor, &quick) {
+                if let Some(p) = self.quick_panel.as_mut() {
+                    p.shown.redraw(&self.gpu, rect, &layout, &self.look.palette, scale);
+                    let _ = self.gpu.commit();
+                    p.layout = layout;
+                    p.scale = scale;
+                    p.quick = quick;
+                    return;
+                }
+            }
+        }
+        let (window, panels, dragging, pending, setting) = match self.quick_panel.take() {
+            Some(p) => (p.shown.into_window(), p.panels, p.dragging, p.pending, p.setting),
             None => {
                 let weak = self.me.clone();
                 match Window::input_surface(PANEL_CLASS, "", PxRect::default(), move |m| {
@@ -159,7 +192,7 @@ impl Shared {
                     let mut s = rc.try_borrow_mut().ok()?;
                     s.on_quick_panel(m)
                 }) {
-                    Ok(w) => (w, None, None, Arc::default(), Arc::default()),
+                    Ok(w) => (w, Vec::new(), None, Arc::default(), Arc::default()),
                     Err(e) => {
                         tracing::warn!(error = %e, "quick settings window failed");
                         return;
@@ -167,30 +200,9 @@ impl Shared {
                 }
             }
         };
-        let Some(b) = self.bars.get(bar) else { return };
-        let scale = b.scale;
-        let node = quick_panel::view(
-            &quick,
-            &self.i18n,
-            self.look.style.text_scale,
-            &TIP,
-            &NotifyStyle::of(self.config().appearance.look),
-        );
-        let layout = kabuk_ui::node::layout(&node, Point::default(), &self.gpu.text);
-        let size = (
-            (layout.size.w * scale.0).ceil() as i32,
-            (layout.size.h * scale.0).ceil() as i32,
-        );
-        let (module, value) = anchor;
-        let at = self.hit_rect(bar, module, value).unwrap_or(b.rect);
-        let rect = tooltip::place(
-            b.edge,
-            b.rect,
-            at,
-            size,
-            scale.px(TIP.gap),
-            super::px_rect(b.monitor.rect),
-        );
+        let Some((layout, rect, scale)) = self.quick_place(bar, anchor, &quick) else {
+            return;
+        };
         window.set_rect(rect);
         let mut surface = WindowSurface::new(&self.gpu, window.hwnd().0 as isize, rect.w as u32, rect.h as u32)
             .map_err(|e| tracing::warn!(error = %e, "quick settings surface failed"))
@@ -218,11 +230,40 @@ impl Shared {
             bar,
             anchor,
             quick,
-            panel,
+            panels,
             dragging,
             pending,
             setting,
         });
+    }
+
+    /// The panel laid out for `quick` and its place under `anchor` on bar `bar`.
+    fn quick_place(&self, bar: usize, anchor: (&'static str, u32), quick: &Quick) -> Option<(Layout, PxRect, Scale)> {
+        let b = self.bars.get(bar)?;
+        let scale = b.scale;
+        let node = quick_panel::view(
+            quick,
+            &self.i18n,
+            self.look.style.text_scale,
+            &TIP,
+            &NotifyStyle::of(self.config().appearance.look),
+        );
+        let layout = kabuk_ui::node::layout(&node, Point::default(), &self.gpu.text);
+        let size = (
+            (layout.size.w * scale.0).ceil() as i32,
+            (layout.size.h * scale.0).ceil() as i32,
+        );
+        let (module, value) = anchor;
+        let at = self.hit_rect(bar, module, value).unwrap_or(b.rect);
+        let rect = tooltip::place(
+            b.edge,
+            b.rect,
+            at,
+            size,
+            scale.px(TIP.gap),
+            super::px_rect(b.monitor.rect),
+        );
+        Some((layout, rect, scale))
     }
 
     fn reshow_quick_panel(&mut self, quick: Quick) {
@@ -256,6 +297,13 @@ impl Shared {
                     }
                 });
             }
+            Action::Screen(i) => {
+                let Some(p) = self.quick_panel.as_mut() else { return };
+                p.quick.screen = i;
+                let quick = p.quick.clone();
+                tracing::info!(screen = ?quick.screens.get(i), "brightness of another monitor");
+                self.reshow_quick_panel(quick);
+            }
             Action::Switch(tile, on) => {
                 tracing::info!(?tile, on, "quick settings switched");
                 let Some(p) = self.quick_panel.as_mut() else { return };
@@ -268,11 +316,9 @@ impl Shared {
                     _ => {}
                 }
                 let quick = p.quick.clone();
-                let bar = p.bar;
                 self.reshow_quick_panel(quick);
                 let slot = self.quick_slot.clone();
                 let control = self.control.as_ref().map(Window::hwnd);
-                let monitor = self.quick_monitor(bar);
                 std::thread::spawn(move || {
                     kabuk_win::system::com_init_mta();
                     let r = match tile {
@@ -288,7 +334,7 @@ impl Shared {
                     let read = QuickRead {
                         radios: kabuk_win::radios::read(),
                         hotspot: kabuk_win::hotspot::state(),
-                        brightness: brightness::read(monitor),
+                        screens: read_screens(),
                     };
                     if let Ok(mut s) = slot.lock() {
                         *s = Some(read);
@@ -330,10 +376,19 @@ impl Shared {
             self.render_all(false);
         } else {
             let value = u8::try_from(percent.min(100)).unwrap_or(100);
-            quick.brightness = Some(value);
-            if let Some(panel) = p.panel {
+            let screen = quick.screen;
+            let number = quick.screens.get_mut(screen).map(|s| {
+                s.percent = value;
+                s.number
+            });
+            let panel = p
+                .panels
+                .iter()
+                .find(|(n, _)| Some(*n) == number)
+                .map(|(_, panel)| *panel);
+            if let Some(panel) = panel {
                 if let Ok(mut pending) = p.pending.lock() {
-                    *pending = Some(value);
+                    *pending = Some((panel, value));
                 }
                 // One thread sets the latest value asked for while the mouse moves on.
                 if !p.setting.swap(true, Ordering::SeqCst) {
@@ -342,7 +397,7 @@ impl Shared {
                         kabuk_win::system::com_init_mta();
                         loop {
                             let next = pending.lock().ok().and_then(|mut v| v.take());
-                            let Some(v) = next else { break };
+                            let Some((panel, v)) = next else { break };
                             if let Err(e) = brightness::set(panel, v) {
                                 tracing::warn!(error = %e, "brightness not set");
                             }

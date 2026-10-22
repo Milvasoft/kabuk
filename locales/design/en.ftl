@@ -205,6 +205,7 @@ qs-project = Project
 qs-settings = All settings
 qs-on = On
 qs-off = Off
+qs-screen-main = { $value } (main)
 cal-today = Today
 notif-title = Notifications
 notif-clear = Clear all

@@ -205,6 +205,7 @@ qs-project = Yansıt
 qs-settings = Tüm ayarlar
 qs-on = Açık
 qs-off = Kapalı
+qs-screen-main = { $value } (ana)
 cal-today = Bugün
 notif-title = Bildirimler
 notif-clear = Tümünü temizle

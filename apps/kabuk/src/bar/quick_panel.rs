@@ -20,6 +20,8 @@ pub const BRIGHTNESS: u32 = 20;
 pub const VOLUME: u32 = 21;
 pub const SETTINGS: u32 = 30;
 pub const SETTINGS_PAGE: &str = "ms-settings:";
+/// The monitor chooser's first button; monitor `screens[i]` is `SCREEN + i` (D91).
+pub const SCREEN: u32 = 40;
 
 /// The content width (DIPs), as the other panels'; tiles in three columns.
 const WIDTH: f32 = 356.0;
@@ -33,6 +35,11 @@ const LEVEL_ICON: f32 = 18.0;
 const LEVEL_VALUE_W: f32 = 30.0;
 const GAP: f32 = 10.0;
 const SUB_SCALE: f32 = 0.88;
+/// The monitor chooser's buttons (`.kp-screens .kp-btn`).
+const CHIP_PAD: (f32, f32) = (10.0, 5.0);
+const CHIP_RADIUS: f32 = 6.0;
+const CHIP_GAP: f32 = 6.0;
+const CHIP_INSET: f32 = 4.0;
 
 /// A tile, in the design's order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -106,7 +113,16 @@ impl Tile {
     }
 }
 
-/// What the panel knows; `None` for what the computer has none of.
+/// A monitor whose brightness answers: Windows' number for it ("Monitor 1 (main)"),
+/// whether it is the main one, and its brightness (DECISIONS D91).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Screen {
+    pub number: u32,
+    pub main: bool,
+    pub percent: u8,
+}
+
+/// What the panel knows; `None` (or none) for what the computer has none of.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Quick {
     pub wifi: Option<bool>,
@@ -114,7 +130,9 @@ pub struct Quick {
     pub bluetooth: Option<bool>,
     pub airplane: Option<bool>,
     pub hotspot: Option<bool>,
-    pub brightness: Option<u8>,
+    /// The monitors whose brightness answers, and which one the level sets (D91).
+    pub screens: Vec<Screen>,
+    pub screen: usize,
     pub volume: Option<(u32, bool)>,
     pub battery: Option<Battery>,
 }
@@ -126,6 +144,8 @@ pub enum Action {
     /// Switch a tile's radio or the hotspot on (`true`) or off.
     Switch(Tile, bool),
     Open(&'static str),
+    /// The brightness level sets monitor `screens[i]` from now on.
+    Screen(usize),
 }
 
 impl Quick {
@@ -155,10 +175,37 @@ impl Quick {
         }
     }
 
+    /// The brightness of the monitor the level sets.
+    pub fn brightness(&self) -> Option<u8> {
+        self.screens.get(self.screen).map(|s| s.percent)
+    }
+
+    /// Takes the monitors read now: the level keeps setting the monitor it set (by its
+    /// number), at first the one under the panel (`home`), else the first. While
+    /// `dragging`, the chosen monitor keeps the value under the mouse.
+    pub fn take_screens(&mut self, screens: Vec<Screen>, home: u32, dragging: bool) {
+        let before = self.screens.get(self.screen).copied();
+        let number = before.map_or(home, |s| s.number);
+        self.screen = screens.iter().position(|s| s.number == number).unwrap_or(0);
+        self.screens = screens;
+        if let (true, Some(b), Some(s)) = (dragging, before, self.screens.get_mut(self.screen)) {
+            if s.number == b.number {
+                s.percent = b.percent;
+            }
+        }
+    }
+
     /// A click on part `value`.
     pub fn click(&self, value: u32) -> Action {
         if value == SETTINGS {
             return Action::Open(SETTINGS_PAGE);
+        }
+        if let Some(i) = value.checked_sub(SCREEN).map(|i| i as usize) {
+            return if i < self.screens.len() {
+                Action::Screen(i)
+            } else {
+                Action::None
+            };
         }
         let Some(t) = Tile::ALL.get(value as usize).copied() else {
             return Action::None;
@@ -256,6 +303,41 @@ fn level(icon: &'static str, percent: u32, value: u32, notify: &NotifyStyle, siz
     .align(Align::Center)
 }
 
+/// The monitor chooser: a button for each monitor whose brightness answers, "1 (main)"
+/// for the main one, the one the level sets lit (`.kp-screens`).
+fn chooser(q: &Quick, i18n: &I18n, size: f32) -> Node {
+    let buttons = q
+        .screens
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let lit = i == q.screen;
+            let label = if s.main {
+                i18n.tr_args("qs-screen-main", &[("value", s.number.into())])
+            } else {
+                s.number.to_string()
+            };
+            Node::row(vec![words(
+                label,
+                if lit { Role::OnAccent } else { Role::Fg },
+                400,
+                size,
+                WIDTH,
+            )])
+            .padding(Insets::symmetric(CHIP_PAD.0, CHIP_PAD.1))
+            .paint(Paint {
+                fill: if lit { Role::AccentFill } else { Role::Surface },
+                border: (!lit).then_some((Role::SurfaceLine, 1.0)),
+                radius: CHIP_RADIUS,
+            })
+            .hit(HIT, SCREEN + i as u32)
+        })
+        .collect();
+    Node::row(buttons)
+        .gap(CHIP_GAP)
+        .padding(Insets::symmetric(CHIP_INSET, 0.0))
+}
+
 /// The battery's line: its charge and the time left (hours and minutes when known).
 fn battery_line(b: &Battery, i18n: &I18n) -> String {
     let pct = i18n.tr_args("bar-percent", &[("value", u32::from(b.percent).into())]);
@@ -279,7 +361,11 @@ pub fn view(q: &Quick, i18n: &I18n, text_scale: f32, s: &TipStyle, notify: &Noti
         .chunks(COLUMNS)
         .map(|row| Node::row(row.iter().map(|t| tile(q, *t, i18n, size, width)).collect()).gap(TILE_GAP))
         .collect();
-    if let Some(b) = q.brightness {
+    // With more than one monitor answering, which one the level sets (D91).
+    if q.screens.len() > 1 {
+        rows.push(chooser(q, i18n, size));
+    }
+    if let Some(b) = q.brightness() {
         rows.push(level("sun", u32::from(b), BRIGHTNESS, notify, size));
     }
     if let Some((v, muted)) = q.volume {
@@ -333,7 +419,8 @@ mod tests {
     //! Edge cases: tiles for what the computer has only (no Bluetooth, no battery, no
     //! hotspot); a switch flips its state, a page tile opens its page; the levels only
     //! when known, a muted volume at 0; the battery's line charging, with time left, full
-    //! and plugged; every string in both languages.
+    //! and plugged; every string in both languages; the monitor chooser with one monitor
+    //! (none), two (the main one named, the chosen one lit) and a click past its buttons.
     use super::*;
     use crate::bar::tooltip::TIP;
     use kabuk_core::config::Look;
@@ -360,7 +447,12 @@ mod tests {
             bluetooth: Some(false),
             airplane: Some(false),
             hotspot: Some(false),
-            brightness: Some(70),
+            screens: vec![Screen {
+                number: 1,
+                main: true,
+                percent: 70,
+            }],
+            screen: 0,
             volume: Some((40, false)),
             battery: Some(Battery {
                 percent: 82,
@@ -462,6 +554,86 @@ mod tests {
         }
     }
 
+    /// Asked for by the user: each monitor's brightness, one level and a chooser above it
+    /// (D91).
+    #[test]
+    fn the_level_sets_the_chosen_monitors_brightness() {
+        let notify = NotifyStyle::of(Look::Ada);
+        let two = Quick {
+            screens: vec![
+                Screen {
+                    number: 1,
+                    main: true,
+                    percent: 18,
+                },
+                Screen {
+                    number: 2,
+                    main: false,
+                    percent: 20,
+                },
+            ],
+            screen: 1,
+            ..full()
+        };
+        for lang in [Lang::Tr, Lang::En] {
+            let i18n = I18n::new(lang);
+            let main = i18n.tr_args("qs-screen-main", &[("value", 1u32.into())]);
+            assert!(main.contains('1') && main.len() > 1, "{main}");
+            // One monitor: no chooser.
+            let t = texts(&view(&full(), &i18n, 1.0, &TIP, &notify));
+            assert!(!t.contains(&main), "{t:?}");
+            // Two: both named, the level at the chosen one's brightness.
+            let n = view(&two, &i18n, 1.0, &TIP, &notify);
+            let t = texts(&n);
+            assert!(t.contains(&main) && t.contains(&"2".to_string()), "{t:?}");
+            assert!(t.contains(&"20".to_string()) && !t.contains(&"18".to_string()), "{t:?}");
+            let l = layout(&n, Point::default(), &Fake);
+            let button = |i: u32| {
+                l.hits
+                    .iter()
+                    .find(|(_, h)| h.module == HIT && h.value == SCREEN + i)
+                    .map(|(r, _)| *r)
+                    .expect("a chooser button")
+            };
+            // The chosen one lit, the other not.
+            let lit = |r: Rect| {
+                l.draws.iter().any(
+                    |d| matches!(d, Draw::Panel { rect, paint, .. } if *rect == r && paint.fill == Role::AccentFill),
+                )
+            };
+            assert!(lit(button(1)) && !lit(button(0)));
+            // Above the level.
+            let level = l
+                .hits
+                .iter()
+                .find(|(_, h)| h.module == HIT && h.value == BRIGHTNESS)
+                .unwrap()
+                .0;
+            assert!(button(0).bottom() <= level.y);
+        }
+        // Read again: the chosen monitor stays chosen; at first the panel's own; one gone,
+        // the first; while dragged, the value under the mouse stays.
+        let screens = two.screens.clone();
+        let mut q = Quick::default();
+        q.take_screens(screens.clone(), 2, false);
+        assert_eq!(q.screen, 1);
+        q.take_screens(screens.iter().rev().copied().collect(), 1, false);
+        assert_eq!(q.screens[q.screen].number, 2, "kept by its number");
+        q.take_screens(screens[..1].to_vec(), 2, false);
+        assert_eq!(q.screen, 0);
+        let mut d = two.clone();
+        d.screens[1].percent = 55;
+        d.take_screens(screens.clone(), 1, true);
+        assert_eq!(d.brightness(), Some(55));
+        d.take_screens(screens, 1, false);
+        assert_eq!(d.brightness(), Some(20));
+        assert_eq!(two.click(SCREEN), Action::Screen(0));
+        assert_eq!(two.click(SCREEN + 1), Action::Screen(1));
+        assert_eq!(two.click(SCREEN + 2), Action::None);
+        assert_eq!(two.brightness(), Some(20));
+        assert_eq!(Quick::default().brightness(), None);
+    }
+
     #[test]
     fn the_panel_draws_tiles_levels_and_the_battery() {
         let notify = NotifyStyle::of(Look::Ada);
@@ -517,7 +689,7 @@ mod tests {
                 .any(|x| x.contains(&i18n.tr("batt-full"))));
             // Unknown levels are not drawn; a muted volume is 0.
             let quiet = Quick {
-                brightness: None,
+                screens: Vec::new(),
                 volume: Some((40, true)),
                 ..q.clone()
             };

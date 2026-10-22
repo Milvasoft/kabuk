@@ -140,7 +140,7 @@ fn main() {
         let i18n = kabuk_i18n::I18n::new(kabuk_i18n::Lang::Tr);
         kabuk::bar::power_menu::view(&i18n, 1.0, &kabuk::bar::tooltip::TIP, 1)
     });
-    // The quick settings panel (`--quick-panel`), as on a desktop without a battery.
+    // The quick settings panel (`--quick-panel`), as on a desktop with two monitors and no battery.
     let quick = std::env::args().any(|a| a == "--quick-panel").then(|| {
         let s = kabuk::notify::style::NotifyStyle::of(look);
         let i18n = kabuk_i18n::I18n::new(kabuk_i18n::Lang::Tr);
@@ -149,6 +149,19 @@ fn main() {
             ssid: Some("milva-5g".into()),
             bluetooth: Some(false),
             airplane: Some(false),
+            screens: vec![
+                kabuk::bar::quick_panel::Screen {
+                    number: 1,
+                    main: true,
+                    percent: 18,
+                },
+                kabuk::bar::quick_panel::Screen {
+                    number: 2,
+                    main: false,
+                    percent: 20,
+                },
+            ],
+            screen: 1,
             volume: Some((40, false)),
             ..Default::default()
         };

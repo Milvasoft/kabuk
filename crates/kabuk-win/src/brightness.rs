@@ -8,8 +8,12 @@ use std::io;
 
 use windows::core::{BSTR, HSTRING};
 use windows::Win32::Devices::Display::{
-    DestroyPhysicalMonitors, GetMonitorBrightness, GetNumberOfPhysicalMonitorsFromHMONITOR,
-    GetPhysicalMonitorsFromHMONITOR, SetMonitorBrightness, PHYSICAL_MONITOR,
+    DestroyPhysicalMonitors, DisplayConfigGetDeviceInfo, GetDisplayConfigBufferSizes, GetMonitorBrightness,
+    GetNumberOfPhysicalMonitorsFromHMONITOR, GetPhysicalMonitorsFromHMONITOR, QueryDisplayConfig, SetMonitorBrightness,
+    DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, DISPLAYCONFIG_DEVICE_INFO_HEADER, DISPLAYCONFIG_MODE_INFO,
+    DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EMBEDDED, DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL,
+    DISPLAYCONFIG_OUTPUT_TECHNOLOGY_UDI_EMBEDDED, DISPLAYCONFIG_PATH_INFO, DISPLAYCONFIG_SOURCE_DEVICE_NAME,
+    PHYSICAL_MONITOR, QDC_ONLY_ACTIVE_PATHS,
 };
 use windows::Win32::Graphics::Gdi::HMONITOR;
 use windows::Win32::System::Com::{
@@ -216,12 +220,81 @@ fn set_external(monitor: isize, percent: u8) -> io::Result<()> {
     Ok(())
 }
 
-/// The brightness of monitor `monitor` (its handle) and where it is set: the computer's own
-/// display when WMI has one, else the monitor over DDC/CI; `None` when neither answers.
-pub fn read(monitor: isize) -> Option<(Panel, u8)> {
-    internal()
-        .map(|p| (Panel::Internal, p))
-        .or_else(|| external(monitor).map(|p| (Panel::External(monitor), p)))
+/// Whether a display path's output is the computer's own panel (a laptop's screen).
+pub fn embedded(technology: i32) -> bool {
+    [
+        DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL,
+        DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EMBEDDED,
+        DISPLAYCONFIG_OUTPUT_TECHNOLOGY_UDI_EMBEDDED,
+    ]
+    .iter()
+    .any(|t| t.0 == technology)
+}
+
+/// The GDI name (`\\.\DISPLAY1`) of a display path's source.
+fn source_name(path: &DISPLAYCONFIG_PATH_INFO) -> Option<String> {
+    let mut name = DISPLAYCONFIG_SOURCE_DEVICE_NAME {
+        header: DISPLAYCONFIG_DEVICE_INFO_HEADER {
+            r#type: DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+            size: std::mem::size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>() as u32,
+            adapterId: path.sourceInfo.adapterId,
+            id: path.sourceInfo.id,
+        },
+        ..Default::default()
+    };
+    // SAFETY: the header heads a packet of the size it states.
+    if unsafe { DisplayConfigGetDeviceInfo(&mut name.header) } != 0 {
+        return None;
+    }
+    let end = name
+        .viewGdiDeviceName
+        .iter()
+        .position(|c| *c == 0)
+        .unwrap_or(name.viewGdiDeviceName.len());
+    Some(String::from_utf16_lossy(&name.viewGdiDeviceName[..end]))
+}
+
+/// Whether the monitor Windows names `device` (`\\.\DISPLAY1`) is the computer's own
+/// panel, whose brightness is WMI's; an external monitor's is its own, over DDC/CI.
+pub fn is_internal(device: &str) -> bool {
+    let (mut paths, mut modes) = (0u32, 0u32);
+    // SAFETY: out counts.
+    if unsafe { GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &mut paths, &mut modes) }.is_err() {
+        return false;
+    }
+    let mut path_list = vec![DISPLAYCONFIG_PATH_INFO::default(); paths as usize];
+    let mut mode_list = vec![DISPLAYCONFIG_MODE_INFO::default(); modes as usize];
+    // SAFETY: the two-call form with buffers of the sizes counted; the counts are
+    // written back with what was filled.
+    let queried = unsafe {
+        QueryDisplayConfig(
+            QDC_ONLY_ACTIVE_PATHS,
+            &mut paths,
+            path_list.as_mut_ptr(),
+            &mut modes,
+            mode_list.as_mut_ptr(),
+            None,
+        )
+    };
+    if queried.is_err() {
+        return false;
+    }
+    path_list.truncate(paths as usize);
+    path_list.iter().any(|p| {
+        embedded(p.targetInfo.outputTechnology.0) && source_name(p).is_some_and(|n| n.eq_ignore_ascii_case(device))
+    })
+}
+
+/// The brightness of monitor `monitor` (its handle; Windows names it `device`) and where
+/// it is set: the computer's own panel through WMI, any other monitor over DDC/CI (the
+/// WMI brightness is the laptop's own, never an external monitor's); `None` when it does
+/// not answer.
+pub fn read(monitor: isize, device: &str) -> Option<(Panel, u8)> {
+    if is_internal(device) {
+        internal().map(|p| (Panel::Internal, p))
+    } else {
+        external(monitor).map(|p| (Panel::External(monitor), p))
+    }
 }
 
 pub fn set(panel: Panel, percent: u8) -> io::Result<()> {
@@ -253,14 +326,27 @@ mod tests {
     #[test]
     fn the_machines_brightness_reads() {
         crate::system::com_init_mta();
-        let primary = crate::shell::monitors()
-            .into_iter()
-            .find(|m| m.primary)
-            .map(|m| m.handle);
-        if let Some(h) = primary {
-            if let Some((_, p)) = read(h) {
+        for m in crate::shell::monitors() {
+            if let Some((panel, p)) = read(m.handle, &m.device) {
                 assert!(p <= 100);
+                // The WMI brightness only for the computer's own panel.
+                assert_eq!(panel == Panel::Internal, is_internal(&m.device), "{}", m.device);
             }
         }
+    }
+
+    /// Edge cases: a laptop's panel by each of its three technologies, an external
+    /// connector, a monitor Windows does not have.
+    #[test]
+    fn only_the_computers_own_panel_is_internal() {
+        assert!(embedded(DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL.0));
+        assert!(embedded(DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EMBEDDED.0));
+        assert!(embedded(DISPLAYCONFIG_OUTPUT_TECHNOLOGY_UDI_EMBEDDED.0));
+        use windows::Win32::Devices::Display::{
+            DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EXTERNAL, DISPLAYCONFIG_OUTPUT_TECHNOLOGY_HDMI,
+        };
+        assert!(!embedded(DISPLAYCONFIG_OUTPUT_TECHNOLOGY_HDMI.0));
+        assert!(!embedded(DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EXTERNAL.0));
+        assert!(!is_internal(r"\\.\DISPLAY99"));
     }
 }

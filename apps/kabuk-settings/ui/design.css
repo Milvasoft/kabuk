@@ -1098,12 +1098,13 @@ p { margin: 0; max-width: 66ch; }
 .kpanel .kp-foot > span { display: inline-flex; align-items: center; gap: 6px; }
 .kpanel .kp-link { display: inline-flex; align-items: center; gap: 6px; color: var(--accent-s); font-size: 12px; }
 .kpanel .kp-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-.kpanel .kp-tile { display: grid; justify-items: center; align-content: start; gap: 6px; text-align: center; font: inherit; color: var(--fg-s); background: transparent; border: 1px solid var(--surf-line); border-radius: 8px; padding: 10px 6px 8px; min-width: 0; }
+.kpanel .kp-tile { display: grid; justify-items: center; align-content: center; gap: 6px; text-align: center; font: inherit; color: var(--fg-s); background: transparent; border: 1px solid var(--surf-line); border-radius: 8px; padding: 10px 6px 8px; min-width: 0; }
 .kpanel .kp-tile .i { width: 18px; height: 18px; }
 .kpanel .kp-tile.on, .kpanel .kp-tile.on b, .kpanel .kp-tile.on span { background: var(--accent-fill); color: var(--on-accent); border-color: transparent; opacity: 1; }
 .kpanel .kp-tile > span { display: grid; gap: 1px; min-width: 0; }
 .kpanel .kp-tile b { font-size: 12px; font-weight: 600; line-height: 1.2; }
 .kpanel .kp-tile > span > span { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kpanel .kp-screens { display: flex; gap: 6px; padding: 0 4px; }
 .kpanel .kp-slider { display: grid; grid-template-columns: 20px 1fr 30px; align-items: center; gap: 10px; padding: 4px; }
 .kpanel .kp-slider .track { position: relative; height: 4px; border-radius: 2px; background: var(--faint); }
 .kpanel .kp-slider .track i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background: var(--accent-s); }
