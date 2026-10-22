@@ -94,6 +94,13 @@ impl Shared {
     /// Uses the look's cursors or gives the user's back, as `appearance.cursors` says;
     /// nothing when that is already so.
     pub(super) fn apply_cursors(&mut self) {
+        // Not in the Store's Kabuk: Windows reads cursors from the real registry (D89).
+        if crate::store::store_version() {
+            if self.config().appearance.cursors != CursorChoice::Windows {
+                tracing::info!("cursors not in the Store version");
+            }
+            return;
+        }
         let size = self.config().appearance.cursor_size.base();
         let style = self.cursor_style();
         let want = match self.config().appearance.cursors {

@@ -18,6 +18,34 @@ pub fn is_packaged() -> bool {
     result != APPMODEL_ERROR_NO_PACKAGE
 }
 
+/// The package's own temporary folder as it is on disk (`…\Packages\<family>\AC\Temp`),
+/// where other programs (Explorer, for a wallpaper) can read what Kabuk writes; `None`
+/// outside a package (DECISIONS D89).
+pub fn temp_folder() -> Option<std::path::PathBuf> {
+    if !is_packaged() {
+        return None;
+    }
+    use windows::Win32::Storage::Packaging::Appx::GetCurrentPackageFamilyName;
+    let mut length = 0u32;
+    // SAFETY: the two-call form: the length, then a buffer that large.
+    unsafe {
+        let _ = GetCurrentPackageFamilyName(&mut length, None);
+        let mut buf = vec![0u16; length as usize];
+        if GetCurrentPackageFamilyName(&mut length, Some(windows::core::PWSTR(buf.as_mut_ptr()))).is_err() {
+            return None;
+        }
+        let family = String::from_utf16_lossy(&buf[..(length as usize).saturating_sub(1)]);
+        let local = std::env::var_os("LOCALAPPDATA")?;
+        Some(
+            std::path::Path::new(&local)
+                .join("Packages")
+                .join(family)
+                .join("AC")
+                .join("Temp"),
+        )
+    }
+}
+
 fn startup_task() -> std::io::Result<StartupTask> {
     StartupTask::GetAsync(&HSTRING::from(STARTUP_TASK))
         .and_then(|op| op.join())

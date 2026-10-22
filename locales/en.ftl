@@ -401,6 +401,7 @@ set-update-latest = Kabuk is up to date
 set-update-newer = Kabuk { $value } is out: download its setup and run it; it installs over this one and keeps your settings
 set-update-get = Open the release
 set-update-failed = GitHub could not be reached; try again later
+set-store-missing = Not in the Microsoft Store version: it writes to Windows' own settings, which the Store keeps apps from. The version on GitHub has it.
 set-update-store = Kabuk was installed from the Microsoft Store, which keeps it up to date
 set-cursors = Mouse cursors
 set-cursors-h = Kabuk's cursors follow the theme or your pick; yours come back when Kabuk exits
@@ -522,11 +523,11 @@ store-listing-description =
     Game mode steps aside when a game is in full screen. If anything ever goes wrong, Ctrl+Alt+Shift+End brings back every window and the Windows taskbar at once.
 
     Kabuk is free and open source (Apache 2.0). It collects nothing about you.
-store-listing-feature-1 = A bar on every monitor: workspaces, apps, tray, notifications, media, clock
+store-listing-feature-1 = A bar on every monitor: workspaces, apps, tray, network, battery, notifications, calendar, media, quick settings
 store-listing-feature-2 = Windows that tile themselves, or float, on nine workspaces across your monitors
 store-listing-feature-3 = A launcher for apps, windows, files and bookmarks, and an app grid
-store-listing-feature-4 = Ten looks, dark and light: bar, colours, cursors and wallpaper together
-store-listing-feature-5 = Animated wallpapers and screen savers made for OLED screens
+store-listing-feature-4 = Ten looks, dark and light: bar, panels and wallpaper together
+store-listing-feature-5 = Animated wallpapers made for OLED screens
 store-listing-feature-6 = The genie: windows pour into their icon as they minimise
 store-listing-feature-7 = Game mode that steps aside for full-screen games
 store-listing-feature-8 = Ctrl+Alt+Shift+End brings Windows back at any moment

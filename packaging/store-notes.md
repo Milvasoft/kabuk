@@ -6,9 +6,7 @@ What Partner Center asks for that is not the listing itself (DECISIONS D84). The
 
 **runFullTrust.** Kabuk is a desktop shell written in Rust with the Win32 API: a bar on every monitor, a tiling window manager, a launcher and a settings app. It must run as a full-trust desktop program to arrange other programs' windows, show its own bar in place of the Windows taskbar and host the system tray.
 
-**unvirtualizedResources** (HKCU and AppData write virtualization disabled; Partner Center takes at most 500 characters):
-
-> Kabuk's looks set Windows' own cursors, screen saver, wallpaper, light/dark mode and accent colour (HKCU Control Panel\Cursors and Desktop, Themes\Personalize, Explorer\Accent, DWM). Windows reads them from the real HKCU, and the files they point to (cursors, screen saver, wallpapers Kabuk draws) from the real AppData; virtualized, they do nothing. Every value is recorded first and written back on exit, by the watchdog and by kabuk --restore (Ctrl+Alt+Shift+End).
+**unvirtualizedResources** was asked for at first and refused at certification on 2026-10-22 (policy 10.6.3). The package no longer declares it (DECISIONS D89): its HKCU and AppData writes stay the package's own, so the Store's Kabuk does not offer the look's cursors, its screen saver or Windows' colours (Settings says they are in the GitHub version), and writes its wallpapers to the package's own temporary folder, where Explorer reads them.
 
 ## Notes for certification
 

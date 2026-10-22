@@ -1960,6 +1960,45 @@ fn the_network_indicator_follows_its_setting_and_opens_its_panel() {
     assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
 }
 
+/// DECISIONS D89, the Store's refusal of `unvirtualizedResources`: the Store's Kabuk
+/// writes nothing of the look's cursors, screen saver or colours to Windows (its package
+/// would keep the writes to itself), whatever the configuration asks, and says so.
+#[test]
+fn the_store_version_leaves_windows_settings_alone() {
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(
+        sandbox.config_file(),
+        "schema = 1\n[appearance]\ncursors = \"kabuk\"\n[system_theme]\ncolors = true\n[screensaver]\nkind = \"circuit\"\n",
+    )
+    .unwrap();
+    // SAFETY of the environment: the tests run one at a time; it is taken away below.
+    std::env::set_var(kabuk::store::PRETEND_ENV, "1");
+    let shell = sandbox.shell_with_bar(&[]);
+    std::env::remove_var(kabuk::store::PRETEND_ENV);
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    for line in [
+        "cursors not in the Store version",
+        "screen saver not in the Store version",
+        "Windows' colours not in the Store version",
+    ] {
+        assert!(
+            wait_until(SETTLE, || sandbox.log_lines(line) >= 1).is_some(),
+            "{line} not said"
+        );
+    }
+    for line in [
+        "cursor set applied",
+        "screen saver set",
+        "Windows' colours follow the look",
+    ] {
+        assert_eq!(sandbox.log_lines(line), 0, "{line}");
+    }
+    drop(shell);
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
+}
+
 /// DECISIONS D88: the system indicators' panels (calendar and notifications, quick
 /// settings, privacy, keyboard language) each open under the bar and close again, and one
 /// opening closes the one open, as the volume panel and the power menu do.

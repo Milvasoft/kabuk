@@ -159,11 +159,11 @@
       <div class="set-grp">${rowFor("appearance.mode", t("modeLbl"), modeHint(), segFor("appearance.mode", t("modeLbl"), [["dark", t("dark")], ["light", t("light")], ["system", t("modeSystem")], ["time", t("modeSun")]]))}
       ${rowFor("appearance.text_size", t("textSize"), "", segFor("appearance.text_size", t("textSize"), [["small", t("small")], ["normal", t("normal")], ["large", t("large")]]))}
       ${rowFor("appearance.animations", t("setAnimations"), t("setAnimationsH"), segFor("appearance.animations", t("setAnimations"), [["full", t("setAnimationsFull")], ["reduced", t("setAnimationsReduced")], ["off", t("setAnimationsOff")]]))}
-      ${rowFor("appearance.cursors", t("setCursors"), t("setCursorsH"), segFor("appearance.cursors", t("setCursors"), [["windows", t("setCursorsWindows")], ["kabuk", t("setCursorsKabuk")], ["custom", t("setCursorsCustom")]]))}
-      ${cfg().appearance.cursors === "windows" ? "" : rowFor("appearance.cursor_size", t("setCursorSize"), t("setCursorSizeH"), segFor("appearance.cursor_size", t("setCursorSize"), [["normal", t("cursorSizeNormal")], ["large", t("cursorSizeLarge")], ["huge", t("cursorSizeHuge")]]))}</div>
-      ${cfg().appearance.cursors === "custom" ? cursorPicker() : ""}
+      ${S.store ? row(t("setCursors"), t("setStoreMissing"), "") : rowFor("appearance.cursors", t("setCursors"), t("setCursorsH"), segFor("appearance.cursors", t("setCursors"), [["windows", t("setCursorsWindows")], ["kabuk", t("setCursorsKabuk")], ["custom", t("setCursorsCustom")]]))}
+      ${S.store || cfg().appearance.cursors === "windows" ? "" : rowFor("appearance.cursor_size", t("setCursorSize"), t("setCursorSizeH"), segFor("appearance.cursor_size", t("setCursorSize"), [["normal", t("cursorSizeNormal")], ["large", t("cursorSizeLarge")], ["huge", t("cursorSizeHuge")]]))}</div>
+      ${!S.store && cfg().appearance.cursors === "custom" ? cursorPicker() : ""}
       <div class="set-grp"><span class="gl">${t("setSysTheme")}</span>
-      ${tgl("system_theme.colors", t("setSysColors"), cfg().appearance.mode === "system" ? t("setSysColorsFollow") : t("setSysColorsH"))}</div>
+      ${S.store ? row(t("setSysColors"), t("setStoreMissing"), "") : tgl("system_theme.colors", t("setSysColors"), cfg().appearance.mode === "system" ? t("setSysColorsFollow") : t("setSysColorsH"))}</div>
       ${S.mode === "light" ? `<div class="note">${t("lightNote")}</div>` : ""}
       ${themeFileGroup()}`;
   }
@@ -340,6 +340,8 @@
     const saverCards = (cat) => galleryCards(designs(cat), (k) => kind === "gallery" && cfg().screensaver.gallery === k, (d) => `data-saver-gal="${escapeHtml(d.key)}"`, hint);
     const gallery = [["saver-live", "galSaversLive"], ["saver-still", "galSaversStill"], ["wall-live", "galWallsAsSavers"]]
       .map(([cat, title]) => `<div class="set-grp"><span class="gl">${t(title)}</span><div class="savers">${saverCards(cat)}</div></div>`).join("");
+    // The Store's Kabuk cannot set Windows' screen saver (D89).
+    if (S.store) return head(t("navSaver"), t("saverDesc")) + `<div class="note">${escapeHtml(t("setStoreMissing"))}</div>`;
     return head(t("navSaver"), t("saverDesc")) + `
       <div class="set-grp"><span class="gl">${t("saverPick")}</span><div class="savers">${savers.map(([k, a, n, h]) => `<button class="saver${kind === k ? " on" : ""}" type="button" data-set="screensaver.kind" data-val='"${k}"' aria-pressed="${kind === k}"><span class="sp">${art[a]}</span><span class="sn">${n}<span>${h}</span></span></button>`).join("")}</div></div>
       ${gallery}

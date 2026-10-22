@@ -400,6 +400,7 @@ set-update-latest = Kabuk güncel
 set-update-newer = Kabuk { $value } çıktı: kurulumunu indirip çalıştır; bu sürümün üzerine kurulur, ayarların kalır
 set-update-get = Sürüm sayfasını aç
 set-update-failed = GitHub'a ulaşılamadı; sonra yeniden dene
+set-store-missing = Microsoft Store sürümünde yok: Windows'un kendi ayarlarına yazıyor, Store buna izin vermiyor. GitHub'daki sürümde var.
 set-update-store = Kabuk Microsoft Store'dan kuruldu; onu Store güncel tutar
 set-cursors = Fare imleçleri
 set-cursors-h = Kabuk'un imleçleri temaya ya da seçimine uyar; Kabuk kapanınca seninkiler geri gelir
@@ -521,11 +522,11 @@ store-listing-description =
     Oyun modu, tam ekran bir oyun açıkken kenara çekilir. Bir şey ters giderse Ctrl+Alt+Shift+End her pencereyi ve Windows görev çubuğunu bir anda geri getirir.
 
     Kabuk ücretsiz ve açık kaynaktır (Apache 2.0). Senin hakkında hiçbir şey toplamaz.
-store-listing-feature-1 = Her monitörde bir bar: çalışma alanları, uygulamalar, tepsi, bildirimler, medya, saat
+store-listing-feature-1 = Her monitörde bir bar: çalışma alanları, uygulamalar, tepsi, ağ, pil, bildirimler, takvim, medya, hızlı ayarlar
 store-listing-feature-2 = Monitörlerine yayılan dokuz çalışma alanında kendiliğinden döşenen ya da yüzen pencereler
 store-listing-feature-3 = Uygulamalar, pencereler, dosyalar ve yer imleri için bir başlatıcı ve uygulama ızgarası
-store-listing-feature-4 = Koyu ve açık on görünüm: bar, renkler, imleçler ve duvar kâğıdı birlikte
-store-listing-feature-5 = OLED ekranlar için yapılmış hareketli duvar kâğıtları ve ekran koruyucular
+store-listing-feature-4 = Koyu ve açık on görünüm: bar, paneller ve duvar kâğıdı birlikte
+store-listing-feature-5 = OLED ekranlar için yapılmış hareketli duvar kâğıtları
 store-listing-feature-6 = Cin efekti: pencereler küçülürken simgelerine akar
 store-listing-feature-7 = Tam ekran oyunlar için kenara çekilen oyun modu
 store-listing-feature-8 = Ctrl+Alt+Shift+End Windows'u her an geri getirir

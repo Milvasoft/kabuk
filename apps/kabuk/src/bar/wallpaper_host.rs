@@ -89,7 +89,10 @@ impl Shared {
     /// made when missing.
     fn pictures_folder(&self) -> Option<PathBuf> {
         let state = wm::lock(&self.state).path().parent()?.to_path_buf();
-        let folder = kabuk_core::wallpaper::pictures_folder(&state, &std::env::temp_dir());
+        // In the Store's package its own temporary folder, as it is on disk: the one under
+        // AppData would be the package's alone, out of Explorer's sight (D89).
+        let temp = kabuk_win::package::temp_folder().unwrap_or_else(std::env::temp_dir);
+        let folder = kabuk_core::wallpaper::pictures_folder(&state, &temp);
         if let Err(e) = std::fs::create_dir_all(&folder) {
             tracing::error!(error = %e, folder = %folder.display(), "wallpaper folder not made");
             return None;

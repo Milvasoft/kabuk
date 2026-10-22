@@ -79,6 +79,12 @@ impl Shared {
     /// Sets Windows' screen saver as `[screensaver]` says (the user's settings recorded
     /// first); nothing when that is already so.
     pub(super) fn apply_saver(&mut self) {
+        // Not in the Store's Kabuk: Windows reads its screen saver from the real registry
+        // (D89).
+        if crate::store::store_version() {
+            tracing::info!("screen saver not in the Store version");
+            return;
+        }
         let s = self.config().screensaver.clone();
         if self.saver.applied == Some((s.kind, s.wait_minutes)) {
             return;

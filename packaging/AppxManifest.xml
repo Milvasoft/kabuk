@@ -11,9 +11,8 @@
   xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
   xmlns:uap11="http://schemas.microsoft.com/appx/manifest/uap/windows10/11"
   xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
-  xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-  IgnorableNamespaces="uap uap3 uap11 desktop desktop6 rescap">
+  IgnorableNamespaces="uap uap3 uap11 desktop rescap">
 
   <Identity
     Name="Milvasoft.Kabuk"
@@ -25,10 +24,10 @@
     <DisplayName>ms-resource:AppName</DisplayName>
     <PublisherDisplayName>Milvasoft</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
-    <!-- Kabuk's cursors, screen saver, wallpaper and colours must reach Windows and be put
-         back: its HKCU and AppData writes are not kept to the package. -->
-    <desktop6:RegistryWriteVirtualization>disabled</desktop6:RegistryWriteVirtualization>
-    <desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>
+    <!-- Its HKCU and AppData writes are the package's own (the Store refused
+         unvirtualizedResources): the look's cursors, screen saver and Windows' colours are
+         not offered, and wallpapers are written to the package's own temporary folder
+         (DECISIONS D89). -->
   </Properties>
 
   <Dependencies>
@@ -74,7 +73,6 @@
 
   <Capabilities>
     <rescap:Capability Name="runFullTrust" />
-    <rescap:Capability Name="unvirtualizedResources" />
     <!-- The genie draws a window's picture with no capture border. -->
     <uap11:Capability Name="graphicsCaptureProgrammatic" />
     <uap11:Capability Name="graphicsCaptureWithoutBorder" />

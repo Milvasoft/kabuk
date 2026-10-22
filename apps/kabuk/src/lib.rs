@@ -12,6 +12,7 @@ pub mod notify;
 pub mod overview;
 pub mod restore_cmd;
 pub mod run;
+pub mod store;
 pub mod tabs;
 pub mod text;
 pub mod wm;

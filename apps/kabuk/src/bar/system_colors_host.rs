@@ -27,6 +27,13 @@ impl Shared {
     /// Writes Windows' colours as the layer wants them, or gives Windows' own back;
     /// nothing when that is already so.
     pub(super) fn apply_system_colors(&mut self) {
+        // Not in the Store's Kabuk: Windows reads its colours from the real registry (D89).
+        if crate::store::store_version() {
+            if self.config().system_theme.colors {
+                tracing::info!("Windows' colours not in the Store version");
+            }
+            return;
+        }
         let want = self.wanted_colors();
         if want == self.colors_applied {
             return;
