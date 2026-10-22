@@ -33,7 +33,9 @@ pub const MARK: &str = "kabuk-mark";
 pub const ENTRIES: [(&str, &str, Action); 6] = [
     (MARK, "launcher-settings", Action::Settings),
     ("lock", "i-lock", Action::Lock),
-    ("power", "i-sleep", Action::Sleep),
+    // The moon and a short word, not the power icon of restart and shut down (found by
+    // the user: sleep was taken for missing).
+    ("moon", "power-sleep", Action::Sleep),
     ("app", "power-sign-out", Action::SignOut),
     ("power", "launcher-restart", Action::Restart),
     ("power", "launcher-shutdown", Action::ShutDown),

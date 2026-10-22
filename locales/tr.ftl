@@ -86,6 +86,7 @@ launcher-restart = Yeniden başlat
 launcher-shutdown = Bilgisayarı kapat
 launcher-settings = Kabuk ayarları
 power-sign-out = Oturumu kapat
+power-sleep = Uyku
 vol-mixer = Ses karıştırıcısını aç
 vol-apps = Ses düzeyi karıştırıcı
 vol-settings = Ses ayarları
