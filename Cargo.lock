@@ -325,7 +325,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "kabuk"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "embed-manifest",
  "embed-resource",
@@ -346,7 +346,7 @@ dependencies = [
 
 [[package]]
 name = "kabuk-core"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "insta",
  "kabuk-i18n",
@@ -366,7 +366,7 @@ dependencies = [
 
 [[package]]
 name = "kabuk-i18n"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "fluent-bundle",
  "fluent-syntax",
@@ -376,14 +376,14 @@ dependencies = [
 
 [[package]]
 name = "kabuk-layout"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "proptest",
 ]
 
 [[package]]
 name = "kabuk-saver"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "embed-manifest",
  "embed-resource",
@@ -399,18 +399,18 @@ dependencies = [
 
 [[package]]
 name = "kabuk-scenes"
-version = "1.0.6"
+version = "1.0.7"
 
 [[package]]
 name = "kabuk-search"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "proptest",
 ]
 
 [[package]]
 name = "kabuk-settings"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "embed-manifest",
  "embed-resource",
@@ -427,7 +427,7 @@ dependencies = [
 
 [[package]]
 name = "kabuk-setup"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "embed-manifest",
  "embed-resource",
@@ -438,7 +438,7 @@ dependencies = [
 
 [[package]]
 name = "kabuk-testapp"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "embed-manifest",
  "windows",
@@ -446,7 +446,7 @@ dependencies = [
 
 [[package]]
 name = "kabuk-theme"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "proptest",
  "serde",
@@ -456,7 +456,7 @@ dependencies = [
 
 [[package]]
 name = "kabuk-ui"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "kabuk-core",
  "kabuk-scenes",
@@ -471,7 +471,7 @@ dependencies = [
 
 [[package]]
 name = "kabuk-wallgen"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "kabuk-core",
  "serde",
@@ -484,7 +484,7 @@ dependencies = [
 
 [[package]]
 name = "kabuk-watchdog"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "embed-manifest",
  "embed-resource",
@@ -496,7 +496,7 @@ dependencies = [
 
 [[package]]
 name = "kabuk-win"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "kabuk-core",
  "kabuk-i18n",
