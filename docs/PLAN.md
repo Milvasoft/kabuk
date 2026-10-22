@@ -415,7 +415,7 @@ Kabuk as a free MSIX on the Microsoft Store (DECISIONS D84), beside the GitHub s
 **Done criteria**
 - [x] `tools/check.ps1` clean; the packaged/unpackaged switches unit-tested. *`package` tests; the settings bridge says `store: false` outside a package.*
 - [x] The package installs, runs and uninstalls in the VM, every system value back after `--restore` and after removal. *`tools/vm/try-msix.ps1` (2026-10-17): registered, started from the package, its state and screen saver seen from outside it, `--install` refused, the startup task off and on, `--restore` put the screen saver back exactly, removal left no package and no alias.*
-- [ ] Partner Center accepts the package (no validation error) and the submission passes certification. *Validated and submitted for certification on 2026-10-18 (listing tr/en, screenshots, age rating 3+, publishing held until the user selects Publish now); certification pending.*
+- [ ] Partner Center accepts the package (no validation error) and the submission passes certification. *Validated and submitted for certification on 2026-10-18 (listing tr/en, screenshots, age rating 3+, publishing held until the user selects Publish now). Refused on 2026-10-22 for `unvirtualizedResources` (policy 10.6.3); resubmitted the same day as 1.0.6 without it (DECISIONS D89), listing updated in both languages; certification pending.*
 
 ---
 
