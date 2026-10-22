@@ -22,9 +22,18 @@ $PipeName = 'kabuk-vm-com1'
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 Set-Location $root
 
+# Once the VM has restarted, the COM pipe can carry nothing until Hyper-V makes it again
+# (seen after the VM's own restarts): it is made again while the agent stays silent.
+$PipeRenewSeconds = 60
+
 function Connect-Agent([int]$timeoutSeconds) {
     $deadline = (Get-Date).AddSeconds($timeoutSeconds)
+    $renew = (Get-Date).AddSeconds($PipeRenewSeconds)
     while ((Get-Date) -lt $deadline) {
+        if ((Get-Date) -gt $renew -and (Get-VM -Name $Name).State -eq 'Running') {
+            Set-VMComPort -VMName $Name -Number 1 -Path "\\.\pipe\$PipeName" -DebuggerMode Off
+            $renew = (Get-Date).AddSeconds($PipeRenewSeconds)
+        }
         try {
             $pipe = New-Object System.IO.Pipes.NamedPipeClientStream('.', $PipeName, [System.IO.Pipes.PipeDirection]::InOut)
             $pipe.Connect(5000)
