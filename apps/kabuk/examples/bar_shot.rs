@@ -7,7 +7,7 @@
 //! with `--tooltip <text>` a tray tooltip with that text (a literal `\n` starts a new line);
 //! with `--apps <n>` and `--tray <n> --tray-more <n>` placeholder app and tray icons (squares);
 //! with `--volume-panel <percent>` (or `menu`) the volume panel; with `--power-menu` the
-//! power menu.
+//! power menu; with `--quick-panel` the quick settings panel.
 
 use kabuk::bar::geometry::{self, BarSize};
 use kabuk::bar::style::Style;
@@ -140,7 +140,21 @@ fn main() {
         let i18n = kabuk_i18n::I18n::new(kabuk_i18n::Lang::Tr);
         kabuk::bar::power_menu::view(&i18n, 1.0, &kabuk::bar::tooltip::TIP, 1)
     });
-    if let Some(node) = notice.or(volume).or(panel).or(power) {
+    // The quick settings panel (`--quick-panel`), as on a desktop without a battery.
+    let quick = std::env::args().any(|a| a == "--quick-panel").then(|| {
+        let s = kabuk::notify::style::NotifyStyle::of(look);
+        let i18n = kabuk_i18n::I18n::new(kabuk_i18n::Lang::Tr);
+        let q = kabuk::bar::quick_panel::Quick {
+            wifi: Some(true),
+            ssid: Some("milva-5g".into()),
+            bluetooth: Some(false),
+            airplane: Some(false),
+            volume: Some((40, false)),
+            ..Default::default()
+        };
+        kabuk::bar::quick_panel::view(&q, &i18n, 1.0, &kabuk::bar::tooltip::TIP, &s)
+    });
+    if let Some(node) = notice.or(volume).or(panel).or(power).or(quick) {
         let l = kabuk_ui::node::layout(&node, kabuk_ui::geom::Point::default(), &gpu.text);
         let w = (l.size.w * scale.0).ceil() as u32;
         let hgt = (l.size.h * scale.0).ceil() as u32;

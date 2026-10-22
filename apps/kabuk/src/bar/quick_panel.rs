@@ -215,9 +215,9 @@ fn tile(q: &Quick, t: Tile, i18n: &I18n, size: f32, width: f32) -> Node {
     if !sub.is_empty() {
         lines.push(words(sub, dim, 400, size * SUB_SCALE, text_w));
     }
-    Node::column(lines)
-        .gap(4.0)
-        .align(Align::Center)
+    // A layer centres its content both ways: one line or two, a tile's content sits in
+    // its middle (found by the user: the ones without a second line hung at the top).
+    Node::layer(vec![Node::column(lines).gap(4.0).align(Align::Center)])
         .size(Some(width), Some(TILE_H))
         .paint(Paint {
             fill: if lit { Role::AccentFill } else { Role::Surface },
@@ -412,6 +412,54 @@ mod tests {
         );
         assert_eq!(q.click(SETTINGS), Action::Open(SETTINGS_PAGE));
         assert_eq!(q.click(99), Action::None);
+    }
+
+    /// Found by the user with a photo: a tile without a second line had its icon and
+    /// name at its top, under its neighbours' and over empty space. Every tile's content
+    /// sits in its middle.
+    #[test]
+    fn a_tiles_content_sits_in_its_middle() {
+        let i18n = I18n::new(Lang::Tr);
+        let l = layout(
+            &view(&full(), &i18n, 1.0, &TIP, &NotifyStyle::of(Look::Ada)),
+            Point::default(),
+            &Fake,
+        );
+        let mid = |r: &Rect| Point {
+            x: r.x + r.w / 2.0,
+            y: r.y + r.h / 2.0,
+        };
+        let tile_of = |value: u32| {
+            l.hits
+                .iter()
+                .find(|(_, h)| h.module == HIT && h.value == value)
+                .unwrap()
+                .0
+        };
+        let icon_in = |r: Rect| {
+            l.draws
+                .iter()
+                .find_map(|d| match d {
+                    Draw::Icon { rect, .. } if r.contains(mid(rect)) => Some(*rect),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let last_text_in = |r: Rect| {
+            l.draws
+                .iter()
+                .rev()
+                .find_map(|d| match d {
+                    Draw::Text { rect, .. } if r.contains(mid(rect)) => Some(*rect),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        for tile in [Tile::Wifi, Tile::NightLight, Tile::Project] {
+            let r = tile_of(tile.value());
+            let (top, bottom) = (icon_in(r).y - r.y, r.bottom() - last_text_in(r).bottom());
+            assert!((top - bottom).abs() < 0.5, "{tile:?}: {top} above, {bottom} below");
+        }
     }
 
     #[test]
