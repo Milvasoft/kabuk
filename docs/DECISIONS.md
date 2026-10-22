@@ -8,6 +8,9 @@ No open decisions (the user decided D39, D43, D44 and the still pictures' drift 
 
 ## Decided and proposed
 
+### D90 · Rıhtım's auto-hiding dock comes over the windows — Decided by the user (2026-10-22)
+Asked for by the user with a video of macOS: there the dock slides up over the window, which keeps its size; in Rıhtım the dock pushed the windows up as it came in (D73) and let them down as it left. Rıhtım's auto-hiding dock now reserves nothing while shown and tells the window manager of no coming work area: it comes in over the windows, as a floating dock does. The auto-hiding bars keep D73's push (the user asked for it when the top bar lay over the windows' titles). A dock that does not auto-hide keeps its strip as before.
+
 ### D89 · The Store's Kabuk without unvirtualizedResources — Decided by the user (2026-10-22)
 Certification refused the restricted capability `unvirtualizedResources` (policy 10.6.3: the justification was not enough). Asked whether to argue again or to drop it, the user chose to drop it. Without it an MSIX package's writes to `HKCU` and `AppData` are kept to the package, so whatever reaches Windows only through them cannot work from the Store: the look's cursors (`Control Panel\Cursors`), Windows' screen saver (`Control Panel\Desktop`) and Windows' colours following the look (`Themes\Personalize`, `Explorer\Accent`, `DWM`). The Store's Kabuk (`kabuk::store::store_version`) writes none of them, logs that, and Settings shows those rows with a note that the GitHub version has them. Wallpapers are written to the package's own temporary folder as it is on disk (`%LOCALAPPDATA%\Packages\<family>\AC\Temp`), which Explorer can read. The GitHub version keeps everything. The Store listing no longer names cursors or screen savers. Alternative: a longer justification and a second review, which the user did not want.
 

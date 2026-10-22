@@ -225,6 +225,12 @@ mod timer {
 /// is stepped.
 const AUTOHIDE_PEEK: f32 = 2.0;
 
+/// Whether auto-hiding `who` pushes the windows while shown (D73): the bars do; Rıhtım's
+/// dock comes over them as macOS's dock does (asked for by the user with a video; D90).
+fn pushes(who: Peeker) -> bool {
+    !matches!(who, Peeker::Dock)
+}
+
 /// `window` told of drags over it (D86); a window that cannot be (no OLE) works as before.
 fn drag_watch(window: kabuk_win::window::Hwnd) -> Option<kabuk_win::droptarget::DragWatch> {
     kabuk_win::droptarget::DragWatch::register(window, MSG_DRAG)
@@ -397,6 +403,9 @@ const MSG_LANGUAGE_KEYS: u32 = msg::APP + 62;
 const MSG_PRIVACY: u32 = msg::APP + 64;
 /// Integration tests: a click on the show-desktop corner (D88).
 pub const MSG_TEST_SHOW_DESKTOP: u32 = msg::APP + 65;
+/// Integration tests: an auto-hiding bar (`wparam` its place plus 1) or the dock (0)
+/// comes in (`lparam` 1) or slides off (0), as the mouse would make it.
+pub const MSG_TEST_PEEK: u32 = msg::APP + 70;
 /// The notices for the calendar panel were read (D88).
 const MSG_NOTICES_READ: u32 = msg::APP + 67;
 /// The quick settings' slow parts were read (D88).
@@ -1553,6 +1562,15 @@ impl Shared {
             }
             MSG_PRIVACY => {
                 self.privacy_changed();
+                Some(0)
+            }
+            #[cfg(feature = "integration")]
+            MSG_TEST_PEEK => {
+                let who = match m.wparam {
+                    0 => Peeker::Dock,
+                    i => Peeker::Bar(i - 1),
+                };
+                self.peek(who, m.lparam == 1);
                 Some(0)
             }
             #[cfg(feature = "integration")]
@@ -3410,6 +3428,9 @@ impl Shared {
     /// they slid "takıla takıla"). Without a window manager, or without full motion, it
     /// is at once.
     fn announce(&mut self, who: Peeker, on: bool) {
+        if !pushes(who) {
+            return;
+        }
         let Some(link) = self.wm.clone() else {
             self.reserve(who, on);
             return;
@@ -3456,6 +3477,7 @@ impl Shared {
             .map(Peeker::Bar)
             .chain(std::iter::once(Peeker::Dock));
         let due: Vec<(Peeker, bool)> = peekers
+            .filter(|who| pushes(*who))
             .filter_map(|who| self.peek_of(who).map(|p| (who, p.to > 0.0)))
             .collect();
         for (who, on) in due {
@@ -3463,7 +3485,7 @@ impl Shared {
         }
     }
 
-    /// While auto-hiding `who` is shown it reserves its strip, as a bar that keeps its
+    /// While auto-hiding `who` is shown (an auto-hiding bar, [`pushes`]) it reserves its strip, as a bar that keeps its
     /// place does, so the windows make room instead of lying under it (asked for by the
     /// user: it came over the windows' tops; DECISIONS D73); sliding off it gives the room
     /// back. Nothing is reserved when the work area could not be recorded first.

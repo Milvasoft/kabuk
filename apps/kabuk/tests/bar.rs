@@ -303,8 +303,10 @@ fn an_auto_hiding_bar_slides_a_maximised_window_out_of_its_way() {
 
 /// DECISIONS D70, found by the user: with auto-hide, Rıhtım's dock did not hide. It
 /// reserves nothing, waits off its edge with a sliver at the monitor's edge, comes in
-/// when the mouse rests there and slides off once it leaves. D73: shown, it pushes the
-/// windows up, and gives the room back. Run in the test machine: the mouse is moved.
+/// when the mouse rests there and slides off once it leaves. D90 (asked for by the user
+/// with a video of macOS's dock): shown, it comes over the windows as macOS's does,
+/// pushing nothing (D73's push stays the top bar's). Run in the test machine: the mouse
+/// is moved.
 #[test]
 fn rihtims_dock_auto_hides_with_the_bar() {
     let before = work_areas();
@@ -353,12 +355,10 @@ fn rihtims_dock_auto_hides_with_the_bar() {
         rect(),
         sandbox.last_log_line(&["auto-hiding"]).unwrap_or_default()
     );
-    let full = before.iter().find(|(d, _)| *d == primary.device).unwrap().1;
-    assert!(
-        wait_until(SETTLE, || primary_work_area().bottom < full.bottom).is_some(),
-        "the shown dock did not push the windows: {:?}",
-        primary_work_area()
-    );
+    // Over the windows: the work area stays as it was all the while.
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(work_areas(), before, "the shown dock pushed the windows");
+    assert_eq!(sandbox.log_lines("auto-hiding dock makes room"), 0);
     // The mouse resting at the edge, under the floating dock, keeps it (found by the
     // user: it came and went again and again).
     std::thread::sleep(Duration::from_millis(1500));
@@ -374,13 +374,84 @@ fn rihtims_dock_auto_hides_with_the_bar() {
         "not hidden again: {:?}",
         rect()
     );
-    assert!(
-        wait_until(SETTLE, || work_areas() == before).is_some(),
-        "the room was not given back: {:?}",
-        work_areas()
-    );
+    assert_eq!(work_areas(), before);
     assert_eq!(sandbox.restore().0, 0);
     assert_eq!(work_areas(), before);
+}
+
+/// DECISIONS D90 (asked for by the user with a video of macOS's dock): Rıhtım's
+/// auto-hiding dock comes in over the windows and pushes nothing, while the auto-hiding
+/// top bar still makes room as it comes in (D73). Shown by test messages, so the mouse
+/// is not moved.
+#[test]
+fn rihtims_dock_comes_over_the_windows_and_the_bar_pushes_them() {
+    use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_PEEK};
+    use kabuk_win::msgloop::{post_message, Msg};
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(
+        sandbox.config_file(),
+        "schema = 1\n[appearance]\nlook = \"rihtim\"\n[bar]\nautohide = true\n",
+    )
+    .unwrap();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("dock placed") == 1).is_some());
+    let pid = sandbox.state().kabuk_pid.unwrap();
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
+    let primary = kabuk_win::shell::monitors().into_iter().find(|m| m.primary).unwrap();
+    let main_bar = kabuk_win::window::windows_of_class("Kabuk.Bar")
+        .into_iter()
+        .filter(|h| h.pid() == Some(pid))
+        .position(|h| {
+            h.window_rect().is_some_and(|r| {
+                let cx = (r.left + r.right) / 2;
+                primary.rect.left <= cx && cx < primary.rect.right
+            })
+        });
+    let peek = |which: usize, show: bool| {
+        post_message(
+            control,
+            Msg {
+                id: MSG_TEST_PEEK,
+                wparam: which,
+                lparam: isize::from(show),
+            },
+        )
+        .unwrap();
+    };
+    let dock = primary_window_of("Kabuk.Dock", pid);
+    let bottom = primary.rect.bottom;
+    assert!(wait_until(SETTLE, || dock.window_rect().unwrap().bottom > bottom).is_some());
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(work_areas(), before, "hidden, something reserved");
+
+    peek(0, true);
+    assert!(
+        wait_until(SETTLE, || dock.window_rect().unwrap().bottom <= bottom).is_some(),
+        "the dock did not come in: {:?}",
+        dock.window_rect()
+    );
+    std::thread::sleep(Duration::from_millis(800));
+    assert_eq!(work_areas(), before, "the shown dock pushed the windows");
+    assert_eq!(sandbox.log_lines("auto-hiding dock makes room"), 0);
+    peek(0, false);
+
+    // The bar (its place among the bars Windows lists, as the shell keeps them) still
+    // makes room as it comes in.
+    let full = before.iter().find(|(d, _)| *d == primary.device).unwrap().1;
+    for i in 0..kabuk_win::shell::monitors().len() {
+        peek(i + 1, true);
+    }
+    assert!(
+        wait_until(SETTLE, || primary_work_area().top > full.top).is_some(),
+        "the shown bar did not push the windows: {:?} (bar {main_bar:?})",
+        primary_work_area()
+    );
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
 }
 
 #[test]
