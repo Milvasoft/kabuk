@@ -39,7 +39,7 @@ const TRAIL: f32 = 120.0;
 /// A small mark at a row's end (the lock, the chevron).
 const MARK: f32 = 14.0;
 /// The switch: its track and knob.
-const SWITCH: (f32, f32) = (36.0, 20.0);
+pub(super) const SWITCH: (f32, f32) = (36.0, 20.0);
 const KNOB: f32 = 14.0;
 /// A button's height and side padding; the key field's height.
 const BUTTON_H: f32 = 28.0;
@@ -261,8 +261,9 @@ fn ends(left: Node, right: Node, right_w: f32) -> Node {
     .align(Align::Center)
 }
 
-/// The switch: the accent's track with the knob at its end when on.
-fn switch(on: bool) -> Node {
+/// The switch: the accent's track with the knob at its end when on; part `value` of
+/// `module` (the quick settings' sync switch is one too, D91).
+pub(super) fn switch(on: bool, module: &'static str, value: u32) -> Node {
     let (w, h) = SWITCH;
     let track = Node::spacer(w, h).paint(Paint {
         fill: if on { Role::AccentFill } else { Role::Surface },
@@ -277,9 +278,7 @@ fn switch(on: bool) -> Node {
             radius: KNOB / 2.0,
         })
         .offset(if on { travel } else { -travel }, 0.0);
-    Node::layer(vec![track, knob])
-        .size(Some(w), Some(h))
-        .hit(HIT, WIFI_SWITCH)
+    Node::layer(vec![track, knob]).size(Some(w), Some(h)).hit(module, value)
 }
 
 /// A button: its words in the middle of an outlined (or, `primary`, filled) box.
@@ -372,7 +371,7 @@ pub fn view(p: &Panel, i18n: &I18n, text_scale: f32, s: &TipStyle) -> Node {
         rows.push(
             ends(
                 words(i18n.tr("net-wifi"), Role::Fg, 600, size, WIDTH - SWITCH.0),
-                switch(on),
+                switch(on, HIT, WIFI_SWITCH),
                 SWITCH.0,
             )
             .size(None, Some(ROW * 0.75)),

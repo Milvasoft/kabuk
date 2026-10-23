@@ -16,11 +16,12 @@ use crate::notify::style::{NotifyStyle, Track};
 
 /// Hit-test id of the panel's parts: a tile ([`Tile`] as its value), a level, the link.
 pub const HIT: &str = "quick-panel";
-pub const BRIGHTNESS: u32 = 20;
 pub const VOLUME: u32 = 21;
 pub const SETTINGS: u32 = 30;
 pub const SETTINGS_PAGE: &str = "ms-settings:";
-/// The monitor chooser's first button; monitor `screens[i]` is `SCREEN + i` (D91).
+/// The switch that keeps every monitor's brightness together (D91).
+pub const SYNC: u32 = 31;
+/// The first brightness level; monitor `screens[i]`'s is `SCREEN + i` (D91).
 pub const SCREEN: u32 = 40;
 
 /// The content width (DIPs), as the other panels'; tiles in three columns.
@@ -35,11 +36,14 @@ const LEVEL_ICON: f32 = 18.0;
 const LEVEL_VALUE_W: f32 = 30.0;
 const GAP: f32 = 10.0;
 const SUB_SCALE: f32 = 0.88;
-/// The monitor chooser's buttons (`.kp-screens .kp-btn`).
-const CHIP_PAD: (f32, f32) = (10.0, 5.0);
-const CHIP_RADIUS: f32 = 6.0;
-const CHIP_GAP: f32 = 6.0;
-const CHIP_INSET: f32 = 4.0;
+/// A monitor level's number at its icon's lower right (`.kp-slider .scr sub`): its size
+/// against the text's, its padding and corners, how far it hangs past the icon.
+const BADGE_SCALE: f32 = 0.75;
+const BADGE_PAD: f32 = 2.0;
+const BADGE_RADIUS: f32 = 3.0;
+const BADGE_OUT: f32 = 4.0;
+/// The sync row's inset (`.kp-sync`).
+const SYNC_INSET: f32 = 4.0;
 
 /// A tile, in the design's order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -130,9 +134,10 @@ pub struct Quick {
     pub bluetooth: Option<bool>,
     pub airplane: Option<bool>,
     pub hotspot: Option<bool>,
-    /// The monitors whose brightness answers, and which one the level sets (D91).
+    /// The monitors whose brightness answers, each with its level, and whether a level
+    /// moves them all (D91).
     pub screens: Vec<Screen>,
-    pub screen: usize,
+    pub sync: bool,
     pub volume: Option<(u32, bool)>,
     pub battery: Option<Battery>,
 }
@@ -144,8 +149,8 @@ pub enum Action {
     /// Switch a tile's radio or the hotspot on (`true`) or off.
     Switch(Tile, bool),
     Open(&'static str),
-    /// The brightness level sets monitor `screens[i]` from now on.
-    Screen(usize),
+    /// Keep every monitor's brightness together (`true`, at the main one's) or not.
+    Sync(bool),
 }
 
 impl Quick {
@@ -175,24 +180,61 @@ impl Quick {
         }
     }
 
-    /// The brightness of the monitor the level sets.
-    pub fn brightness(&self) -> Option<u8> {
-        self.screens.get(self.screen).map(|s| s.percent)
+    /// Sets monitor `screens[i]`'s brightness, every monitor's while they are kept
+    /// together; the monitors changed.
+    pub fn set_brightness(&mut self, i: usize, percent: u8) -> Vec<usize> {
+        let changed: Vec<usize> = if self.sync {
+            (0..self.screens.len()).collect()
+        } else if i < self.screens.len() {
+            vec![i]
+        } else {
+            Vec::new()
+        };
+        for j in &changed {
+            self.screens[*j].percent = percent;
+        }
+        changed
     }
 
-    /// Takes the monitors read now: the level keeps setting the monitor it set (by its
-    /// number), at first the one under the panel (`home`), else the first. While
-    /// `dragging`, the chosen monitor keeps the value under the mouse.
-    pub fn take_screens(&mut self, screens: Vec<Screen>, home: u32, dragging: bool) {
-        let before = self.screens.get(self.screen).copied();
-        let number = before.map_or(home, |s| s.number);
-        self.screen = screens.iter().position(|s| s.number == number).unwrap_or(0);
+    /// Keeps every monitor's brightness together (`on`) or not; turned on, they all take
+    /// the main one's (else the first's). The monitors changed.
+    pub fn set_sync(&mut self, on: bool) -> Vec<usize> {
+        self.sync = on;
+        let main = self
+            .screens
+            .iter()
+            .find(|s| s.main)
+            .or(self.screens.first())
+            .map(|s| s.percent);
+        let Some(p) = main.filter(|_| on) else {
+            return Vec::new();
+        };
+        let changed: Vec<usize> = (0..self.screens.len())
+            .filter(|j| self.screens[*j].percent != p)
+            .collect();
+        for j in &changed {
+            self.screens[*j].percent = p;
+        }
+        changed
+    }
+
+    /// Takes the monitors read now; while level `dragging` is held, the value under the
+    /// mouse stays (on every monitor while they are kept together).
+    pub fn take_screens(&mut self, screens: Vec<Screen>, dragging: Option<usize>) {
+        let held = dragging.and_then(|i| self.screens.get(i)).copied();
         self.screens = screens;
-        if let (true, Some(b), Some(s)) = (dragging, before, self.screens.get_mut(self.screen)) {
-            if s.number == b.number {
-                s.percent = b.percent;
+        let sync = self.sync;
+        if let Some(h) = held {
+            for s in self.screens.iter_mut().filter(|s| sync || s.number == h.number) {
+                s.percent = h.percent;
             }
         }
+    }
+
+    /// The monitor whose brightness level is part `value`.
+    pub fn level_of(&self, value: u32) -> Option<usize> {
+        let i = value.checked_sub(SCREEN)? as usize;
+        (i < self.screens.len()).then_some(i)
     }
 
     /// A click on part `value`.
@@ -200,12 +242,8 @@ impl Quick {
         if value == SETTINGS {
             return Action::Open(SETTINGS_PAGE);
         }
-        if let Some(i) = value.checked_sub(SCREEN).map(|i| i as usize) {
-            return if i < self.screens.len() {
-                Action::Screen(i)
-            } else {
-                Action::None
-            };
+        if value == SYNC {
+            return Action::Sync(!self.sync);
         }
         let Some(t) = Tile::ALL.get(value as usize).copied() else {
             return Action::None;
@@ -274,13 +312,13 @@ fn tile(q: &Quick, t: Tile, i18n: &I18n, size: f32, width: f32) -> Node {
         .hit(HIT, t.value())
 }
 
-fn level(icon: &'static str, percent: u32, value: u32, notify: &NotifyStyle, size: f32) -> Node {
+fn level(icon: Node, percent: u32, value: u32, notify: &NotifyStyle, size: f32) -> Node {
     let track = Track {
         width: WIDTH - LEVEL_ICON - LEVEL_VALUE_W - 2.0 * GAP,
         ..notify.track
     };
     Node::row(vec![
-        Node::icon(icon, LEVEL_ICON, Role::Fg),
+        icon,
         slider(&track, percent as f32 / 100.0).hit(HIT, value),
         Node::column(vec![Node::text(TextSpec {
             spans: vec![Span {
@@ -303,39 +341,48 @@ fn level(icon: &'static str, percent: u32, value: u32, notify: &NotifyStyle, siz
     .align(Align::Center)
 }
 
-/// The monitor chooser: a button for each monitor whose brightness answers, "1 (main)"
-/// for the main one, the one the level sets lit (`.kp-screens`).
-fn chooser(q: &Quick, i18n: &I18n, size: f32) -> Node {
-    let buttons = q
-        .screens
-        .iter()
-        .enumerate()
-        .map(|(i, s)| {
-            let lit = i == q.screen;
-            let label = if s.main {
-                i18n.tr_args("qs-screen-main", &[("value", s.number.into())])
-            } else {
-                s.number.to_string()
-            };
-            Node::row(vec![words(
-                label,
-                if lit { Role::OnAccent } else { Role::Fg },
-                400,
-                size,
-                WIDTH,
-            )])
-            .padding(Insets::symmetric(CHIP_PAD.0, CHIP_PAD.1))
-            .paint(Paint {
-                fill: if lit { Role::AccentFill } else { Role::Surface },
-                border: (!lit).then_some((Role::SurfaceLine, 1.0)),
-                radius: CHIP_RADIUS,
-            })
-            .hit(HIT, SCREEN + i as u32)
-        })
-        .collect();
-    Node::row(buttons)
-        .gap(CHIP_GAP)
-        .padding(Insets::symmetric(CHIP_INSET, 0.0))
+/// A monitor's level icon: a monitor with a sun, its number at the lower right
+/// (`.kp-slider .scr`).
+fn screen_icon(number: u32, size: f32) -> Node {
+    let badge = Node::row(vec![Node::text(TextSpec {
+        spans: vec![Span {
+            text: number.to_string(),
+            color: Role::Fg,
+            weight: 700,
+            after: 0.0,
+            underline: false,
+            italic: false,
+            spacing: 0.0,
+        }],
+        font: FontRole::Num,
+        size: size * BADGE_SCALE,
+        max_width: None,
+    })])
+    .padding(Insets::symmetric(BADGE_PAD, 0.0))
+    .paint(Paint {
+        fill: Role::Surface,
+        border: None,
+        radius: BADGE_RADIUS,
+    });
+    let half = LEVEL_ICON / 2.0;
+    Node::layer(vec![
+        Node::icon("screen-sun", LEVEL_ICON, Role::Fg),
+        badge.offset(half, half - BADGE_OUT / 2.0),
+    ])
+    .size(Some(LEVEL_ICON), Some(LEVEL_ICON))
+}
+
+/// The row over the monitors' levels: its words and the switch that keeps them together.
+fn sync_row(q: &Quick, i18n: &I18n, size: f32) -> Node {
+    let (switch_w, _) = super::network_panel::SWITCH;
+    Node::row(vec![
+        Node::column(vec![words(i18n.tr("qs-sync"), Role::Fg, 400, size, WIDTH - switch_w)])
+            .align(Align::Start)
+            .size(Some(WIDTH - switch_w - 2.0 * SYNC_INSET), None),
+        super::network_panel::switch(q.sync, HIT, SYNC),
+    ])
+    .align(Align::Center)
+    .padding(Insets::symmetric(SYNC_INSET, 0.0))
 }
 
 /// The battery's line: its charge and the time left (hours and minutes when known).
@@ -361,15 +408,28 @@ pub fn view(q: &Quick, i18n: &I18n, text_scale: f32, s: &TipStyle, notify: &Noti
         .chunks(COLUMNS)
         .map(|row| Node::row(row.iter().map(|t| tile(q, *t, i18n, size, width)).collect()).gap(TILE_GAP))
         .collect();
-    // With more than one monitor answering, which one the level sets (D91).
-    if q.screens.len() > 1 {
-        rows.push(chooser(q, i18n, size));
+    // A level for each monitor whose brightness answers, under the switch that keeps
+    // them together; one alone keeps the sun (D91).
+    let many = q.screens.len() > 1;
+    if many {
+        rows.push(sync_row(q, i18n, size));
     }
-    if let Some(b) = q.brightness() {
-        rows.push(level("sun", u32::from(b), BRIGHTNESS, notify, size));
+    for (i, screen) in q.screens.iter().enumerate() {
+        let icon = if many {
+            screen_icon(screen.number, size)
+        } else {
+            Node::icon("sun", LEVEL_ICON, Role::Fg)
+        };
+        rows.push(level(icon, u32::from(screen.percent), SCREEN + i as u32, notify, size));
     }
     if let Some((v, muted)) = q.volume {
-        rows.push(level("vol", if muted { 0 } else { v.min(100) }, VOLUME, notify, size));
+        rows.push(level(
+            Node::icon("vol", LEVEL_ICON, Role::Fg),
+            if muted { 0 } else { v.min(100) },
+            VOLUME,
+            notify,
+            size,
+        ));
     }
     rows.push(Node::spacer(WIDTH, 1.0).paint(Paint {
         fill: Role::SurfaceLine,
@@ -419,8 +479,8 @@ mod tests {
     //! Edge cases: tiles for what the computer has only (no Bluetooth, no battery, no
     //! hotspot); a switch flips its state, a page tile opens its page; the levels only
     //! when known, a muted volume at 0; the battery's line charging, with time left, full
-    //! and plugged; every string in both languages; the monitor chooser with one monitor
-    //! (none), two (the main one named, the chosen one lit) and a click past its buttons.
+    //! and plugged; every string in both languages; one monitor's level (the sun, no
+    //! switch) and two (each its own, or together at the main one's).
     use super::*;
     use crate::bar::tooltip::TIP;
     use kabuk_core::config::Look;
@@ -452,7 +512,7 @@ mod tests {
                 main: true,
                 percent: 70,
             }],
-            screen: 0,
+            sync: false,
             volume: Some((40, false)),
             battery: Some(Battery {
                 percent: 82,
@@ -554,10 +614,10 @@ mod tests {
         }
     }
 
-    /// Asked for by the user: each monitor's brightness, one level and a chooser above it
-    /// (D91).
+    /// Asked for by the user: a level for each monitor, one under the other, each with a
+    /// monitor icon and its number, under a switch that keeps them together (D91).
     #[test]
-    fn the_level_sets_the_chosen_monitors_brightness() {
+    fn each_monitor_has_its_level_and_the_switch_keeps_them_together() {
         let notify = NotifyStyle::of(Look::Ada);
         let two = Quick {
             screens: vec![
@@ -572,66 +632,83 @@ mod tests {
                     percent: 20,
                 },
             ],
-            screen: 1,
+            sync: false,
             ..full()
+        };
+        let hit = |l: &kabuk_ui::node::Layout, value: u32| {
+            l.hits
+                .iter()
+                .find(|(_, h)| h.module == HIT && h.value == value)
+                .map(|(r, _)| *r)
+        };
+        let icons = |l: &kabuk_ui::node::Layout, name: &str| {
+            l.draws
+                .iter()
+                .filter(|d| matches!(d, Draw::Icon { spec, .. } if spec.name == name))
+                .count()
         };
         for lang in [Lang::Tr, Lang::En] {
             let i18n = I18n::new(lang);
-            let main = i18n.tr_args("qs-screen-main", &[("value", 1u32.into())]);
-            assert!(main.contains('1') && main.len() > 1, "{main}");
-            // One monitor: no chooser.
-            let t = texts(&view(&full(), &i18n, 1.0, &TIP, &notify));
-            assert!(!t.contains(&main), "{t:?}");
-            // Two: both named, the level at the chosen one's brightness.
+            let sync = i18n.tr("qs-sync");
+            // One monitor: its level with the sun, no switch.
+            let n = view(&full(), &i18n, 1.0, &TIP, &notify);
+            let l = layout(&n, Point::default(), &Fake);
+            assert!(!texts(&n).contains(&sync));
+            assert!(hit(&l, SCREEN).is_some() && hit(&l, SYNC).is_none());
+            assert_eq!((icons(&l, "sun"), icons(&l, "screen-sun")), (1, 0));
+            // Two: the switch, then a level for each with its number and value.
             let n = view(&two, &i18n, 1.0, &TIP, &notify);
             let t = texts(&n);
-            assert!(t.contains(&main) && t.contains(&"2".to_string()), "{t:?}");
-            assert!(t.contains(&"20".to_string()) && !t.contains(&"18".to_string()), "{t:?}");
+            for x in [sync.as_str(), "1", "2", "18", "20"] {
+                assert!(t.contains(&x.to_string()), "{x} in {t:?}");
+            }
             let l = layout(&n, Point::default(), &Fake);
-            let button = |i: u32| {
-                l.hits
-                    .iter()
-                    .find(|(_, h)| h.module == HIT && h.value == SCREEN + i)
-                    .map(|(r, _)| *r)
-                    .expect("a chooser button")
-            };
-            // The chosen one lit, the other not.
-            let lit = |r: Rect| {
-                l.draws.iter().any(
-                    |d| matches!(d, Draw::Panel { rect, paint, .. } if *rect == r && paint.fill == Role::AccentFill),
-                )
-            };
-            assert!(lit(button(1)) && !lit(button(0)));
-            // Above the level.
-            let level = l
-                .hits
-                .iter()
-                .find(|(_, h)| h.module == HIT && h.value == BRIGHTNESS)
-                .unwrap()
-                .0;
-            assert!(button(0).bottom() <= level.y);
+            let (switch, first, second) = (
+                hit(&l, SYNC).unwrap(),
+                hit(&l, SCREEN).unwrap(),
+                hit(&l, SCREEN + 1).unwrap(),
+            );
+            assert!(switch.bottom() <= first.y && first.bottom() <= second.y);
+            assert_eq!((icons(&l, "sun"), icons(&l, "screen-sun")), (0, 2));
         }
-        // Read again: the chosen monitor stays chosen; at first the panel's own; one gone,
-        // the first; while dragged, the value under the mouse stays.
+        // Off: a level moves its own monitor.
+        let mut q = two.clone();
+        let percents = |q: &Quick| q.screens.iter().map(|s| s.percent).collect::<Vec<_>>();
+        assert_eq!(q.set_brightness(1, 50), vec![1]);
+        assert_eq!(percents(&q), vec![18, 50]);
+        // Turned on: every monitor at the main one's, then a level moves them all.
+        assert_eq!(q.click(SYNC), Action::Sync(true));
+        assert_eq!(q.set_sync(true), vec![1]);
+        assert_eq!(percents(&q), vec![18, 18]);
+        assert_eq!(q.set_brightness(1, 60), vec![0, 1]);
+        assert_eq!(percents(&q), vec![60, 60]);
+        // Turned off: nothing moves.
+        assert_eq!(q.click(SYNC), Action::Sync(false));
+        assert!(q.set_sync(false).is_empty());
+        assert_eq!(q.set_brightness(0, 10), vec![0]);
+        // The main one leads wherever it is listed.
+        let mut m = two.clone();
+        m.screens[0].main = false;
+        m.screens[1].main = true;
+        m.set_sync(true);
+        assert_eq!(percents(&m), vec![20, 20]);
+        // Read again: a level held keeps the value under the mouse (every monitor's while
+        // they are together); let go, Windows' values.
         let screens = two.screens.clone();
-        let mut q = Quick::default();
-        q.take_screens(screens.clone(), 2, false);
-        assert_eq!(q.screen, 1);
-        q.take_screens(screens.iter().rev().copied().collect(), 1, false);
-        assert_eq!(q.screens[q.screen].number, 2, "kept by its number");
-        q.take_screens(screens[..1].to_vec(), 2, false);
-        assert_eq!(q.screen, 0);
         let mut d = two.clone();
         d.screens[1].percent = 55;
-        d.take_screens(screens.clone(), 1, true);
-        assert_eq!(d.brightness(), Some(55));
-        d.take_screens(screens, 1, false);
-        assert_eq!(d.brightness(), Some(20));
-        assert_eq!(two.click(SCREEN), Action::Screen(0));
-        assert_eq!(two.click(SCREEN + 1), Action::Screen(1));
-        assert_eq!(two.click(SCREEN + 2), Action::None);
-        assert_eq!(two.brightness(), Some(20));
-        assert_eq!(Quick::default().brightness(), None);
+        d.take_screens(screens.clone(), Some(1));
+        assert_eq!(percents(&d), vec![18, 55]);
+        d.sync = true;
+        d.screens[1].percent = 40;
+        d.take_screens(screens.clone(), Some(1));
+        assert_eq!(percents(&d), vec![40, 40]);
+        d.take_screens(screens, None);
+        assert_eq!(percents(&d), vec![18, 20]);
+        assert_eq!(two.level_of(SCREEN + 1), Some(1));
+        assert_eq!(two.level_of(SCREEN + 2), None);
+        assert_eq!(two.level_of(VOLUME), None);
+        assert_eq!(two.click(SCREEN + 1), Action::None);
     }
 
     #[test]
@@ -659,7 +736,7 @@ mod tests {
                 .filter(|(_, h)| h.module == HIT)
                 .map(|(_, h)| h.value)
                 .collect();
-            for v in [BRIGHTNESS, VOLUME, SETTINGS, Tile::Wifi.value(), Tile::Project.value()] {
+            for v in [SCREEN, VOLUME, SETTINGS, Tile::Wifi.value(), Tile::Project.value()] {
                 assert!(hits.contains(&v), "{v} not clickable");
             }
             // The lit tile on the accent.

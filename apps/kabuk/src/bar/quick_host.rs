@@ -17,10 +17,14 @@ use kabuk_win::msgloop::{self, msg, vk, Msg, PxRect, Window};
 use super::motion_host::Shown;
 use super::tooltip::{self, TIP};
 use super::{Shared, MSG_QUICK_READ};
-use crate::bar::quick_panel::{self, Action, Quick, Screen, Tile, BRIGHTNESS, VOLUME};
+use crate::bar::quick_panel::{self, Action, Quick, Screen, Tile, VOLUME};
 use crate::notify::style::NotifyStyle;
 
 const PANEL_CLASS: &str = "Kabuk.QuickPanel";
+/// What the panel remembers (in the state's folder): whether the monitors' brightness is
+/// kept together (D91).
+const QUICK_FILE: &str = "quick-settings.json";
+const SYNC_KEY: &str = "brightness_sync";
 /// Integration tests open (`wparam` 1) or close (0) the panel without taking the keyboard,
 /// or click its part `lparam` (2).
 pub const MSG_TEST_QUICK_PANEL: u32 = msg::APP + 68;
@@ -66,8 +70,9 @@ pub(super) struct QuickPanel {
     panels: Vec<(u32, brightness::Panel)>,
     /// The level held by a press, followed while the mouse moves.
     dragging: Option<u32>,
-    /// The brightness asked for (and where) while one is being set, and whether one is.
-    pending: Arc<Mutex<Option<(brightness::Panel, u8)>>>,
+    /// The brightness asked for, latest for each monitor, while one is being set, and
+    /// whether one is.
+    pending: Arc<Mutex<Vec<(brightness::Panel, u8)>>>,
     setting: Arc<AtomicBool>,
 }
 
@@ -131,11 +136,6 @@ impl Shared {
         let Some(read) = self.quick_slot.lock().ok().and_then(|mut s| s.take()) else {
             return;
         };
-        let Some(bar) = self.quick_panel.as_ref().map(|p| p.bar) else {
-            return;
-        };
-        // At first the level sets the monitor under the panel.
-        let home = self.bars.get(bar).map_or(0, |b| b.monitor.number);
         let Some(p) = self.quick_panel.as_mut() else { return };
         let (screens, panels): (Vec<Screen>, Vec<(u32, brightness::Panel)>) = read
             .screens
@@ -143,7 +143,8 @@ impl Shared {
             .map(|(s, panel)| (s, (s.number, panel)))
             .unzip();
         // A level being dragged keeps the value under the mouse.
-        p.quick.take_screens(screens, home, p.dragging == Some(BRIGHTNESS));
+        let held = p.dragging.and_then(|v| p.quick.level_of(v));
+        p.quick.take_screens(screens, held);
         p.panels = panels;
         p.quick.wifi = read.radios.wifi;
         p.quick.bluetooth = read.radios.bluetooth;
@@ -165,7 +166,8 @@ impl Shared {
         self.close_privacy_panel();
         self.close_calendar_panel();
         self.close_media_card();
-        let quick = self.quick_now(None);
+        let mut quick = self.quick_now(None);
+        quick.sync = self.quick_sync();
         self.show_quick_panel(bar, anchor, quick, false, activate);
         self.read_quick();
     }
@@ -297,11 +299,14 @@ impl Shared {
                     }
                 });
             }
-            Action::Screen(i) => {
+            Action::Sync(on) => {
                 let Some(p) = self.quick_panel.as_mut() else { return };
-                p.quick.screen = i;
+                // Turned on, every monitor takes the main one's brightness.
+                let changed = p.quick.set_sync(on);
                 let quick = p.quick.clone();
-                tracing::info!(screen = ?quick.screens.get(i), "brightness of another monitor");
+                tracing::info!(on, changed = changed.len(), "monitors' brightness kept together");
+                self.save_quick_sync(on);
+                self.set_brightness_of(&changed);
                 self.reshow_quick_panel(quick);
             }
             Action::Switch(tile, on) => {
@@ -374,44 +379,81 @@ impl Shared {
             }
             quick.volume = self.live.volume.map(|v| (v.percent, v.muted));
             self.render_all(false);
-        } else {
+        } else if let Some(i) = quick.level_of(which) {
             let value = u8::try_from(percent.min(100)).unwrap_or(100);
-            let screen = quick.screen;
-            let number = quick.screens.get_mut(screen).map(|s| {
-                s.percent = value;
-                s.number
-            });
-            let panel = p
-                .panels
-                .iter()
-                .find(|(n, _)| Some(*n) == number)
-                .map(|(_, panel)| *panel);
-            if let Some(panel) = panel {
-                if let Ok(mut pending) = p.pending.lock() {
-                    *pending = Some((panel, value));
-                }
-                // One thread sets the latest value asked for while the mouse moves on.
-                if !p.setting.swap(true, Ordering::SeqCst) {
-                    let (pending, setting) = (p.pending.clone(), p.setting.clone());
-                    std::thread::spawn(move || {
-                        kabuk_win::system::com_init_mta();
-                        loop {
-                            let next = pending.lock().ok().and_then(|mut v| v.take());
-                            let Some((panel, v)) = next else { break };
-                            if let Err(e) = brightness::set(panel, v) {
-                                tracing::warn!(error = %e, "brightness not set");
-                            }
-                        }
-                        setting.store(false, Ordering::SeqCst);
-                    });
-                }
+            let changed = quick.set_brightness(i, value);
+            if let Some(p) = self.quick_panel.as_mut() {
+                p.quick.screens.clone_from(&quick.screens);
             }
+            self.set_brightness_of(&changed);
         }
         self.reshow_quick_panel(quick);
     }
 
+    /// Sets the brightness the open panel shows for monitors `changed` (indexes into its
+    /// screens): one thread sets the latest value asked for each while the mouse moves on.
+    fn set_brightness_of(&mut self, changed: &[usize]) {
+        let Some(p) = self.quick_panel.as_ref() else { return };
+        let asked: Vec<(brightness::Panel, u8)> = changed
+            .iter()
+            .filter_map(|i| p.quick.screens.get(*i))
+            .filter_map(|s| {
+                p.panels
+                    .iter()
+                    .find(|(n, _)| *n == s.number)
+                    .map(|(_, panel)| (*panel, s.percent))
+            })
+            .collect();
+        if asked.is_empty() {
+            return;
+        }
+        if let Ok(mut pending) = p.pending.lock() {
+            pending.retain(|(panel, _)| !asked.iter().any(|(a, _)| a == panel));
+            pending.extend(asked);
+        }
+        if !p.setting.swap(true, Ordering::SeqCst) {
+            let (pending, setting) = (p.pending.clone(), p.setting.clone());
+            std::thread::spawn(move || {
+                kabuk_win::system::com_init_mta();
+                loop {
+                    let next = pending.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
+                    if next.is_empty() {
+                        break;
+                    }
+                    for (panel, v) in next {
+                        if let Err(e) = brightness::set(panel, v) {
+                            tracing::warn!(error = %e, "brightness not set");
+                        }
+                    }
+                }
+                setting.store(false, Ordering::SeqCst);
+            });
+        }
+    }
+
+    fn quick_file(&self) -> Option<std::path::PathBuf> {
+        Some(super::wm::lock(&self.state).path().parent()?.join(QUICK_FILE))
+    }
+
+    /// Whether the monitors' brightness is kept together, as last chosen (off at first).
+    fn quick_sync(&self) -> bool {
+        self.quick_file()
+            .and_then(|f| std::fs::read_to_string(f).ok())
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+            .and_then(|v| v.get(SYNC_KEY).and_then(serde_json::Value::as_bool))
+            .unwrap_or(false)
+    }
+
+    fn save_quick_sync(&self, on: bool) {
+        let Some(file) = self.quick_file() else { return };
+        let text = serde_json::json!({ SYNC_KEY: on }).to_string();
+        if let Err(e) = kabuk_core::fsutil::write_atomic(&file, text.as_bytes()) {
+            tracing::error!(error = %e, "quick settings not written");
+        }
+    }
+
     pub(super) fn on_quick_panel(&mut self, m: Msg) -> Option<isize> {
-        let is_level = |v: u32| v == BRIGHTNESS || v == VOLUME;
+        let is_level = |p: &QuickPanel, v: u32| v == VOLUME || p.quick.level_of(v).is_some();
         match m.id {
             msg::LBUTTONDOWN => {
                 let p = self.quick_panel.as_mut()?;
@@ -421,7 +463,7 @@ impl Shared {
                     y: p.scale.dips(y),
                 };
                 let v = p.layout.hit_test(at).filter(|h| h.module == quick_panel::HIT)?.value;
-                if is_level(v) {
+                if is_level(p, v) {
                     p.dragging = Some(v);
                     p.shown.window().capture_mouse(true);
                     self.quick_level_from(v, x);
@@ -446,7 +488,7 @@ impl Shared {
                     y: p.scale.dips(y),
                 };
                 let v = p.layout.hit_test(at).filter(|h| h.module == quick_panel::HIT)?.value;
-                if is_level(v) {
+                if is_level(p, v) {
                     return Some(0);
                 }
                 let action = p.quick.click(v);

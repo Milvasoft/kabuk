@@ -38,6 +38,7 @@ pub const ICONS: &[(&str, &str)] = &[
     ("power", include_str!("../../../assets/icons/power.svg")),
     ("qs", include_str!("../../../assets/icons/qs.svg")),
     ("right", include_str!("../../../assets/icons/right.svg")),
+    ("screen-sun", include_str!("../../../assets/icons/screen-sun.svg")),
     ("search", include_str!("../../../assets/icons/search.svg")),
     ("shield", include_str!("../../../assets/icons/shield.svg")),
     ("sun", include_str!("../../../assets/icons/sun.svg")),

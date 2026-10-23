@@ -161,7 +161,7 @@ fn main() {
                     percent: 20,
                 },
             ],
-            screen: 1,
+            sync: false,
             volume: Some((40, false)),
             ..Default::default()
         };

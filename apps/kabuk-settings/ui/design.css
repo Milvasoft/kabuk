@@ -1104,7 +1104,9 @@ p { margin: 0; max-width: 66ch; }
 .kpanel .kp-tile > span { display: grid; gap: 1px; min-width: 0; }
 .kpanel .kp-tile b { font-size: 12px; font-weight: 600; line-height: 1.2; }
 .kpanel .kp-tile > span > span { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.kpanel .kp-screens { display: flex; gap: 6px; padding: 0 4px; }
+.kpanel .kp-sync { display: flex; align-items: center; justify-content: space-between; padding: 0 4px; font-size: 12px; color: var(--fg-s); }
+.kpanel .kp-slider .scr { position: relative; display: grid; }
+.kpanel .kp-slider .scr sub { position: absolute; left: 9px; bottom: -4px; font: 700 9px/1.1 var(--num, inherit); color: var(--fg-s); background: var(--surf); border-radius: 3px; padding: 0 2px; }
 .kpanel .kp-slider { display: grid; grid-template-columns: 20px 1fr 30px; align-items: center; gap: 10px; padding: 4px; }
 .kpanel .kp-slider .track { position: relative; height: 4px; border-radius: 2px; background: var(--faint); }
 .kpanel .kp-slider .track i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background: var(--accent-s); }
