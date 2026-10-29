@@ -48,6 +48,7 @@
 //! tray icon menu (`TrackPopupMenu`), and `CLOSE_MENU` (`WM_APP + 5`) closes it.
 //! `RETITLE` (`WM_APP + 6`, wparam = n) renames the window n times in a row, as a busy
 //! terminal or a game showing its frame rate does.
+//! `FLASH` (`WM_APP + 7`) flashes the window for attention, as a chat does on a message.
 
 use std::io::Write;
 use std::sync::OnceLock;
@@ -77,6 +78,7 @@ const FAKE_RESIZE: u32 = WM_APP + 3;
 const OPEN_MENU: u32 = WM_APP + 4;
 const CLOSE_MENU: u32 = WM_APP + 5;
 const RETITLE: u32 = WM_APP + 6;
+const FLASH: u32 = WM_APP + 7;
 const TRAY_ID: u32 = 1;
 /// Sizes the self-resizing window alternates between.
 const RESIZE_STEPS: [(i32, i32); 2] = [(500, 400), (700, 520)];
@@ -439,6 +441,17 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             }
             CLOSE_MENU => {
                 let _ = EndMenu();
+                return LRESULT(0);
+            }
+            FLASH => {
+                let info = FLASHWINFO {
+                    cbSize: std::mem::size_of::<FLASHWINFO>() as u32,
+                    hwnd,
+                    dwFlags: FLASHW_ALL | FLASHW_TIMERNOFG,
+                    uCount: 0,
+                    dwTimeout: 0,
+                };
+                let _ = FlashWindowEx(&info);
                 return LRESULT(0);
             }
             RETITLE => {

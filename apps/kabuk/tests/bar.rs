@@ -4400,3 +4400,37 @@ fn something_that_does_not_open_is_told() {
     assert_eq!(sandbox.restore().0, 0);
     assert!(wait_until(SETTLE, || restored(&before)).is_some());
 }
+
+/// PLAN M19 U14: a window flashing for attention (a chat's new message) showed nothing on
+/// the bar; Windows' taskbar marks its button. The bar hears it from the shell.
+#[test]
+fn a_window_asking_for_attention_is_seen() {
+    use kabuk_win::msgloop::{post_message, Msg};
+    const FLASH: u32 = 0x8000 + 7;
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    let _shell = sandbox.shell_with_bar_and_wm();
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let chat = TestWindow::open(&["--title", &title("attention")]);
+    let other = TestWindow::open(&["--title", &title("in-front")]);
+    assert!(wait_until(SETTLE, || other.hwnd.focus()).is_some());
+    post_message(
+        chat.hwnd,
+        Msg {
+            id: FLASH,
+            wparam: 0,
+            lparam: 0,
+        },
+    )
+    .unwrap();
+    let wants = format!("app wants attention hwnd={}", chat.hwnd.0);
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines(&wants) == 1).is_some(),
+        "the flashing window was not seen"
+    );
+    drop(other);
+    drop(chat);
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}

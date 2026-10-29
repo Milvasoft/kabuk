@@ -39,6 +39,7 @@ pub mod screen;
 pub mod screen_picture;
 pub mod screensaver;
 pub mod shell;
+pub mod shellhook;
 pub mod shellitems;
 pub mod stats;
 pub mod sync;

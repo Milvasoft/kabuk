@@ -74,6 +74,8 @@ pub(super) struct AppsState {
     pins_read: std::sync::Arc<std::sync::Mutex<Option<PinSources>>>,
     /// Whether the pins have been read (until then they are not written).
     pins_loaded: bool,
+    /// Windows flashing for attention until they are seen (PLAN M19 U14).
+    pub(super) attention: std::collections::HashSet<u64>,
 }
 
 /// The Windows taskbar's pins and Kabuk's pins file, each with its app ids.
@@ -395,6 +397,7 @@ impl Shared {
             });
         }
         self.apps.ids.retain(|h, _| running.iter().any(|r| r.hwnd == *h));
+        self.apps.attention.retain(|h| running.iter().any(|r| r.hwnd == *h));
         self.apps.framed.retain(|h, _| running.iter().any(|r| r.hwnd == *h));
         apps::remember_order(&mut self.apps.order, &running);
         let focused = kabuk_win::events::foreground().map(|h| h.0);
@@ -530,10 +533,32 @@ impl Shared {
                 image: self.app_picture(a),
                 running: !a.windows.is_empty(),
                 focused: a.focused,
+                attention: a.windows.iter().any(|w| self.apps.attention.contains(w)),
                 grow: self.app_growth(i),
                 shift: self.app_shift(i, &ids[i]),
             })
             .collect()
+    }
+
+    /// The shell told of a window (`wparam` its notice, `lparam` the window): one that
+    /// flashes asks for attention until it is seen (PLAN M19 U14).
+    pub(super) fn shell_notice(&mut self, wparam: usize, lparam: isize) {
+        use kabuk_win::shellhook::Notice;
+        let hwnd = lparam as u64;
+        let changed = match Notice::of(wparam) {
+            Notice::Flash => {
+                let fresh = self.apps.attention.insert(hwnd);
+                if fresh {
+                    tracing::info!(hwnd, "app wants attention");
+                }
+                fresh
+            }
+            Notice::Seen => self.apps.attention.remove(&hwnd),
+            Notice::Other => false,
+        };
+        if changed {
+            self.render_all(false);
+        }
     }
 
     /// The apps as Rıhtım's dock shows them (DECISIONS D17).

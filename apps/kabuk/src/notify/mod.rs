@@ -126,11 +126,9 @@ impl Notice {
     /// The icon in its box (the design shows `check`; the layout ones show the layout's).
     pub fn icon(self) -> &'static str {
         match self {
-            Notice::FloatingLayout
-            | Notice::TilingLayout
-            | Notice::Floated
-            | Notice::Tiled
-            | Notice::Layout { .. } => "tile",
+            Notice::FloatingLayout | Notice::TilingLayout | Notice::Floated | Notice::Tiled | Notice::Layout { .. } => {
+                "tile"
+            }
             Notice::GameOn | Notice::GameOff { .. } => "pad",
             Notice::Copied => "check",
             Notice::ConfigRejected { .. }

@@ -162,6 +162,8 @@ pub struct AppIcon {
     pub image: Option<u64>,
     pub running: bool,
     pub focused: bool,
+    /// One of its windows flashes for attention (PLAN M19 U14), as Windows' taskbar shows.
+    pub attention: bool,
     /// How far it has grown under the mouse, 0-1 (asked for by the user).
     pub grow: f32,
     /// How far its picture is drawn from its place (DIPs): following the mouse while it
@@ -1046,7 +1048,11 @@ fn app_icons(d: &BarData, s: &Style) -> Option<Vec<Node>> {
             let mark = Node::spacer(APP_MARK.0, APP_MARK.1);
             let mark = if a.running {
                 mark.paint(Paint {
-                    fill: if a.focused { Role::Accent } else { Role::Dim },
+                    fill: match (a.attention, a.focused) {
+                        (true, _) => Role::Warning,
+                        (false, true) => Role::Accent,
+                        (false, false) => Role::Dim,
+                    },
                     border: None,
                     radius: APP_MARK.1 / 2.0,
                 })
@@ -2143,6 +2149,7 @@ mod tests {
                 image: Some(i),
                 running: true,
                 focused: i == 0,
+                attention: false,
                 grow: 0.0,
                 shift: (0.0, 0.0),
             })
@@ -2176,6 +2183,7 @@ mod tests {
             image: Some(image),
             running: true,
             focused,
+            attention: false,
             grow: 0.0,
             shift: (0.0, 0.0),
         };
@@ -2235,6 +2243,34 @@ mod tests {
         );
     }
 
+    /// PLAN M19 U14: an app whose window flashes for attention has its mark in the
+    /// warning colour, over the focus's accent.
+    #[test]
+    fn an_app_asking_for_attention_is_marked() {
+        let tr = I18n::new(Lang::Tr);
+        let mark = |attention: bool, focused: bool| {
+            let d = BarData {
+                apps: vec![AppIcon {
+                    label: String::new(),
+                    image: Some(5),
+                    running: true,
+                    focused,
+                    attention,
+                    grow: 0.0,
+                    shift: (0.0, 0.0),
+                }],
+                ..data(&tr)
+            };
+            render(&d, &tr)
+                .draws
+                .iter()
+                .any(|x| matches!(x, Draw::Panel { paint, .. } if paint.fill == Role::Warning))
+        };
+        assert!(mark(true, false));
+        assert!(mark(true, true));
+        assert!(!mark(false, false));
+    }
+
     /// M19 P3: the apps' pictures load off the bar thread; until one comes its app shows
     /// a plain glyph in the same place, not a hole.
     #[test]
@@ -2246,6 +2282,7 @@ mod tests {
                 image: None,
                 running: true,
                 focused: false,
+                attention: false,
                 grow: 0.0,
                 shift: (0.0, 0.0),
             }],
@@ -2277,6 +2314,7 @@ mod tests {
             image: Some(31),
             running: true,
             focused: false,
+            attention: false,
             grow: 0.0,
             shift,
         };
@@ -2325,6 +2363,7 @@ mod tests {
                     image: Some(21),
                     running: true,
                     focused: true,
+                    attention: false,
                     grow: 0.0,
                     shift: (0.0, 0.0),
                 },
@@ -2333,6 +2372,7 @@ mod tests {
                     image: Some(22),
                     running: false,
                     focused: false,
+                    attention: false,
                     grow: 0.0,
                     shift: (0.0, 0.0),
                 },
@@ -2418,6 +2458,7 @@ mod tests {
             image: Some(31),
             running: false,
             focused: false,
+            attention: false,
             grow: 0.0,
             shift: (0.0, 0.0),
         };
@@ -2878,6 +2919,7 @@ mod tests {
                 image: Some(i),
                 running: true,
                 focused: false,
+                attention: false,
                 grow: 0.0,
                 shift: (0.0, 0.0),
             })

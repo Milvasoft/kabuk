@@ -694,6 +694,8 @@ struct Shared {
     game_devices: Vec<String>,
     /// Started again by the watchdog after a stop: said at the end of the start.
     restarted: bool,
+    /// The shell's notices about windows (attention), to the control window.
+    shell_hook: Option<kabuk_win::shellhook::ShellHook>,
     /// Tells when Windows turns the displays off and on.
     displays: Option<kabuk_win::power::DisplayWatch>,
     /// Whether the figures' timers run (stats, GPU): only while a bar showing them is seen.
@@ -994,6 +996,7 @@ impl BarManager {
                 notices: notify_host::NotifyState::default(),
                 game_devices: Vec::new(),
                 restarted: false,
+                shell_hook: None,
                 displays: None,
                 figures: (false, false),
                 held_games: Vec::new(),
@@ -1106,6 +1109,9 @@ impl BarManager {
             s.apps.pictures =
                 crate::bar::pictures::Pictures::start("apps", control.hwnd(), apps_host::MSG_APP_PICTURES);
             s.figures_worker = crate::bar::figures::Figures::start(control.hwnd(), MSG_FIGURES, STATS_INTERVAL);
+            s.shell_hook = kabuk_win::shellhook::ShellHook::register(control.hwnd())
+                .map_err(|e| tracing::warn!(error = %e, "windows asking for attention not seen"))
+                .ok();
             s.control = Some(control);
             timed("count_notifications", || s.count_notifications());
             timed("bind_overview_keys", || s.bind_overview_keys());
@@ -1764,6 +1770,10 @@ impl Shared {
                 if let Some(f) = crate::notify::Failure::ALL.get(m.wparam) {
                     self.notify(crate::notify::Notice::Failed(*f));
                 }
+                Some(0)
+            }
+            id if self.shell_hook.as_ref().is_some_and(|h| h.message() == id) => {
+                self.shell_notice(m.wparam, m.lparam);
                 Some(0)
             }
             MSG_LATE_START => {

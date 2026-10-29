@@ -265,6 +265,7 @@ fn main() {
                 image: Some(square(&gpu, 200 + i as u64)),
                 running: i % 3 != 2,
                 focused: i == 0,
+                attention: false,
                 grow: if i == 1 { 1.0 } else { 0.0 },
                 shift: (0.0, 0.0),
             })
