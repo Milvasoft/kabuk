@@ -74,6 +74,8 @@ pub struct Workspace {
     pub number: u32,
     pub active: bool,
     pub busy: bool,
+    /// The user's name for it (PLAN M19 U20); Konsol writes it in place of its own.
+    pub name: Option<String>,
 }
 
 /// The focused window's title split for display: the first part emphasised.
@@ -194,6 +196,7 @@ pub fn visible_workspaces(all: &[kabuk_layout::WorkspaceInfo], shown: u32) -> Ve
             number: w.number,
             active: w.active,
             busy: w.busy,
+            name: None,
         })
         .collect()
 }
@@ -262,10 +265,11 @@ fn group(children: Vec<Node>, s: &Style, vertical: bool, thickness: f32) -> Node
 fn workspace_label(ws: &Workspace, s: &Style, vertical: bool, i18n: &I18n) -> String {
     match s.ws {
         Ws::Named { .. } => {
-            let name = if ws.number <= NAMED_WORKSPACES && !vertical {
-                i18n.tr(&format!("konsol-ws-{}", ws.number))
-            } else {
-                String::new()
+            let name = match &ws.name {
+                _ if vertical => String::new(),
+                Some(name) => i18n.tr_args("konsol-ws-named", &[("name", name.clone().into())]),
+                None if ws.number <= NAMED_WORKSPACES => i18n.tr(&format!("konsol-ws-{}", ws.number)),
+                None => String::new(),
             };
             format!("{}{}{}", ws.number, name, if ws.active { "*" } else { "" })
         }
@@ -1615,16 +1619,19 @@ mod tests {
                     number: 1,
                     active: true,
                     busy: true,
+                    name: None,
                 },
                 Workspace {
                     number: 2,
                     active: false,
                     busy: true,
+                    name: None,
                 },
                 Workspace {
                     number: 3,
                     active: false,
                     busy: false,
+                    name: None,
                 },
             ],
             floating_layout: false,
@@ -2725,6 +2732,14 @@ mod tests {
         let t = texts(&render_look(Look::Konsol, &d, &tr));
         assert!(
             t.contains(&"1:code*".to_string()) && t.contains(&"2:web".to_string()) && t.contains(&"[tile]".to_string()),
+            "{t:?}"
+        );
+        // PLAN M19 U20: a workspace the user named shows its name in Konsol's way.
+        let mut named = d.clone();
+        named.workspaces[1].name = Some("Kod".into());
+        let t = texts(&render_look(Look::Konsol, &named, &tr));
+        assert!(
+            t.contains(&"2:Kod".to_string()) && t.contains(&"1:code*".to_string()),
             "{t:?}"
         );
         // Çizgi: date before time.

@@ -4739,6 +4739,58 @@ fn the_clock_has_a_tooltip_with_the_whole_date() {
     assert!(wait_until(SETTLE, || restored(&before)).is_some());
 }
 
+/// PLAN M19 U20: workspaces named in `kabuk.toml` are named in their tooltip (and so to a
+/// screen reader), a change of the names is taken at once, and one without a name keeps
+/// its number.
+#[test]
+fn a_workspaces_tooltip_has_its_name() {
+    use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_WORKSPACE_TIP};
+    use kabuk_win::msgloop::{post_message, Msg};
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    let config = |names: &str| {
+        std::fs::write(
+            sandbox.config_file(),
+            format!("schema = 1\n[language]\nlanguage = \"en\"\n[windows]\nworkspace_names = {names}\n"),
+        )
+        .unwrap();
+    };
+    config(r#"["Web", "Kod"]"#);
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
+    let tip_of = |n: usize, expected: &str| {
+        post_message(
+            control,
+            Msg {
+                id: MSG_TEST_WORKSPACE_TIP,
+                wparam: n,
+                lparam: 0,
+            },
+        )
+        .unwrap();
+        assert!(
+            wait_until(SETTLE, || sandbox
+                .last_log_line(&["tooltip shown"])
+                .is_some_and(|l| l.contains(&format!("tip={expected} "))))
+            .is_some(),
+            "workspace {n}: {:?}",
+            sandbox.last_log_line(&["tooltip shown"])
+        );
+    };
+    tip_of(2, "Workspace 2 · Kod");
+    tip_of(3, "Workspace 3");
+    config(r#"["Web", "Code"]"#);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("configuration reloaded") >= 1).is_some());
+    tip_of(2, "Workspace 2 · Code");
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}
+
 /// DECISIONS D97: Narrator saw nothing of the bar. A screen reader finds its modules as
 /// buttons named in the user's language, where they are drawn, and invoking the clock
 /// does what a click on it does (its calendar opens).

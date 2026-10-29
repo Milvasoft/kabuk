@@ -29,6 +29,8 @@ pub struct WindowEntry {
     pub hwnd: u64,
     pub title: String,
     pub workspace: u32,
+    /// The workspace's name, when it has one (PLAN M19 U20).
+    pub workspace_name: Option<String>,
     /// Windows' display number ("Monitor n").
     pub monitor: u32,
     /// Where its program's picture comes from, as the bar's apps have it.
@@ -44,7 +46,14 @@ pub fn window_items(windows: &[WindowEntry], i18n: &I18n) -> Vec<Item> {
             let where_ = i18n.tr_args(
                 "launcher-window-where",
                 &[
-                    ("workspace", Arg::Num(f64::from(w.workspace))),
+                    (
+                        "workspace",
+                        Arg::Str(crate::text::workspace_title(
+                            i18n,
+                            w.workspace,
+                            w.workspace_name.as_deref(),
+                        )),
+                    ),
                     ("monitor", Arg::Num(f64::from(w.monitor))),
                 ],
             );
@@ -472,6 +481,7 @@ mod tests {
                 hwnd: 7,
                 title: "kabuk – Visual Studio Code".into(),
                 workspace: 2,
+                workspace_name: None,
                 monitor: 1,
             },
             WindowEntry {
@@ -479,12 +489,23 @@ mod tests {
                 hwnd: 8,
                 title: " ".into(),
                 workspace: 1,
+                workspace_name: None,
+                monitor: 2,
+            },
+            WindowEntry {
+                picture: None,
+                hwnd: 9,
+                title: "Firefox".into(),
+                workspace: 3,
+                workspace_name: Some("Web".into()),
                 monitor: 2,
             },
         ];
         let items = window_items(&w, &tr);
-        assert_eq!(items.len(), 1);
+        assert_eq!(items.len(), 2);
         assert_eq!(items[0].subtitle, "Çalışma alanı 2, Monitör 1");
+        // PLAN M19 U20: a named workspace by its name too.
+        assert_eq!(items[1].subtitle, "Çalışma alanı 3 · Web, Monitör 2");
         assert_eq!(items[0].target, Target::Window(7));
         let c = commands(&tr);
         assert_eq!(c.len(), SystemCommand::ALL.len());

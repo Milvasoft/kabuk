@@ -20,7 +20,8 @@
 // what it changed; search finds a setting by its label, hint or page and opens it; the
 // settings file is exported, imported (a refused one not taken) and reset behind a
 // confirmation, each undone from kabuk.toml.bak; the gallery shows placeholders until its
-// previews come; a rule's monitor is one of the connected ones; Kabuk's do not disturb (PLAN M19 U20).
+// previews come; a rule's monitor is one of the connected ones;
+// workspace names by number and Kabuk's do not disturb (PLAN M19 U20).
 "use strict";
 const fs = require("fs");
 const os = require("os");
@@ -444,6 +445,26 @@ async function main() {
     await page.click(`[data-reset="${p}"]`); await settled();
   }
   check(!/workspaces =|tiling_layout|double_click_to_tile/.test(toml()), "window manager settings back to their defaults");
+
+  // PLAN M19 U20: workspace names, a field for each workspace there is; an empty one
+  // keeps its number, and a name past the workspaces shown stays for when they come back.
+  const wsFields = () => page.$$eval("[data-ws-name]", (els) => els.length);
+  const nameWs = async (i, v) => {
+    await page.$eval(`[data-ws-name="${i}"]`, (el, value) => { el.value = value; el.dispatchEvent(new Event("change", { bubbles: true })); }, v);
+    await settled();
+  };
+  check((await wsFields()) === 9, "workspace names: a field for each of nine workspaces");
+  await nameWs(0, "Web");
+  await nameWs(2, " Kod ");
+  check(/workspace_names = \["Web", "", "Kod"\]/.test(toml()), "workspace names: by number, an empty one between");
+  check((await page.$eval(`[data-ws-name="2"]`, (e) => e.value)) === "Kod", "workspace names: shown as saved");
+  await slide("ws-count", "2");
+  check((await wsFields()) === 2, "workspace names: as many fields as workspaces");
+  await nameWs(0, "");
+  check(/workspace_names = \["", "", "Kod"\]/.test(toml()), "workspace names: the third kept while there are two");
+  await page.click(`[data-reset="windows.workspace_names"]`); await settled();
+  await page.click(`[data-reset="windows.workspaces"]`); await settled();
+  check(!/workspace_names|workspaces =/.test(toml()), "workspace names: back to the numbers");
 
   // PLAN M19 U20: Kabuk's do not disturb, a switch on the bar's page.
   await go("bar");

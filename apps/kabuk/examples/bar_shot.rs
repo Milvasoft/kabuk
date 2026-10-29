@@ -220,6 +220,7 @@ fn main() {
         modules: Modules::default(),
         workspaces: (1..=3)
             .map(|n| Workspace {
+                name: None,
                 number: n,
                 active: n == 1,
                 busy: true,

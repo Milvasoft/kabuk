@@ -83,11 +83,13 @@ konsol-ws-3 = :term
 konsol-ws-4 = :docs
 konsol-ws-5 = :chat
 konsol-ws-6 = :misc
+## A workspace the user named, in Konsol's way (PLAN M19 U20).
+konsol-ws-named = :{ $name }
 
 ## Launcher
 
 launcher-kind-window = Pencere
-launcher-window-where = Çalışma alanı { $workspace }, Monitör { $monitor }
+launcher-window-where = { $workspace }, Monitör { $monitor }
 launcher-restart = Yeniden başlat
 launcher-shutdown = Bilgisayarı kapat
 launcher-settings = Kabuk ayarları
@@ -501,6 +503,9 @@ set-workspaces = Çalışma alanları
 set-workspaces-h = Kaç tane olduğu; her biri tüm monitörlere yayılır
 set-shown-workspaces = Bardaki çalışma alanları
 set-shown-workspaces-h = Hep görünür; dolu olanlar ve etkin olan da görünür
+set-ws-names = Çalışma alanı adları
+set-ws-names-h = Barın ipuçlarında, genel bakışta, başlatıcıda ve önizlemelerde; boş olan numarasıyla kalır
+set-ws-name = Çalışma alanı { $value }
 set-tiling-layout = Dizme düzeni
 set-tiling-layout-h = Her çalışma alanının düzeni; orada düzen kısayoluyla değiştirilmediyse
 set-layout-dwindle = İkiye bölerek

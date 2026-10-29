@@ -89,11 +89,27 @@ impl Shared {
         self.hide_tooltip();
         let Some(app) = self.apps.list.get(index) else { return };
         let windows: Vec<u64> = app.windows.iter().copied().take(PREVIEW.max_windows).collect();
+        // Which workspace each is on, said when they are on several (PLAN M19 U20).
+        let view = self.wm.as_ref().map(wm::WmLink::view);
+        let workspaces: Vec<Option<u32>> = windows
+            .iter()
+            .map(|h| {
+                view.as_ref()
+                    .and_then(|v| v.windows.iter().find(|w| w.hwnd == *h))
+                    .map(|w| w.workspace)
+            })
+            .collect();
+        let several = app_preview::on_several_workspaces(&workspaces);
+        let names = &self.config().windows;
         let shots: Vec<Shot> = windows
             .iter()
-            .map(|h| Shot {
+            .zip(&workspaces)
+            .map(|(h, ws)| Shot {
                 title: Hwnd(*h).title(),
                 size: Hwnd(*h).restored_size().unwrap_or_default(),
+                workspace: ws
+                    .filter(|_| several)
+                    .map(|n| crate::text::workspace_title(&self.i18n, n, names.workspace_name(n).as_deref())),
             })
             .collect();
         if shots.is_empty() {

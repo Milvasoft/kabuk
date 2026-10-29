@@ -313,6 +313,7 @@ impl Shared {
                 drawn.push(Cell {
                     rect: dips(*cell, scale),
                     number: ws.number,
+                    name: self.config().windows.workspace_name(ws.number),
                     shown: Some(i) == shown,
                     boxes,
                 });

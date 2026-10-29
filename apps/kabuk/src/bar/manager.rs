@@ -480,6 +480,9 @@ pub const MSG_TEST_CLOCK_TIP: u32 = msg::APP + 93;
 /// Integration tests: the wheel turns `lparam` notches (up positive) over the primary
 /// bar's battery, which sets its monitor's brightness (PLAN M19 U18).
 pub const MSG_TEST_WHEEL_BRIGHTNESS: u32 = msg::APP + 121;
+/// Integration tests: the mouse rests on workspace `wparam` of the primary bar (PLAN M19
+/// U20: its name in the tooltip).
+pub const MSG_TEST_WORKSPACE_TIP: u32 = msg::APP + 124;
 /// Integration tests: something that cannot be opened is opened (PLAN M19 U6).
 pub const MSG_TEST_OPEN_MISSING: u32 = msg::APP + 92;
 /// Integration tests: a change made on bar `wparam` shows a notice (DECISIONS D95).
@@ -1810,6 +1813,14 @@ impl Shared {
             MSG_TEST_CLOCK_TIP => {
                 let b = self.bars.iter().position(|b| b.primary)?;
                 self.hover = Some((b, Hovered::Module(view::hit::CLOCK, 0)));
+                self.show_tooltip();
+                Some(0)
+            }
+            #[cfg(feature = "integration")]
+            MSG_TEST_WORKSPACE_TIP => {
+                let b = self.bars.iter().position(|b| b.primary)?;
+                let n = u32::try_from(m.wparam).unwrap_or(1);
+                self.hover = Some((b, Hovered::Module(view::hit::WORKSPACE, n)));
                 self.show_tooltip();
                 Some(0)
             }
@@ -3425,7 +3436,11 @@ impl Shared {
                 let date = i18n.date_long(t.weekday, t.day, t.month);
                 format!("{date} {}", t.year)
             }),
-            view::hit::WORKSPACE => Some(i18n.tr_args("tip-workspace", &[("value", value.to_string().into())])),
+            view::hit::WORKSPACE => Some(crate::text::workspace_title(
+                i18n,
+                value,
+                self.config().windows.workspace_name(value).as_deref(),
+            )),
             view::hit::BATTERY => self.live.battery.map(|b| {
                 let left = b.seconds_left.map(|s| {
                     i18n.tr_args(
@@ -4719,9 +4734,16 @@ impl Shared {
                         number: n,
                         active: n == self.live.active_ws,
                         busy: false,
+                        name: None,
                     })
                     .collect(),
-            },
+            }
+            .into_iter()
+            .map(|w| Workspace {
+                name: cfg.windows.workspace_name(w.number),
+                ..w
+            })
+            .collect(),
             // The active workspace's layout, else (without the window manager) the default.
             floating_layout: wm_workspaces
                 .and_then(|all| all.iter().find(|w| w.active))

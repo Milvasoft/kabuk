@@ -84,11 +84,13 @@ konsol-ws-3 = :term
 konsol-ws-4 = :docs
 konsol-ws-5 = :chat
 konsol-ws-6 = :misc
+## A workspace the user named, in Konsol's way (PLAN M19 U20).
+konsol-ws-named = :{ $name }
 
 ## Launcher
 
 launcher-kind-window = Window
-launcher-window-where = Workspace { $workspace }, Monitor { $monitor }
+launcher-window-where = { $workspace }, Monitor { $monitor }
 launcher-restart = Restart
 launcher-shutdown = Shut down
 launcher-settings = Kabuk settings
@@ -502,6 +504,9 @@ set-workspaces = Workspaces
 set-workspaces-h = How many there are; each one spans every monitor
 set-shown-workspaces = Workspaces on the bar
 set-shown-workspaces-h = Always shown; the busy ones and the active one show too
+set-ws-names = Workspace names
+set-ws-names-h = On the bar's tooltips, the overview, the launcher and the previews; an empty one keeps its number
+set-ws-name = Workspace { $value }
 set-tiling-layout = Tiling layout
 set-tiling-layout-h = Every workspace's, unless switched there with the layout shortcut
 set-layout-dwindle = Dwindle

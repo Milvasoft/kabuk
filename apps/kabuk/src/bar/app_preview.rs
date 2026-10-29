@@ -58,6 +58,16 @@ pub struct Shot {
     pub title: String,
     /// The window's size (pixels; its restored size when it is minimised).
     pub size: (i32, i32),
+    /// The workspace it is on, named (PLAN M19 U20), under its title; `None` when the
+    /// app's windows are all on one (see [`on_several_workspaces`]).
+    pub workspace: Option<String>,
+}
+
+/// Whether an app's windows (each one's workspace, `None` for a window the window manager
+/// does not hold) are on more than one workspace: only then do the cards say which.
+pub fn on_several_workspaces(workspaces: &[Option<u32>]) -> bool {
+    let mut known = workspaces.iter().flatten();
+    known.next().is_some_and(|first| known.any(|other| other != first))
 }
 
 /// The frame for a window of `size`: `frame_h` high and as wide as its shape, within
@@ -114,6 +124,11 @@ pub fn view(text_scale: f32, tip: &TipStyle, s: &PreviewStyle, shots: &[Shot]) -
                 .size(Some(s.close), Some(s.close))
                 .hit(CLOSE, index);
             let title = Node::row(vec![title, close]).gap(s.title_gap).align(Align::Center);
+            // The workspace under the title, dimmed, as wide as the picture.
+            let workspace = shot
+                .workspace
+                .as_ref()
+                .map(|ws| Node::row(vec![line(ws, Role::Dim, tip.text * text_scale, Some(w))]).size(Some(w), None));
             let frame = Node::spacer(w, h)
                 .paint(Paint {
                     fill: Role::SurfaceAlt,
@@ -121,11 +136,16 @@ pub fn view(text_scale: f32, tip: &TipStyle, s: &PreviewStyle, shots: &[Shot]) -
                     radius: s.frame_radius,
                 })
                 .hit(FRAME, index);
-            Node::column(vec![title, frame])
-                .gap(s.title_gap)
-                .align(Align::Start)
-                .padding(Insets::all(s.card_pad))
-                .hit(HIT, index)
+            Node::column(
+                std::iter::once(title)
+                    .chain(workspace)
+                    .chain(std::iter::once(frame))
+                    .collect(),
+            )
+            .gap(s.title_gap)
+            .align(Align::Start)
+            .padding(Insets::all(s.card_pad))
+            .hit(HIT, index)
         })
         .collect();
     Node::row(cards)
@@ -190,6 +210,7 @@ mod tests {
         let shots = [Shot {
             title: "A long window title that has to be cut".into(),
             size: (1600, 900),
+            workspace: None,
         }];
         let l = layout(&view(1.0, &TIP, &PREVIEW, &shots), Point::default(), &Fake);
         let of = |m: &str| {
@@ -212,6 +233,7 @@ mod tests {
             .map(|i| Shot {
                 title: format!("Window {i} with a long title that is cut"),
                 size: (1600, 900),
+                workspace: None,
             })
             .collect();
         let l = layout(&view(1.0, &TIP, &PREVIEW, &shots), Point::default(), &Fake);
@@ -228,5 +250,56 @@ mod tests {
         assert!(cards.windows(2).all(|p| p[0].0.x < p[1].0.x));
         let empty = layout(&view(1.0, &TIP, &PREVIEW, &[]), Point::default(), &Fake);
         assert!(empty.hits.is_empty());
+    }
+
+    /// PLAN M19 U20: the cards say which workspace each window is on only when the app's
+    /// windows are on more than one; a window the window manager does not hold counts for
+    /// none.
+    #[test]
+    fn the_workspace_is_said_when_an_apps_windows_are_on_several() {
+        assert!(!on_several_workspaces(&[]));
+        assert!(!on_several_workspaces(&[Some(2)]));
+        assert!(!on_several_workspaces(&[Some(2), Some(2)]));
+        assert!(!on_several_workspaces(&[None, Some(2), None]));
+        assert!(on_several_workspaces(&[Some(1), None, Some(3)]));
+        assert!(on_several_workspaces(&[Some(1), Some(1), Some(3)]));
+    }
+
+    #[test]
+    fn a_cards_workspace_is_under_its_title_over_its_picture() {
+        let shot = |workspace: Option<&str>| Shot {
+            title: "Notes".into(),
+            size: (1600, 900),
+            workspace: workspace.map(Into::into),
+        };
+        let texts = |l: &kabuk_ui::node::Layout| -> Vec<(String, f32)> {
+            l.draws
+                .iter()
+                .filter_map(|d| match d {
+                    kabuk_ui::node::Draw::Text { spec, rect } => Some((spec.spans[0].text.clone(), rect.y)),
+                    _ => None,
+                })
+                .collect()
+        };
+        let l = layout(
+            &view(1.0, &TIP, &PREVIEW, &[shot(Some("Workspace 2 · Web")), shot(None)]),
+            Point::default(),
+            &Fake,
+        );
+        let t = texts(&l);
+        let title = t.iter().find(|(s, _)| s == "Notes").unwrap().1;
+        let ws = t
+            .iter()
+            .find(|(s, _)| s == "Workspace 2 · Web")
+            .expect("the workspace")
+            .1;
+        let frame = l
+            .hits
+            .iter()
+            .find(|(_, h)| h.module == FRAME && h.value == 0)
+            .unwrap()
+            .0;
+        assert!(title < ws && ws < frame.y, "{t:?} {frame:?}");
+        assert_eq!(t.iter().filter(|(s, _)| s.starts_with("Workspace")).count(), 1);
     }
 }

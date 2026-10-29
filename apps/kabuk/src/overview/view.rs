@@ -56,15 +56,25 @@ pub struct Cell {
     pub rect: Rect,
     /// The workspace's number, written under the cell.
     pub number: u32,
+    /// The user's name for it, written after the number (PLAN M19 U20).
+    pub name: Option<String>,
     pub shown: bool,
     pub boxes: Vec<WindowBox>,
 }
 
-/// The number under a cell: centred in the gap below it, in the accent when shown.
+/// Between a cell's number and its name, as the bar's groups are set apart.
+const NAME_GLYPH: &str = "\u{00b7}";
+
+/// The number under a cell, and its name: centred in the gap below it, in the accent
+/// when shown, cut to the cell's width.
 fn label(c: &Cell, s: &OverviewStyle, text_scale: f32) -> Node {
+    let text = match &c.name {
+        Some(name) => format!("{} {NAME_GLYPH} {name}", c.number),
+        None => c.number.to_string(),
+    };
     Node::text(TextSpec {
         spans: vec![Span {
-            text: c.number.to_string(),
+            text,
             color: if c.shown { Role::Accent } else { Role::Dim },
             weight: if c.shown { 600 } else { 400 },
             after: 0.0,
@@ -74,7 +84,7 @@ fn label(c: &Cell, s: &OverviewStyle, text_scale: f32) -> Node {
         }],
         font: FontRole::Ui,
         size: s.text * text_scale,
-        max_width: None,
+        max_width: Some(c.rect.w),
     })
 }
 
@@ -197,12 +207,14 @@ mod tests {
             Cell {
                 rect: Rect::new(20.0, 20.0, 470.0, 270.0),
                 number: 1,
+                name: None,
                 shown: true,
                 boxes: Vec::new(),
             },
             Cell {
                 rect: Rect::new(510.0, 20.0, 470.0, 270.0),
                 number: 3,
+                name: None,
                 shown: false,
                 boxes: vec![WindowBox {
                     rect: Rect::new(515.0, 25.0, 200.0, 120.0),
@@ -315,5 +327,23 @@ mod tests {
         assert!(one.3 >= 290.0 && three.3 >= 290.0);
         assert!((one.2 + 3.5 - (20.0 + 235.0)).abs() < 1.0, "{one:?}");
         assert!((three.2 + 3.5 - (510.0 + 235.0)).abs() < 1.0, "{three:?}");
+    }
+
+    /// PLAN M19 U20: a workspace the user named has its name after its number.
+    #[test]
+    fn a_named_cell_has_its_name_after_its_number() {
+        let mut named = cells();
+        named[1].name = Some("Web".into());
+        let l = layout(&scene(SIZE, &named, None, &STYLE, 1.0), Point::default(), &Fake);
+        let texts: Vec<String> = l
+            .draws
+            .iter()
+            .filter_map(|d| match d {
+                kabuk_ui::node::Draw::Text { spec, .. } => Some(spec.spans[0].text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(texts.contains(&"3 \u{00b7} Web".to_string()), "{texts:?}");
+        assert!(texts.contains(&"1".to_string()), "{texts:?}");
     }
 }

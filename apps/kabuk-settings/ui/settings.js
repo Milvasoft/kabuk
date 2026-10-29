@@ -489,6 +489,28 @@
     return `<div class="set-grp">${tgl("notices.quiet", t("setQuiet"), t("setQuietH"))}</div>`;
   }
 
+  // Workspace names (PLAN M19 U20): a field for each workspace there is, by number; an
+  // empty one keeps its number. As long as kabuk-core's WORKSPACE_NAME_MAX.
+  const WS_NAME_MAX = 24;
+  function workspaceNamesRow() {
+    const w = cfg().windows;
+    const names = w.workspace_names || [];
+    const fields = Array.from({ length: w.workspaces }, (_, i) => {
+      const label = tv("setWsName", i + 1);
+      return `<input type="text" data-ws-name="${i}" maxlength="${WS_NAME_MAX}" spellcheck="false" style="width:120px" value="${escapeHtml(names[i] || "")}" placeholder="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">`;
+    }).join("");
+    return rowFor("windows.workspace_names", t("setWsNames"), t("setWsNamesH"), `<span class="num" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;max-width:400px">${fields}</span>`);
+  }
+  // Every field's name in order, without the empty ones at the end.
+  function workspaceNames() {
+    const list = [...document.querySelectorAll("[data-ws-name]")].map((el) => el.value.trim());
+    // A name past the fields shown (fewer workspaces now) is kept for when they come back.
+    const kept = (cfg().windows.workspace_names || []).slice(list.length);
+    const all = list.concat(kept);
+    while (all.length && !all[all.length - 1]) all.pop();
+    return all;
+  }
+
   // Layout profiles (DECISIONS D65): programs over monitors and workspaces, saved from the
   // windows open now and opened again in one go.
   function profilesGroup() {

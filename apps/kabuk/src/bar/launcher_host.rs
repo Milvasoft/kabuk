@@ -240,6 +240,7 @@ impl Shared {
                         hwnd: w.hwnd,
                         title: Hwnd(w.hwnd).title(),
                         workspace: w.workspace,
+                        workspace_name: self.config().windows.workspace_name(w.workspace),
                         monitor: view
                             .monitors
                             .iter()
