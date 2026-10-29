@@ -22,6 +22,8 @@
 //!                          "rect <left> <top> <right> <bottom>"
 //!   --tray-menu-at-corner  with --tray-log, opens its menu at the screen's corner (0, 0)
 //!                          after a click, as Explorer's Bluetooth icon does under Kabuk
+//!   --tray-modify-again    with --tray-log, answers `TaskbarCreated` with a modify of its
+//!                          icon instead of an add, as Windows Security does
 //!   --fullscreen-after <ms> open as an ordinary window and go full screen (borderless,
 //!                          covering the primary monitor) after this long, as a game does
 //!   --fullscreen           borderless window covering the primary monitor, above the
@@ -98,6 +100,7 @@ struct Options {
     cloak_after_ms: Option<u32>,
     tray_log: Option<String>,
     tray_menu_at_corner: bool,
+    tray_modify_again: bool,
     fullscreen: bool,
     fullscreen_after_ms: Option<u32>,
     overlay: bool,
@@ -151,6 +154,7 @@ fn parse() -> Result<Options, String> {
             "--cloak-after" => o.cloak_after_ms = Some(value()?.parse().map_err(|_| "bad --cloak-after")?),
             "--tray-log" => o.tray_log = Some(value()?),
             "--tray-menu-at-corner" => o.tray_menu_at_corner = true,
+            "--tray-modify-again" => o.tray_modify_again = true,
             "--fullscreen" => o.fullscreen = true,
             "--fullscreen-after" => {
                 o.fullscreen_after_ms = Some(value()?.parse().map_err(|_| "bad --fullscreen-after")?)
@@ -408,10 +412,15 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 let _ = SetWindowPos(hwnd, None, 0, 0, w, h, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
                 return LRESULT(0);
             }
-            // Like real programs: add the icon again when a tray asks.
+            // Like real programs: add the icon again when a tray asks (or, as Windows
+            // Security does, modify it: Explorer still holds it).
             m if o.tray_log.is_some() && m == RegisterWindowMessageW(&HSTRING::from("TaskbarCreated")) => {
-                tray_icon(hwnd, o, windows::Win32::UI::Shell::NIM_ADD);
-                tray_icon(hwnd, o, windows::Win32::UI::Shell::NIM_SETVERSION);
+                if o.tray_modify_again {
+                    tray_icon(hwnd, o, windows::Win32::UI::Shell::NIM_MODIFY);
+                } else {
+                    tray_icon(hwnd, o, windows::Win32::UI::Shell::NIM_ADD);
+                    tray_icon(hwnd, o, windows::Win32::UI::Shell::NIM_SETVERSION);
+                }
                 return LRESULT(0);
             }
             FAKE_DRAG => {

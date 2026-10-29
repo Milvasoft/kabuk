@@ -137,7 +137,8 @@ impl TrayHost {
                 tracing::trace!(?message, len = bytes.len(), answer, "AppBar message forwarded");
             }
             if kind == COPYDATA_NOTIFY_ICON {
-                if let Some(call) = model::parse(bytes) {
+                if let Some(mut call) = model::parse(bytes) {
+                    call.explorer_took = answer != 0;
                     sink(TrayEvent::Call(call));
                 }
             }

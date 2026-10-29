@@ -83,6 +83,9 @@ pub struct IconCall {
     pub tip: Option<String>,
     pub hidden: Option<bool>,
     pub version: Option<u32>,
+    /// Explorer, which got the call first, took it: for a modify, Explorer holds the icon
+    /// (set by the tray window after Explorer answered; false when parsed).
+    pub explorer_took: bool,
 }
 
 fn u32_at(b: &[u8], at: usize) -> Option<u32> {
@@ -141,6 +144,7 @@ pub fn parse(bytes: &[u8]) -> Option<IconCall> {
         tip,
         hidden,
         version: (op == Op::SetVersion).then(|| field(AT_VERSION).unwrap_or(0)),
+        explorer_took: false,
     })
 }
 
@@ -179,11 +183,14 @@ pub struct Tray {
 }
 
 impl Tray {
-    /// Applies a call; returns true when what is shown changed.
+    /// Applies a call; returns true when what is shown changed. A modify of an icon Kabuk
+    /// does not hold, which Explorer took, adds it: found on the user's machine, Windows
+    /// Security answers Kabuk's call to register with a modify (its icon is still
+    /// Explorer's), so it was never on the bar (PLAN M19 B2).
     pub fn apply(&mut self, c: &IconCall) -> bool {
         let at = self.icons.iter().position(|i| i.key == c.key);
         match (c.op, at) {
-            (Op::Add, None) => {
+            (op, None) if op == Op::Add || (op == Op::Modify && c.explorer_took) => {
                 self.icons.push(Icon {
                     key: c.key,
                     hwnd: c.hwnd,

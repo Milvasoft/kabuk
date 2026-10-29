@@ -1,6 +1,7 @@
 //! Edge cases: each notify-icon call (add, modify, delete, set version, set focus), a
 //! modify that changes only some fields, a hidden icon, an icon identified by GUID (no
-//! window handle), a duplicate add, a modify or delete of an unknown icon, an owner window
+//! window handle), a duplicate add, a modify or delete of an unknown icon (a modify Explorer
+//! took adds it: Explorer holds it), an owner window
 //! that disappears, data that is too short or has the wrong signature, an old (smaller)
 //! structure without a GUID, click messages for the old and the version-4 conventions;
 //! a question about where an icon is (the corner and the size, by GUID or by window, a
@@ -224,6 +225,24 @@ fn the_tray_keeps_icons_in_registration_order() {
         ..Data::default()
     }));
     assert_eq!(t.len(), 2);
+    // An unknown icon's modify Explorer took: Explorer holds the icon, so Kabuk does too.
+    let changed = t.apply(&IconCall {
+        explorer_took: true,
+        ..parsed(Data {
+            message: NIM_MODIFY,
+            hwnd: 1,
+            uid: 9,
+            tip: "Windows Security",
+            ..Data::default()
+        })
+    });
+    assert!(changed);
+    let held = t.icons().last().unwrap();
+    assert_eq!(
+        (held.tip.as_str(), held.icon, held.callback),
+        ("Windows Security", 0x4567, 0x8001)
+    );
+    assert_eq!(t.len(), 3);
     // The owner window went away: its icons go too.
     t.remove_owner(1);
     assert_eq!(t.len(), 0);

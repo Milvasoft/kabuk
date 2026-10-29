@@ -151,6 +151,65 @@ fn a_programs_tray_icon_appears_on_the_bar_and_clicks_reach_it() {
     assert!(wait_until(SETTLE, || before.is_back()).is_some(), "desktop not back");
 }
 
+/// PLAN M19 B2, found on the user's machine: Windows Security, whose icon Explorer held
+/// before Kabuk took the tray, answers the call to register with a modify, which Kabuk
+/// ignored for an icon it did not hold, so the icon never reached the bar.
+#[test]
+fn an_icon_explorer_held_before_and_only_modified_comes_to_the_bar() {
+    let before = Desktop::now();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    let log = sandbox.dir.path().join("tray-clicks.txt");
+    let tip = title("tray-modified");
+    // Its icon is Explorer's before the shell starts.
+    let app = TestWindow::open(&[
+        "--title",
+        &tip,
+        "--tray-log",
+        log.to_str().unwrap(),
+        "--tray-modify-again",
+    ]);
+    let _shell = sandbox.kabuk_with(&[TAKE_EXPLORER, "--no-wm"]);
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("tray window up") == 1).is_some());
+    assert!(
+        wait_until(SETTLE, || sandbox
+            .last_log_line(&["tray call", "op=Modify", &tip, "explorer_took=true"])
+            .is_some())
+        .is_some(),
+        "no modify Explorer took:\n{}",
+        story(&sandbox)
+    );
+    let held = || {
+        let out = std::process::Command::new(kabuk_exe())
+            .arg("--state-dir")
+            .arg(sandbox.state_dir())
+            .arg("--config")
+            .arg(sandbox.config_file())
+            .args(["msg", "query", "tray"])
+            .output()
+            .expect("run kabuk msg");
+        let icons: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_default();
+        icons
+            .as_array()
+            .and_then(|a| a.iter().find(|i| i["tip"] == tip.as_str()).cloned())
+    };
+    let mut ours = None;
+    wait_until(SETTLE, || {
+        ours = held();
+        ours.is_some()
+    });
+    let ours = ours.unwrap_or_else(|| panic!("our icon not held:\n{}", story(&sandbox)));
+    assert_eq!(
+        (ours["hwnd"].as_u64(), ours["shown"].as_bool()),
+        (Some(app.hwnd.0), Some(true)),
+        "{ours}"
+    );
+
+    app.close();
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || before.is_back()).is_some(), "desktop not back");
+}
+
 #[test]
 fn a_forced_kill_brings_the_taskbar_back_within_two_seconds() {
     let before = Desktop::now();
