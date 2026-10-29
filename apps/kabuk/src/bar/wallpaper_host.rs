@@ -464,6 +464,7 @@ impl Shared {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
         let next = step - now % step;
+        tracing::debug!(in_secs = next, "wallpaper drift scheduled");
         c.set_timer(super::timer::DRIFT, std::time::Duration::from_secs(next));
     }
 

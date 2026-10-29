@@ -3409,6 +3409,57 @@ fn a_still_picture_drifts_a_step_at_a_time() {
     assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
 }
 
+/// PLAN M19 U11: the drift's step set in Settings. A changed step with the same picture
+/// left the timer waiting for the old one.
+#[test]
+fn a_changed_drift_step_is_waited_for_at_once() {
+    kabuk_win::system::com_init();
+    let theirs = kabuk_win::wallpaper::backup().expect("Windows' wallpaper readable");
+    assert!(!kabuk_win::wallpaper::slideshow_on(), "a slideshow runs");
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    let picture = sandbox.dir.path().join("mine.jpg");
+    let (w, h) = (64u32, 36u32);
+    let px: Vec<u8> = (0..h)
+        .flat_map(|_| (0..w).flat_map(|x| [(x * 4) as u8, 80, 200]))
+        .collect();
+    kabuk_win::picture::save_jpeg(&picture, w, h, &px).unwrap();
+    let config = |minutes: u32| {
+        format!(
+            "schema = 1\n[wallpaper]\nkind = \"image\"\nimage = '{}'\ndrift_minutes = {minutes}\n",
+            picture.display()
+        )
+    };
+    std::fs::write(sandbox.config_file(), config(120)).unwrap();
+    let _shell = sandbox.shell_with_bar(&[]);
+    let scheduled = || sandbox.log_lines("wallpaper drift scheduled");
+    assert!(
+        wait_until(STARTUP_TIMEOUT, || scheduled() > 0).is_some(),
+        "no drift scheduled"
+    );
+    let was = scheduled();
+    std::fs::write(sandbox.config_file(), config(1)).unwrap();
+    assert!(
+        wait_until(SETTLE, || scheduled() > was).is_some(),
+        "the new step was not waited for"
+    );
+    let line = sandbox.last_log_line(&["wallpaper drift scheduled"]).unwrap();
+    let secs: u64 = line
+        .split("in_secs=")
+        .nth(1)
+        .and_then(|r| r.split_whitespace().next())
+        .and_then(|n| n.parse().ok())
+        .unwrap_or_else(|| panic!("{line}"));
+    assert!(secs <= 60, "{line}");
+    assert_eq!(sandbox.restore().0, 0);
+    assert_eq!(
+        kabuk_win::wallpaper::current().as_ref(),
+        Some(&theirs),
+        "the user's wallpaper did not come back"
+    );
+    assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
+}
+
 /// PLAN M13: a created wallpaper chosen in `[wallpaper]` starts the scene player behind
 /// the icons, which compiles it and draws it on every monitor; one that is missing from
 /// the state folder opens no window, so Windows' wallpaper under it shows its black.
