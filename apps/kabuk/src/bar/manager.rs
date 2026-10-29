@@ -1415,7 +1415,13 @@ impl Shared {
                     self.close_volume_panel();
                 } else {
                     let b = self.bars.iter().position(|b| b.primary)?;
-                    if m.wparam == 3 {
+                    if m.wparam == 4 {
+                        // A right click on the first empty spot along the bar's middle.
+                        let r = self.bars[b].rect;
+                        let (step, middle) = (4, r.h / 2);
+                        let spot = (0..r.w).step_by(step).find(|x| self.hit(b, *x, middle).is_none())?;
+                        self.click(b, spot, middle, Click::Right);
+                    } else if m.wparam == 3 {
                         self.open_system_menu(b, volume_panel::Menu::Clock, false, (view::hit::CLOCK, 0), false);
                     } else {
                         let menu = volume_panel::Menu::Volume;
@@ -3052,6 +3058,25 @@ impl Shared {
     /// The screen rectangle of a hit region of bar `index` (`module`, `value`).
     fn hit_rect(&self, index: usize, module: &str, value: u32) -> Option<PxRect> {
         let bar = self.bars.get(index)?;
+        // A place on an empty part of the bar: a sliver across it there.
+        if module == view::hit::EMPTY {
+            let along = i32::try_from(value).ok()?;
+            return Some(if geometry::vertical(bar.edge) {
+                PxRect {
+                    x: bar.rect.x,
+                    y: bar.rect.y + along,
+                    w: bar.rect.w,
+                    h: 1,
+                }
+            } else {
+                PxRect {
+                    x: bar.rect.x + along,
+                    y: bar.rect.y,
+                    w: 1,
+                    h: bar.rect.h,
+                }
+            });
+        }
         let (r, _) = bar
             .layout
             .hits
@@ -4112,6 +4137,16 @@ impl Shared {
             };
             if let (Some(menu), Some((module, value))) = (menu, hit) {
                 self.toggle_system_menu(index, menu, false, (module, value));
+            }
+            // An empty part of the bar: Windows' taskbar menu, where the click came.
+            if hit.is_none() {
+                let along = if geometry::vertical(self.bars[index].edge) {
+                    y
+                } else {
+                    x
+                };
+                let along = u32::try_from(along.max(0)).unwrap_or(0);
+                self.toggle_system_menu(index, volume_panel::Menu::Bar, false, (view::hit::EMPTY, along));
             }
             return;
         }

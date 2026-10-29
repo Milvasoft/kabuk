@@ -21,7 +21,8 @@ use crate::notify::style::NotifyStyle;
 
 const PANEL_CLASS: &str = "Kabuk.VolumePanel";
 /// Integration tests open (`wparam` 1: with the track, 2: the volume's right click menu,
-/// 3: the clock's) or close (0) the panel without taking the keyboard.
+/// 3: the clock's) or close (0) the panel without taking the keyboard; 4 right-clicks the
+/// first empty spot of the primary bar (its menu takes the keyboard, as a click's does).
 pub const MSG_TEST_VOLUME_PANEL: u32 = msg::APP + 35;
 
 pub(super) struct VolumePanel {
@@ -382,6 +383,12 @@ impl Shared {
                         let (_, _, page) = *p.menu.entries().get(usize::try_from(entry - FIRST_ENTRY).ok()?)?;
                         self.close_volume_panel();
                         tracing::info!(page, "volume panel entry");
+                        if page == volume_panel::KABUK_SETTINGS {
+                            if let Err(e) = self.open_settings() {
+                                tracing::warn!(error = %e, "settings not opened");
+                            }
+                            return Some(0);
+                        }
                         std::thread::spawn(move || {
                             kabuk_win::system::com_init();
                             if let Err(e) = kabuk_win::shellitems::open(page) {

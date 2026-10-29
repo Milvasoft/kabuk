@@ -125,6 +125,9 @@ pub enum Menu {
     Stats,
     Network,
     Battery,
+    /// An empty part of the bar: what Windows' taskbar menu holds (asked for by the user
+    /// on 2026-10-29).
+    Bar,
 }
 
 /// The volume's entries.
@@ -145,6 +148,13 @@ const STATS: [Entry; 2] = [
     ("cpu", "stats-task-manager", "taskmgr.exe"),
     ("mem", "stats-resource-monitor", "resmon.exe"),
 ];
+/// Opens Kabuk's settings: the bar's own, as the taskbar's menu opens the taskbar's.
+pub const KABUK_SETTINGS: &str = "kabuk:settings";
+/// Windows 11's taskbar menu: Task Manager, then the taskbar's settings (Kabuk's here).
+const BAR: [Entry; 2] = [
+    ("cpu", "stats-task-manager", "taskmgr.exe"),
+    ("app", "launcher-settings", KABUK_SETTINGS),
+];
 const BATTERY: [Entry; 1] = [("batt", "batt-settings", "ms-settings:batterysaver")];
 const NETWORK: [Entry; 2] = [
     ("down", "net-settings", "ms-settings:network"),
@@ -160,6 +170,7 @@ impl Menu {
             Menu::Stats => &STATS,
             Menu::Network => &NETWORK,
             Menu::Battery => &BATTERY,
+            Menu::Bar => &BAR,
         }
     }
 }
@@ -461,6 +472,7 @@ mod tests {
                 Menu::Notifications,
                 Menu::Stats,
                 Menu::Network,
+                Menu::Bar,
             ] {
                 for (_, key, _) in menu.entries() {
                     let w = i18n.tr(key);

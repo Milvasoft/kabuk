@@ -19,6 +19,9 @@ use super::style::{Arrangement, Between, Group, LayoutIndicator, Style, Typo, Ws
 
 /// Module ids, also used for hit testing.
 pub mod hit {
+    /// Not a hit: where on an empty part of the bar a right click came, to place its menu
+    /// there; the value is the place along the bar in pixels from its start.
+    pub const EMPTY: &str = "bar-empty";
     pub const WORKSPACE: &str = "workspace";
     pub const MEDIA: &str = "media";
     pub const VOLUME: &str = "vol";
