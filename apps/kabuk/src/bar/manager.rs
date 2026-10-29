@@ -727,6 +727,8 @@ struct Shared {
     game_devices: Vec<String>,
     /// Started again by the watchdog after a stop: said at the end of the start.
     restarted: bool,
+    /// The installed input languages as last read (D88).
+    input_langs: Option<Vec<kabuk_win::input_lang::InputLang>>,
     /// The shell's notices about windows (attention), to the control window.
     shell_hook: Option<kabuk_win::shellhook::ShellHook>,
     /// Tells when Windows turns the displays off and on.
@@ -1029,6 +1031,7 @@ impl BarManager {
                 notices: notify_host::NotifyState::default(),
                 game_devices: Vec::new(),
                 restarted: false,
+                input_langs: None,
                 shell_hook: None,
                 displays: None,
                 figures: (false, false),
@@ -2610,6 +2613,10 @@ impl Shared {
     /// Settings, display and shell notifications (already noted in `pending`), for any
     /// bar or the dock: `Some(result)` when `m` was one of them.
     fn on_notification(&mut self, m: &Msg) -> Option<Option<isize>> {
+        if m.id == msg::SETTINGCHANGE {
+            kabuk_win::system::settings_changed();
+            self.input_langs = None;
+        }
         let shell = m.id == self.taskbar_created || m.id == msg::DISPLAYCHANGE || m.id == msg::DPICHANGED;
         if m.id != msg::SETTINGCHANGE && !shell {
             return None;

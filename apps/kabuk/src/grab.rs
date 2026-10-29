@@ -81,6 +81,7 @@ impl Snapshot {
         self.alt_drag = cfg.windows.alt_drag;
         self.double_click_to_tile = cfg.windows.double_click_to_tile;
         self.corners = cfg.hot_corners;
+        CORNERS_ON.store(self.corners_on(), std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Whether any corner does something (else moves cost the hook nothing).
@@ -92,6 +93,10 @@ impl Snapshot {
 }
 
 pub type SharedSnapshot = Arc<Mutex<Snapshot>>;
+
+/// Whether any hot corner does something: the mouse hook looks here before taking the
+/// snapshot's lock on a move (PLAN M19 P18: it took it on every move).
+static CORNERS_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// The running input thread; dropping it removes the hook.
 pub struct InputThread {
@@ -200,7 +205,7 @@ fn hook(snapshot: SharedSnapshot, orders: Rc<dyn Fn(Order)>, me: Rc<Cell<Option<
         match e.kind {
             MouseKind::Down(_) => buttons += 1,
             MouseKind::Up(_) => buttons = buttons.saturating_sub(1),
-            MouseKind::Move => {
+            MouseKind::Move if CORNERS_ON.load(std::sync::atomic::Ordering::Relaxed) => {
                 let snap = snapshot.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 if snap.corners_on() {
                     let held = buttons > 0 || grabber.holding();
@@ -220,6 +225,7 @@ fn hook(snapshot: SharedSnapshot, orders: Rc<dyn Fn(Order)>, me: Rc<Cell<Option<
                     }
                 }
             }
+            MouseKind::Move => {}
         }
         // Moves come all the time; they matter only while a window is held.
         if e.kind == MouseKind::Move && !grabber.holding() {

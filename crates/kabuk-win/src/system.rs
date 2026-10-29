@@ -85,9 +85,31 @@ pub fn background_thread() {
     let _ = unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST) };
 }
 
-/// Windows' "Animation effects" (Settings → Accessibility → Visual effects). Read-only;
-/// on when it cannot be read, as Windows' default is.
+/// [`animations_on`] as last read: `ANIMATIONS_UNREAD`, or 1 off, 2 on.
+static ANIMATIONS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(ANIMATIONS_UNREAD);
+const ANIMATIONS_UNREAD: u8 = 0;
+
+/// Windows' "Animation effects" (Settings → Accessibility → Visual effects), read once and
+/// again after [`settings_changed`] (PLAN M19 P18: it was read several times per frame of
+/// an animation). Read-only; on when it cannot be read, as Windows' default is.
 pub fn animations_on() -> bool {
+    use std::sync::atomic::Ordering;
+    match ANIMATIONS.load(Ordering::Relaxed) {
+        ANIMATIONS_UNREAD => {
+            let on = read_animations_on();
+            ANIMATIONS.store(if on { 2 } else { 1 }, Ordering::Relaxed);
+            on
+        }
+        v => v == 2,
+    }
+}
+
+/// A `WM_SETTINGCHANGE` came: settings read once are read again when next asked.
+pub fn settings_changed() {
+    ANIMATIONS.store(ANIMATIONS_UNREAD, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn read_animations_on() -> bool {
     use windows::Win32::UI::WindowsAndMessaging::{
         SystemParametersInfoW, SPI_GETCLIENTAREAANIMATION, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
     };

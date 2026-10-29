@@ -56,7 +56,12 @@ impl Shared {
         if !self.config().bar.modules.keyboard {
             return false;
         }
-        let all = kabuk_win::input_lang::installed();
+        // The installed languages change only in Windows' settings: read once, and again
+        // after a language chord or a settings change (PLAN M19 P18: read on every focus).
+        let all = self
+            .input_langs
+            .get_or_insert_with(kabuk_win::input_lang::installed)
+            .clone();
         let shown = kabuk_core::input_lang::shown(all.len())
             .then(|| {
                 let now = kabuk_win::input_lang::current()?;
@@ -76,6 +81,7 @@ impl Shared {
 
     /// A language chord ended: the language is read once Windows has switched.
     pub(super) fn language_chord(&mut self) {
+        self.input_langs = None;
         if let Some(c) = &self.control {
             c.set_timer(timer::KEYBOARD_READ, KEYBOARD_READ_AFTER);
         }

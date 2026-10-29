@@ -233,8 +233,8 @@ impl Sampler {
                 self.net = None;
             }
         }
-        let list = self.interfaces.as_ref().map(|(l, _)| l.clone()).unwrap_or_default();
-        let Some(bytes) = received_bytes_of(&list) else {
+        let bytes = received_bytes_of(self.interfaces.as_ref().map_or(&[][..], |(l, _)| l.as_slice()));
+        let Some(bytes) = bytes else {
             // An interface went away: enumerate again next time.
             self.interfaces = None;
             self.net = None;
