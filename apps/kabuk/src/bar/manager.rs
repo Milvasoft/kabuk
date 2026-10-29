@@ -347,7 +347,8 @@ pub const DISPLAY_DEBOUNCE: Duration = Duration::from_millis(500);
 /// The bar is small and redraws only on change: the CPU rasteriser is cheap and saves
 /// the ~48 MB a hardware device costs (DECISIONS D14).
 const RASTER: Raster = Raster::Software;
-/// Volume change per wheel notch, in percent points.
+/// Volume change per wheel notch, in percent points; an arrow key moves a selected level
+/// (a volume, a brightness) as much.
 pub const VOLUME_STEP: i32 = 2;
 /// How far a wheel notch over the battery moves the monitor's brightness (PLAN M19 U16).
 pub const BRIGHTNESS_STEP: i32 = 5;

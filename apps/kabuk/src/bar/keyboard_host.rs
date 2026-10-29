@@ -1,12 +1,14 @@
 //! The bar's keyboard language (DECISIONS D88): the input language of the window in
 //! front, read when the window in front changes and after one of Windows' language
 //! chords (seen by the keyboard hook, which lets it through), and its panel, which lists
-//! the languages and switches the window that was in front.
+//! the languages and switches the window that was in front. The keyboard selects and
+//! chooses its rows as in every popup ([`crate::bar::popup_keys`]; a digit chooses the
+//! language at that place).
 
 use kabuk_ui::geom::{Point, Scale};
 use kabuk_ui::node::Layout;
 use kabuk_ui::render::WindowSurface;
-use kabuk_win::msgloop::{msg, vk, Msg, PxRect, Window};
+use kabuk_win::msgloop::{self, msg, vk, Msg, PxRect, Window};
 use kabuk_win::window::Hwnd;
 
 use super::motion_host::Shown;
@@ -14,6 +16,7 @@ use super::tooltip::{self, TIP};
 use super::view::hit;
 use super::{timer, Shared, MSG_LANGUAGE_KEYS};
 use crate::bar::keyboard_panel::{self, Row, SETTINGS, SETTINGS_PAGE};
+use crate::bar::popup_keys::{self, Step};
 
 const PANEL_CLASS: &str = "Kabuk.KeyboardPanel";
 /// Integration tests open (`wparam` 1) or close (0) the panel without taking the keyboard.
@@ -23,9 +26,13 @@ pub const MSG_TEST_KEYBOARD_PANEL: u32 = msg::APP + 61;
 pub(super) const KEYBOARD_READ_AFTER: std::time::Duration = std::time::Duration::from_millis(200);
 
 pub(super) struct KeyboardPanel {
-    _shown: Shown,
+    shown: Shown,
     layout: Layout,
     scale: Scale,
+    /// The rows drawn, to draw them again with another selected, and the one the
+    /// keyboard is on.
+    rows: Vec<Row>,
+    selected: Option<u32>,
     /// The languages listed, and the window that was in front when it opened (the one a
     /// choice switches).
     languages: Vec<kabuk_win::input_lang::InputLang>,
@@ -144,8 +151,7 @@ impl Shared {
         };
         let Some(b) = self.bars.get(bar) else { return };
         let scale = b.scale;
-        let node = keyboard_panel::view(&rows, &self.i18n, self.look.style.text_scale, &TIP);
-        let layout = kabuk_ui::node::layout(&node, Point::default(), &self.gpu.text);
+        let layout = self.keyboard_panel_layout(&rows, None);
         let size = (
             (layout.size.w * scale.0).ceil() as i32,
             (layout.size.h * scale.0).ceil() as i32,
@@ -177,12 +183,40 @@ impl Shared {
         }
         tracing::info!(languages = rows.len(), "keyboard panel opened");
         self.keyboard_panel = Some(KeyboardPanel {
-            _shown: shown,
+            shown,
             layout,
             scale,
+            rows,
+            selected: None,
             languages,
             target,
         });
+    }
+
+    /// The panel laid out with row `selected` drawn selected.
+    fn keyboard_panel_layout(&self, rows: &[Row], selected: Option<u32>) -> Layout {
+        let node = keyboard_panel::view(rows, &self.i18n, self.look.style.text_scale, &TIP);
+        let node = popup_keys::marked(node, keyboard_panel::HIT, selected, &TIP);
+        kabuk_ui::node::layout(&node, Point::default(), &self.gpu.text)
+    }
+
+    /// A click on row `value` (or Enter on it, or its digit): a language, or the settings.
+    fn keyboard_panel_click(&mut self, value: u32) {
+        let Some(p) = self.keyboard_panel.as_ref() else { return };
+        let chosen = usize::try_from(value)
+            .ok()
+            .and_then(|i| p.languages.get(i))
+            .map(|l| l.hkl);
+        let target = p.target;
+        self.close_keyboard_panel();
+        if value == SETTINGS {
+            tracing::info!(page = SETTINGS_PAGE, "keyboard panel link");
+            self.open_off_thread(SETTINGS_PAGE.into(), crate::notify::Failure::Settings);
+        } else if let (Some(hkl), Some(window)) = (chosen, target) {
+            tracing::info!("input language chosen");
+            kabuk_win::input_lang::switch(window, hkl);
+            self.language_chord();
+        }
     }
 
     pub(super) fn on_keyboard_panel(&mut self, m: Msg) -> Option<isize> {
@@ -195,21 +229,28 @@ impl Shared {
                     y: p.scale.dips(y),
                 };
                 let value = p.layout.hit_test(at).filter(|h| h.module == keyboard_panel::HIT)?.value;
-                let chosen = p.languages.get(value as usize).map(|l| l.hkl);
-                let target = p.target;
-                self.close_keyboard_panel();
-                if value == SETTINGS {
-                    tracing::info!(page = SETTINGS_PAGE, "keyboard panel link");
-                    self.open_off_thread(SETTINGS_PAGE.into(), crate::notify::Failure::Settings);
-                } else if let (Some(hkl), Some(window)) = (chosen, target) {
-                    tracing::info!("input language chosen");
-                    kabuk_win::input_lang::switch(window, hkl);
-                    self.language_chord();
-                }
+                self.keyboard_panel_click(value);
                 Some(0)
             }
             msg::KEYDOWN if m.wparam == vk::ESCAPE => {
                 self.close_keyboard_panel();
+                Some(0)
+            }
+            msg::KEYDOWN => {
+                let key = popup_keys::Key::of(m.wparam, msgloop::shift_held(), true)?;
+                let p = self.keyboard_panel.as_ref()?;
+                match popup_keys::step(&popup_keys::entries(&p.layout, keyboard_panel::HIT), p.selected, key) {
+                    Step::Select(v) => {
+                        let layout = self.keyboard_panel_layout(&p.rows, Some(v));
+                        let p = self.keyboard_panel.as_mut()?;
+                        p.shown.repaint(&self.gpu, &layout, &self.look.palette, p.scale);
+                        let _ = self.gpu.commit();
+                        p.layout = layout;
+                        p.selected = Some(v);
+                    }
+                    Step::Activate(v) => self.keyboard_panel_click(v),
+                    Step::Same | Step::Adjust(..) => {}
+                }
                 Some(0)
             }
             msg::ACTIVATE => {

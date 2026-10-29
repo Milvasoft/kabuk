@@ -4,7 +4,7 @@
 
 use kabuk_i18n::I18n;
 use kabuk_ui::geom::Insets;
-use kabuk_ui::node::{Align, FontRole, Node, Paint, Role, Span, TextSpec};
+use kabuk_ui::node::{Align, Axis, FontRole, Node, Paint, Role, Span, TextSpec};
 
 use super::tooltip::TipStyle;
 
@@ -72,6 +72,8 @@ pub fn view(rows: &[Row], i18n: &I18n, text_scale: f32, s: &TipStyle) -> Node {
             .padding(Insets::symmetric(s.pad_h, 0.0))
             .size(None, Some(ROW))
             .hit(HIT, u32::try_from(i).unwrap_or(u32::MAX))
+            // As wide as the panel: a click anywhere on it counts, the keyboard's fill spans it.
+            .fill(Axis::Row, 0.0)
         })
         .collect();
     out.push(
@@ -83,7 +85,8 @@ pub fn view(rows: &[Row], i18n: &I18n, text_scale: f32, s: &TipStyle) -> Node {
         .align(Align::Center)
         .padding(Insets::symmetric(s.pad_h, 0.0))
         .size(None, Some(ROW))
-        .hit(HIT, SETTINGS),
+        .hit(HIT, SETTINGS)
+        .fill(Axis::Row, 0.0),
     );
     Node::column(out)
         .align(Align::Start)

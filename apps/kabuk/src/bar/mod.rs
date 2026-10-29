@@ -13,6 +13,7 @@ pub mod manager;
 pub mod media_card;
 pub mod network_panel;
 pub mod pictures;
+pub mod popup_keys;
 pub mod power_menu;
 pub mod privacy_panel;
 pub mod quick_panel;

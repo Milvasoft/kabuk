@@ -2,7 +2,9 @@
 //! DECISIONS D88): opened by a click on the clock or the bell while its module is on,
 //! placed under what was clicked. The notices are read on a thread of their own (tens of
 //! milliseconds) and the panel is drawn again when they come, and whenever Windows'
-//! notification centre changes while it is open.
+//! notification centre changes while it is open. Left and Right turn the month; the
+//! other keys move over its links and buttons as in every popup
+//! ([`crate::bar::popup_keys`]), and Enter or Space clicks the one selected.
 
 use std::sync::{Arc, Mutex};
 
@@ -19,6 +21,7 @@ use super::motion_host::Shown;
 use super::tooltip::{self, TIP};
 use super::{Shared, MSG_NOTICES_READ};
 use crate::bar::calendar_panel::{self, Action, NoticeRow, Panel};
+use crate::bar::popup_keys::{self, Step};
 
 const PANEL_CLASS: &str = "Kabuk.CalendarPanel";
 /// Integration tests open (`wparam` 1) or close (0) the panel without taking the keyboard,
@@ -38,6 +41,8 @@ pub(super) struct CalendarPanel {
     bar: usize,
     anchor: (&'static str, u32),
     panel: Panel,
+    /// The part the keyboard is on.
+    selected: Option<u32>,
 }
 
 impl Shared {
@@ -151,8 +156,9 @@ impl Shared {
         again: bool,
         activate: bool,
     ) {
+        let selected = self.calendar_panel.as_ref().and_then(|p| p.selected);
         if again {
-            if let Some((layout, rect, scale)) = self.calendar_place(bar, anchor, &panel) {
+            if let Some((layout, rect, scale)) = self.calendar_place(bar, anchor, &panel, selected) {
                 if let Some(p) = self.calendar_panel.as_mut() {
                     p.shown.redraw(&self.gpu, rect, &layout, &self.look.palette, scale);
                     let _ = self.gpu.commit();
@@ -180,7 +186,7 @@ impl Shared {
                 }
             }
         };
-        let Some((layout, rect, scale)) = self.calendar_place(bar, anchor, &panel) else {
+        let Some((layout, rect, scale)) = self.calendar_place(bar, anchor, &panel, selected) else {
             return;
         };
         window.set_rect(rect);
@@ -210,19 +216,23 @@ impl Shared {
             bar,
             anchor,
             panel,
+            selected,
         });
     }
 
-    /// The panel laid out for `panel` and its place under `anchor` on bar `bar`.
+    /// The panel laid out for `panel`, with part `selected` drawn selected, and its place
+    /// under `anchor` on bar `bar`.
     fn calendar_place(
         &self,
         bar: usize,
         anchor: (&'static str, u32),
         panel: &Panel,
+        selected: Option<u32>,
     ) -> Option<(Layout, PxRect, Scale)> {
         let b = self.bars.get(bar)?;
         let scale = b.scale;
         let node = calendar_panel::view(panel, &self.i18n, self.look.style.text_scale, &TIP);
+        let node = popup_keys::marked(node, calendar_panel::HIT, selected, &TIP);
         let layout = kabuk_ui::node::layout(&node, Point::default(), &self.gpu.text);
         let size = (
             (layout.size.w * scale.0).ceil() as i32,
@@ -313,7 +323,20 @@ impl Shared {
                     }
                     vk::LEFT => calendar_panel::PREVIOUS,
                     vk::RIGHT => calendar_panel::NEXT,
-                    _ => return None,
+                    key => {
+                        let key = popup_keys::Key::of(key, msgloop::shift_held(), false)?;
+                        let p = self.calendar_panel.as_mut()?;
+                        match popup_keys::step(&popup_keys::entries(&p.layout, calendar_panel::HIT), p.selected, key) {
+                            Step::Select(v) => {
+                                p.selected = Some(v);
+                                let panel = p.panel.clone();
+                                self.reshow_calendar_panel(panel);
+                                return Some(0);
+                            }
+                            Step::Activate(v) => v,
+                            Step::Same | Step::Adjust(..) => return Some(0),
+                        }
+                    }
                 };
                 let action = self.calendar_panel.as_mut()?.panel.click(value);
                 self.calendar_action(action);

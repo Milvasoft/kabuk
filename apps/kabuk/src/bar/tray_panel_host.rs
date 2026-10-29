@@ -4,18 +4,21 @@
 //! and on Esc. After a click on one of its icons it stays while that program shows its
 //! menu or its windows, and closes once another program, the desktop or a taskbar comes
 //! to the front, or the bar is clicked (asked for by the user: it closed as the menu
-//! opened, and as the program opened).
+//! opened, and as the program opened). The keyboard moves over its icons as in every popup, by rows and
+//! columns ([`crate::bar::popup_keys::step_grid`]), and Enter or Space clicks the one
+//! selected.
 
 use kabuk_core::tray::Click;
 use kabuk_ui::geom::{Point, Scale};
 use kabuk_ui::node::Layout;
 use kabuk_ui::render::WindowSurface;
-use kabuk_win::msgloop::{msg, vk, Msg, PxRect, Window};
+use kabuk_win::msgloop::{self, msg, vk, Msg, PxRect, Window};
 
 use super::motion_host::Shown;
 use super::tooltip::{self, TIP};
 use super::view::hit;
 use super::Shared;
+use crate::bar::popup_keys::{self, Step};
 use crate::bar::tray_panel;
 
 const PANEL_CLASS: &str = "Kabuk.TrayPanel";
@@ -37,6 +40,8 @@ pub(super) struct TrayPanel {
     /// The process of the icon clicked last: its menu or windows in front keep the panel;
     /// anything else in front closes it.
     held_for: Option<u32>,
+    /// The icon the keyboard is on.
+    selected: Option<u32>,
 }
 
 /// Whether the panel held for process `owner` stays with the window of process `fg_pid`
@@ -85,10 +90,12 @@ impl Shared {
         let weak = self.me.clone();
         // Drawn again while open: it does not enter again, and keeps the program it is held for.
         let mut held_for = None;
+        let mut selected = None;
         // Open already: drawn again in place (`Ok`), else a new window (`Err`).
         let held = match self.tray_panel.take() {
             Some(p) => {
                 held_for = p.held_for;
+                selected = p.selected;
                 Ok(p.shown)
             }
             None => match Window::input_surface(PANEL_CLASS, "", PxRect::default(), move |m| {
@@ -106,10 +113,9 @@ impl Shared {
         let Some(b) = self.bars.get(bar) else { return };
         let scale = b.scale;
         let images: Vec<u64> = self.hidden_tray().into_iter().map(|(_, k)| k).collect();
-        let Some(node) = tray_panel::view(&images, self.look.style.tray_icon, self.look.style.tray_gap, &TIP) else {
+        let Some(layout) = self.tray_panel_layout(&images, selected) else {
             return;
         };
-        let layout = kabuk_ui::node::layout(&node, Point::default(), &self.gpu.text);
         let size = (
             (layout.size.w * scale.0).ceil() as i32,
             (layout.size.h * scale.0).ceil() as i32,
@@ -154,7 +160,51 @@ impl Shared {
             scale,
             bar,
             held_for,
+            selected,
         });
+    }
+
+    /// The panel of icons `images` laid out with icon `selected` drawn selected; `None`
+    /// without icons.
+    fn tray_panel_layout(&self, images: &[u64], selected: Option<u32>) -> Option<Layout> {
+        let node = tray_panel::view(images, self.look.style.tray_icon, self.look.style.tray_gap, &TIP)?;
+        let node = popup_keys::marked(node, tray_panel::HIT, selected, &TIP);
+        Some(kabuk_ui::node::layout(&node, Point::default(), &self.gpu.text))
+    }
+
+    /// A key on the panel: the selection moves over the icons, Enter or Space clicks one
+    /// as the mouse does, at its middle.
+    fn tray_panel_key(&mut self, key: popup_keys::Key) {
+        let Some(p) = self.tray_panel.as_ref() else { return };
+        let entries = popup_keys::entries(&p.layout, tray_panel::HIT);
+        match popup_keys::step_grid(&entries, tray_panel::COLUMNS, p.selected, key) {
+            Step::Select(i) => {
+                let images: Vec<u64> = self.hidden_tray().into_iter().map(|(_, k)| k).collect();
+                let Some(layout) = self.tray_panel_layout(&images, Some(i)) else {
+                    return;
+                };
+                let Some(p) = self.tray_panel.as_mut() else { return };
+                p.shown.repaint(&self.gpu, &layout, &self.look.palette, p.scale);
+                let _ = self.gpu.commit();
+                p.layout = layout;
+                p.selected = Some(i);
+            }
+            Step::Activate(i) => {
+                let Some((cell, _)) = p
+                    .layout
+                    .hits
+                    .iter()
+                    .find(|(_, h)| h.module == tray_panel::HIT && h.value == i)
+                else {
+                    return;
+                };
+                let (x, y) = (p.scale.px(cell.x + cell.w / 2.0), p.scale.px(cell.y + cell.h / 2.0));
+                let origin = kabuk_win::window::Hwnd(p.shown.window().hwnd().0).window_rect();
+                let (sx, sy) = origin.map_or((x, y), |r| (r.left + x, r.top + y));
+                self.panel_click(usize::try_from(i).unwrap_or(usize::MAX), Click::Left, sx, sy);
+            }
+            Step::Same | Step::Adjust(..) => {}
+        }
     }
 
     /// The tray changed while the panel is open: draw it again (or close it, empty).
@@ -205,6 +255,11 @@ impl Shared {
             msg::LBUTTONDBLCLK => Click::Double,
             msg::KEYDOWN if m.wparam == vk::ESCAPE => {
                 self.close_tray_panel();
+                return Some(0);
+            }
+            msg::KEYDOWN => {
+                let key = popup_keys::Key::of(m.wparam, msgloop::shift_held(), false)?;
+                self.tray_panel_key(key);
                 return Some(0);
             }
             msg::ACTIVATE => {

@@ -194,7 +194,8 @@ pub struct Node {
     /// Extra displacement inside a layer (CSS `position: relative` offsets).
     pub offset: Point,
     /// Inside a layer: stretch along this axis to the layer's size minus an inset on
-    /// each side (CSS `left: 6px; right: 6px`).
+    /// each side (CSS `left: 6px; right: 6px`); in a box, across it (a column's row as
+    /// wide as the column, CSS `align-self: stretch`).
     pub fill: Option<(Axis, f32)>,
 }
 
@@ -600,8 +601,16 @@ fn place(node: &Node, me: &Measured, rect: Rect, out: &mut Layout) {
                 Axis::Column => inner.y,
             };
             for (child, s) in children.iter().zip(sizes) {
-                let r = match axis {
-                    Axis::Row => {
+                let r = match (axis, child.fill) {
+                    // A child filled across the box takes its width (a menu's row) or
+                    // height, less the inset on each side.
+                    (Axis::Row, Some((Axis::Column, inset))) => {
+                        Rect::new(cursor, inner.y + inset, s.size.w, (inner.h - 2.0 * inset).max(0.0))
+                    }
+                    (Axis::Column, Some((Axis::Row, inset))) => {
+                        Rect::new(inner.x + inset, cursor, (inner.w - 2.0 * inset).max(0.0), s.size.h)
+                    }
+                    (Axis::Row, _) => {
                         let y = match node.align {
                             Align::Start => inner.y,
                             Align::Center => inner.y + (inner.h - s.size.h) / 2.0,
@@ -610,7 +619,7 @@ fn place(node: &Node, me: &Measured, rect: Rect, out: &mut Layout) {
                         };
                         Rect::new(cursor, y, s.size.w, s.size.h)
                     }
-                    Axis::Column => {
+                    (Axis::Column, _) => {
                         let x = match node.align {
                             Align::Start | Align::Baseline => inner.x,
                             Align::Center => inner.x + (inner.w - s.size.w) / 2.0,
@@ -913,6 +922,76 @@ mod tests {
         ]);
         let l = layout(&ws, Point::default(), &Fake);
         assert_eq!(rects(&l)[1], Rect::new(6.0, 28.0, 32.0 - 12.0, 2.0));
+    }
+
+    /// A menu's rows as wide as the menu, whatever their words: the selected one's fill
+    /// and its click region reach across it.
+    #[test]
+    fn box_children_can_fill_across_the_box() {
+        let row = |t: &str| {
+            Node::row(vec![text(t, 10.0)])
+                .paint(Paint {
+                    fill: Role::SurfaceSel,
+                    border: None,
+                    radius: 0.0,
+                })
+                .fill(Axis::Row, 1.0)
+        };
+        let menu = Node::column(vec![row("a"), row("abcdef"), text("x", 10.0)])
+            .align(Align::Start)
+            .padding(Insets::all(4.0));
+        let l = layout(&menu, Point::default(), &Fake);
+        let panels: Vec<Rect> = l
+            .draws
+            .iter()
+            .filter_map(|d| match d {
+                Draw::Panel { rect, .. } => Some(*rect),
+                _ => None,
+            })
+            .collect();
+        let widest = rects(&l).iter().map(|r| r.w).fold(0.0, f32::max);
+        assert_eq!(panels.len(), 2);
+        assert!(
+            panels.iter().all(|r| r.x == 5.0 && r.w == l.size.w - 10.0),
+            "{panels:?}"
+        );
+        assert!(widest <= l.size.w - 8.0);
+        // The words still start at the row's start; a child not filled keeps its width.
+        let words: Vec<Rect> = l
+            .draws
+            .iter()
+            .filter_map(|d| match d {
+                Draw::Text { rect, .. } => Some(*rect),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(words[0].x, 5.0);
+        assert!(words[2].w < panels[0].w);
+        // Across a row: a child as tall as the row, less its inset.
+        let bar = Node::row(vec![text("tall", 30.0), Node::spacer(2.0, 0.0).fill(Axis::Column, 3.0)]);
+        let l = layout(&bar, Point::default(), &Fake);
+        let tall = l.size.h;
+        let r = layout(
+            &Node::row(vec![
+                text("tall", 30.0),
+                Node::spacer(2.0, 0.0).fill(Axis::Column, 3.0).paint(Paint {
+                    fill: Role::Fg,
+                    border: None,
+                    radius: 0.0,
+                }),
+            ]),
+            Point::default(),
+            &Fake,
+        );
+        let line = r
+            .draws
+            .iter()
+            .find_map(|d| match d {
+                Draw::Panel { rect, .. } => Some(*rect),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!((line.y, line.h), (3.0, tall - 6.0));
     }
 
     #[test]

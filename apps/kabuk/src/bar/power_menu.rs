@@ -6,7 +6,7 @@
 
 use kabuk_i18n::I18n;
 use kabuk_ui::geom::Insets;
-use kabuk_ui::node::{Align, FontRole, Node, Paint, Role, Span, TextSpec};
+use kabuk_ui::node::{Align, Axis, FontRole, Node, Paint, Role, Span, TextSpec};
 
 use super::tooltip::TipStyle;
 
@@ -81,6 +81,8 @@ pub fn view(i18n: &I18n, text_scale: f32, s: &TipStyle, mark: u64) -> Node {
             .padding(Insets::symmetric(s.pad_h, 0.0))
             .size(None, Some(ROW))
             .hit(HIT, u32::try_from(i).unwrap_or(u32::MAX))
+            // As wide as the menu: a click anywhere on it counts, the keyboard's fill spans it.
+            .fill(Axis::Row, 0.0)
         })
         .collect();
     Node::column(rows)
@@ -95,7 +97,8 @@ pub fn view(i18n: &I18n, text_scale: f32, s: &TipStyle, mark: u64) -> Node {
 
 #[cfg(test)]
 mod tests {
-    //! Edge cases: every entry has words in both languages and is clickable by its index.
+    //! Edge cases: every entry has words in both languages, is clickable by its index and
+    //! is as wide as the menu.
     use super::*;
     use crate::bar::tooltip::TIP;
     use kabuk_i18n::Lang;
@@ -130,6 +133,10 @@ mod tests {
                 .map(|(_, h)| h.value)
                 .collect();
             assert_eq!(hits, vec![0, 1, 2, 3, 4, 5]);
+            // Every entry as wide as the menu, whatever its words (the keyboard's fill and
+            // a click reach across it).
+            let pad = 2.0 * (TIP.pad_v + TIP.border);
+            assert!(l.hits.iter().all(|(r, _)| (r.w - (l.size.w - pad)).abs() < 0.01));
             // Kabuk's settings come first, with the mark's picture.
             assert!(l
                 .draws

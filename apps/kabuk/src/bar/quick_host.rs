@@ -2,7 +2,9 @@
 //! D88): opened by the bar's quick settings button or the battery, placed under it. What
 //! is slow to ask Windows (the radios, the hotspot, the brightness) is read and set on
 //! threads of their own, and the panel is drawn again when they answer; the volume is
-//! the bar's own. A level follows a press and a drag.
+//! the bar's own. A level follows a press and a drag. The keyboard moves over the
+//! tiles, levels and links as in every popup ([`crate::bar::popup_keys`]): Enter or Space
+//! clicks the one selected, Left and Right move a selected level a wheel notch's step.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -17,6 +19,7 @@ use kabuk_win::msgloop::{self, msg, vk, Msg, PxRect, Window};
 use super::motion_host::Shown;
 use super::tooltip::{self, TIP};
 use super::{Shared, MSG_QUICK_READ};
+use crate::bar::popup_keys::{self, Step};
 use crate::bar::quick_panel::{self, Action, Quick, Screen, Tile, VOLUME};
 use crate::notify::style::NotifyStyle;
 
@@ -77,6 +80,8 @@ pub(super) struct QuickPanel {
     /// whether one is.
     pending: Arc<Mutex<Vec<(brightness::Panel, u8)>>>,
     setting: Arc<AtomicBool>,
+    /// The part the keyboard is on.
+    selected: Option<u32>,
 }
 
 impl Shared {
@@ -176,8 +181,9 @@ impl Shared {
     }
 
     fn show_quick_panel(&mut self, bar: usize, anchor: (&'static str, u32), quick: Quick, again: bool, activate: bool) {
+        let selected = self.quick_panel.as_ref().and_then(|p| p.selected);
         if again {
-            if let Some((layout, rect, scale)) = self.quick_place(bar, anchor, &quick) {
+            if let Some((layout, rect, scale)) = self.quick_place(bar, anchor, &quick, selected) {
                 if let Some(p) = self.quick_panel.as_mut() {
                     p.shown.redraw(&self.gpu, rect, &layout, &self.look.palette, scale);
                     let _ = self.gpu.commit();
@@ -205,7 +211,7 @@ impl Shared {
                 }
             }
         };
-        let Some((layout, rect, scale)) = self.quick_place(bar, anchor, &quick) else {
+        let Some((layout, rect, scale)) = self.quick_place(bar, anchor, &quick, selected) else {
             return;
         };
         window.set_rect(rect);
@@ -239,11 +245,19 @@ impl Shared {
             dragging,
             pending,
             setting,
+            selected,
         });
     }
 
-    /// The panel laid out for `quick` and its place under `anchor` on bar `bar`.
-    fn quick_place(&self, bar: usize, anchor: (&'static str, u32), quick: &Quick) -> Option<(Layout, PxRect, Scale)> {
+    /// The panel laid out for `quick`, with part `selected` drawn selected, and its place
+    /// under `anchor` on bar `bar`.
+    fn quick_place(
+        &self,
+        bar: usize,
+        anchor: (&'static str, u32),
+        quick: &Quick,
+        selected: Option<u32>,
+    ) -> Option<(Layout, PxRect, Scale)> {
         let b = self.bars.get(bar)?;
         let scale = b.scale;
         let node = quick_panel::view(
@@ -253,6 +267,7 @@ impl Shared {
             &TIP,
             &NotifyStyle::of(self.config().appearance.look),
         );
+        let node = popup_keys::marked(node, quick_panel::HIT, selected, &TIP);
         let layout = kabuk_ui::node::layout(&node, Point::default(), &self.gpu.text);
         let size = (
             (layout.size.w * scale.0).ceil() as i32,
@@ -375,6 +390,12 @@ impl Shared {
             return;
         };
         let percent = quick_panel::level_at(p.scale.dips(x), *track);
+        self.set_quick_level(which, percent);
+    }
+
+    /// Sets level `which` (the volume or a monitor's brightness) to `percent`.
+    fn set_quick_level(&mut self, which: u32, percent: u32) {
+        let Some(p) = self.quick_panel.as_ref() else { return };
         let mut quick = p.quick.clone();
         if which == VOLUME {
             if let Some(a) = &self.audio {
@@ -458,6 +479,37 @@ impl Shared {
         }
     }
 
+    /// A key on the panel other than Esc.
+    fn quick_panel_key(&mut self, key: popup_keys::Key) {
+        let Some(p) = self.quick_panel.as_mut() else { return };
+        let is_level = |v: u32| v == VOLUME || p.quick.level_of(v).is_some();
+        match popup_keys::step(&popup_keys::entries(&p.layout, quick_panel::HIT), p.selected, key) {
+            Step::Select(v) => {
+                p.selected = Some(v);
+                let quick = p.quick.clone();
+                self.reshow_quick_panel(quick);
+            }
+            Step::Activate(v) if !is_level(v) => {
+                let action = p.quick.click(v);
+                self.quick_action(action);
+            }
+            Step::Adjust(v, way) if is_level(v) => {
+                let now = if v == VOLUME {
+                    p.quick.volume.map(|(percent, _)| percent)
+                } else {
+                    p.quick
+                        .level_of(v)
+                        .and_then(|i| p.quick.screens.get(i))
+                        .map(|s| u32::from(s.percent))
+                };
+                if let Some(now) = now {
+                    self.set_quick_level(v, popup_keys::stepped(now, way, super::VOLUME_STEP));
+                }
+            }
+            Step::Activate(_) | Step::Adjust(..) | Step::Same => {}
+        }
+    }
+
     pub(super) fn on_quick_panel(&mut self, m: Msg) -> Option<isize> {
         let is_level = |p: &QuickPanel, v: u32| v == VOLUME || p.quick.level_of(v).is_some();
         match m.id {
@@ -503,6 +555,11 @@ impl Shared {
             }
             msg::KEYDOWN if m.wparam == vk::ESCAPE => {
                 self.close_quick_panel();
+                Some(0)
+            }
+            msg::KEYDOWN => {
+                let key = popup_keys::Key::of(m.wparam, msgloop::shift_held(), false)?;
+                self.quick_panel_key(key);
                 Some(0)
             }
             msg::ACTIVATE => {

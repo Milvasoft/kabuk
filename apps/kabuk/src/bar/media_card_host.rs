@@ -1,28 +1,35 @@
 //! The media card on the bar thread (`bar::media_card`, DECISIONS D66): opened by a right
 //! click on the media module and placed like the tray panel; its buttons step the
 //! session; a change of what plays draws it again; a click elsewhere or Esc closes it.
+//! The keyboard moves over its buttons as in every popup ([`crate::bar::popup_keys`];
+//! Left and Right too, they stand in a row) and Enter or Space presses one.
 
 use kabuk_ui::geom::{Point, Scale};
 use kabuk_ui::motion::Level;
 use kabuk_ui::node::Layout;
 use kabuk_ui::render::WindowSurface;
-use kabuk_win::msgloop::{msg, vk, Msg, PxRect, Window};
+use kabuk_win::msgloop::{self, msg, vk, Msg, PxRect, Window};
 
 use super::motion_host::Shown;
 use super::tooltip::{self, TIP};
 use super::view::hit;
 use super::Shared;
 use crate::bar::media_card::{self, Button, Card};
+use crate::bar::popup_keys::{self, Step};
 
 const CARD_CLASS: &str = "Kabuk.MediaCard";
 /// Integration tests open (`wparam` 1) the card without taking the keyboard, or close it.
 pub const MSG_TEST_MEDIA_CARD: u32 = msg::APP + 50;
 
 pub(super) struct MediaCard {
-    _shown: Shown,
+    shown: Shown,
     layout: Layout,
     scale: Scale,
     bar: usize,
+    /// What it shows, to draw it again with another button selected, and the button the
+    /// keyboard is on.
+    card: Card,
+    selected: Option<u32>,
 }
 
 impl Shared {
@@ -77,7 +84,8 @@ impl Shared {
         self.close_privacy_panel();
         self.close_keyboard_panel();
         self.close_network_panel();
-        self.media_card = None;
+        // Drawn again for a change: the keyboard stays on its button.
+        let selected = self.media_card.take().and_then(|c| c.selected);
         let weak = self.me.clone();
         let window = match Window::input_surface(CARD_CLASS, "", PxRect::default(), move |m| {
             let rc = weak.upgrade()?;
@@ -94,8 +102,7 @@ impl Shared {
         let (scale, edge, strip, monitor) = (b.scale, b.edge, b.rect, super::px_rect(b.monitor.rect));
         let anchor = self.hit_rect(bar, hit::MEDIA, 0).unwrap_or(strip);
         let card = self.media_card_data();
-        let node = media_card::view(&card, &self.i18n, self.look.style.text_scale, &TIP);
-        let layout = kabuk_ui::node::layout(&node, Point::default(), &self.gpu.text);
+        let layout = self.media_card_layout(&card, selected);
         let size = (
             (layout.size.w * scale.0).ceil() as i32,
             (layout.size.h * scale.0).ceil() as i32,
@@ -120,11 +127,33 @@ impl Shared {
         }
         tracing::info!(title = %card.title, cover = card.cover.is_some(), "media card opened");
         self.media_card = Some(MediaCard {
-            _shown: shown,
+            shown,
             layout,
             scale,
             bar,
+            card,
+            selected,
         });
+    }
+
+    /// The card for `card` laid out with button `selected` drawn selected.
+    fn media_card_layout(&self, card: &Card, selected: Option<u32>) -> Layout {
+        let node = media_card::view(card, &self.i18n, self.look.style.text_scale, &TIP);
+        let node = popup_keys::marked(node, media_card::HIT, selected, &TIP);
+        kabuk_ui::node::layout(&node, Point::default(), &self.gpu.text)
+    }
+
+    /// A click on button `value` (or Enter on it).
+    fn media_card_click(&mut self, value: u32) {
+        let Some(b) = Button::from_value(value) else { return };
+        tracing::info!(button = ?b, "media card");
+        if let Some(media) = &self.media {
+            match b {
+                Button::Previous => media.previous(),
+                Button::Toggle => media.toggle(),
+                Button::Next => media.next(),
+            }
+        }
     }
 
     /// What plays changed: an open card shows it.
@@ -143,23 +172,34 @@ impl Shared {
                     x: c.scale.dips(x),
                     y: c.scale.dips(y),
                 };
-                let b = c
-                    .layout
-                    .hit_test(at)
-                    .filter(|h| h.module == media_card::HIT)
-                    .and_then(|h| Button::from_value(h.value))?;
-                tracing::info!(button = ?b, "media card");
-                if let Some(media) = &self.media {
-                    match b {
-                        Button::Previous => media.previous(),
-                        Button::Toggle => media.toggle(),
-                        Button::Next => media.next(),
-                    }
-                }
+                let value = c.layout.hit_test(at).filter(|h| h.module == media_card::HIT)?.value;
+                self.media_card_click(value);
                 Some(0)
             }
             msg::KEYDOWN if m.wparam == vk::ESCAPE => {
                 self.close_media_card();
+                Some(0)
+            }
+            msg::KEYDOWN => {
+                let key = match popup_keys::Key::of(m.wparam, msgloop::shift_held(), false)? {
+                    // The buttons stand in a row.
+                    popup_keys::Key::Less => popup_keys::Key::Up,
+                    popup_keys::Key::More => popup_keys::Key::Down,
+                    k => k,
+                };
+                let c = self.media_card.as_ref()?;
+                match popup_keys::step(&popup_keys::entries(&c.layout, media_card::HIT), c.selected, key) {
+                    Step::Select(v) => {
+                        let layout = self.media_card_layout(&c.card, Some(v));
+                        let c = self.media_card.as_mut()?;
+                        c.shown.repaint(&self.gpu, &layout, &self.look.palette, c.scale);
+                        let _ = self.gpu.commit();
+                        c.layout = layout;
+                        c.selected = Some(v);
+                    }
+                    Step::Activate(v) => self.media_card_click(v),
+                    Step::Same | Step::Adjust(..) => {}
+                }
                 Some(0)
             }
             msg::ACTIVATE => {

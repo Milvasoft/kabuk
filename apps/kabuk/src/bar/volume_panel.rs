@@ -10,7 +10,7 @@
 
 use kabuk_i18n::I18n;
 use kabuk_ui::geom::{Insets, Rect};
-use kabuk_ui::node::{Align, FontRole, Node, Paint, Role, Span, TextSpec};
+use kabuk_ui::node::{Align, Axis, FontRole, Node, Paint, Role, Span, TextSpec};
 use kabuk_win::audio::Session;
 
 use super::tooltip::TipStyle;
@@ -221,6 +221,8 @@ fn entry_row(
     .padding(Insets::symmetric(s.pad_h, 0.0))
     .size(None, Some(ROW))
     .hit(HIT, value)
+    // As wide as the panel: a click anywhere on it counts, the keyboard's fill spans it.
+    .fill(Axis::Row, 0.0)
 }
 
 /// The widest an output's name may be before it is cut (DIPs).

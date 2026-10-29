@@ -90,6 +90,15 @@ impl Shown {
         tracing::debug!(?rect, "popup drawn again");
     }
 
+    /// Draws the popup again at its size and place (a selection moved). The caller commits.
+    pub(super) fn repaint(&mut self, gpu: &Gpu, layout: &Layout, palette: &Palette, scale: Scale) {
+        if let Some(s) = self.surface.as_mut() {
+            if let Err(e) = s.render(gpu, layout, palette, scale, (0.0, 0.0), None) {
+                tracing::warn!(error = %e, "popup not drawn again");
+            }
+        }
+    }
+
     /// Plays the exit from where the entrance is; `None` when there is nothing to play
     /// and the window can go now. The caller commits.
     fn leave(mut self, gpu: &Gpu, level: Level) -> Option<Leaving> {

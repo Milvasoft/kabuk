@@ -5,7 +5,7 @@
 use kabuk_core::privacy::Use;
 use kabuk_i18n::I18n;
 use kabuk_ui::geom::Insets;
-use kabuk_ui::node::{Align, FontRole, Node, Paint, Role, Span, TextSpec};
+use kabuk_ui::node::{Align, Axis, FontRole, Node, Paint, Role, Span, TextSpec};
 
 use super::tooltip::TipStyle;
 
@@ -44,6 +44,8 @@ fn row(icon: Node, text: Node, s: &TipStyle) -> Node {
         .align(Align::Center)
         .padding(Insets::symmetric(s.pad_h, 0.0))
         .size(None, Some(ROW))
+        // As wide as the panel: a click anywhere on it counts, the keyboard's fill spans it.
+        .fill(Axis::Row, 0.0)
 }
 
 /// The panel's tree: a line per program and what it uses, then the settings link.

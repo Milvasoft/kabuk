@@ -8,7 +8,7 @@
 use kabuk_core::jumplist::{Group, Heading, Launch};
 use kabuk_i18n::I18n;
 use kabuk_ui::geom::Insets;
-use kabuk_ui::node::{Align, FontRole, Node, Paint, Role, Span, TextSpec};
+use kabuk_ui::node::{Align, Axis, FontRole, Node, Paint, Role, Span, TextSpec};
 
 use super::tooltip::TipStyle;
 
@@ -184,7 +184,9 @@ pub fn view(i18n: &I18n, text_scale: f32, s: &TipStyle, subject: &Subject) -> No
             .align(Align::Center)
             .padding(Insets::symmetric(s.pad_h, 0.0))
             .size(None, Some(ROW))
-            .hit(HIT, u32::try_from(i).unwrap_or(u32::MAX)),
+            .hit(HIT, u32::try_from(i).unwrap_or(u32::MAX))
+            // As wide as the menu: a click anywhere on it counts, the keyboard's fill spans it.
+            .fill(Axis::Row, 0.0),
         );
     }
     Node::column(rows)

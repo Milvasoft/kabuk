@@ -3,17 +3,20 @@
 //! mixer) sets it and a drag follows the mouse, the speaker mutes the output and an
 //! app's icon the app, an entry opens Windows' page; a click elsewhere or Esc closes it.
 //! The level is redrawn whenever the output's changes, and the mixer whenever an app's
-//! session does (Core Audio tells; no polling).
+//! session does (Core Audio tells; no polling). The keyboard moves over its parts as in
+//! every popup ([`crate::bar::popup_keys`]): Enter or Space clicks the one selected, and
+//! Left and Right move a selected level a wheel notch's step.
 
 use kabuk_ui::geom::{Point, Scale};
 use kabuk_ui::node::Layout;
 use kabuk_ui::render::WindowSurface;
-use kabuk_win::msgloop::{msg, vk, Msg, PxRect, Window};
+use kabuk_win::msgloop::{self, msg, vk, Msg, PxRect, Window};
 
 use super::motion_host::Shown;
 use super::tooltip::{self, TIP};
 use super::view::hit;
 use super::Shared;
+use crate::bar::popup_keys::{self, Step};
 use crate::bar::volume_panel::{
     self, Menu, MixerRow, MixerView, FIRST_APP, FIRST_APP_MUTE, FIRST_ENTRY, FIRST_OUTPUT, MUTE, TRACK,
 };
@@ -44,6 +47,13 @@ pub(super) struct VolumePanel {
     /// The mixer's apps, and the watch on their sessions while the panel is open.
     mixer: Vec<MixerRow>,
     _sessions: Option<kabuk_win::audio::SessionWatch>,
+    /// The part the keyboard is on.
+    selected: Option<u32>,
+}
+
+/// Whether part `h` is a level: the output's track or an app's in the mixer.
+fn is_level(h: u32) -> bool {
+    h == TRACK || (FIRST_APP..FIRST_APP_MUTE).contains(&h)
 }
 
 impl Shared {
@@ -85,7 +95,14 @@ impl Shared {
         }
     }
 
-    fn volume_view(&self, menu: Menu, with_track: bool, mixer: &[MixerRow]) -> kabuk_ui::node::Node {
+    /// The panel's tree, with part `selected` drawn selected.
+    fn volume_view(
+        &self,
+        menu: Menu,
+        with_track: bool,
+        mixer: &[MixerRow],
+        selected: Option<u32>,
+    ) -> kabuk_ui::node::Node {
         let level = with_track.then(|| self.live.volume.map_or((0, false), |v| (v.percent, v.muted)));
         let outputs: Vec<(String, bool)> = self
             .outputs(menu, with_track)
@@ -104,7 +121,7 @@ impl Shared {
                 }
             })
             .collect();
-        volume_panel::view(
+        let node = volume_panel::view(
             &self.i18n,
             self.look.style.text_scale,
             &TIP,
@@ -113,7 +130,8 @@ impl Shared {
             &outputs,
             &apps,
             menu.entries(),
-        )
+        );
+        popup_keys::marked(node, volume_panel::HIT, selected, &TIP)
     }
 
     /// The output devices the panel lists (the volume's left click only).
@@ -144,9 +162,14 @@ impl Shared {
         self.close_calendar_panel();
         self.close_quick_panel();
         let mixer = self.mixer_now(menu, with_track);
-        // Open already: drawn again in place (`Ok`), else a new window (`Err`).
+        // Open already: drawn again in place (`Ok`), else a new window (`Err`); the
+        // keyboard stays on its part.
+        let mut selected = None;
         let (held, again, sessions) = match self.volume_panel.take() {
-            Some(p) => (Ok(p.shown), true, p._sessions),
+            Some(p) => {
+                selected = p.selected;
+                (Ok(p.shown), true, p._sessions)
+            }
             None => {
                 let weak = self.me.clone();
                 match Window::input_surface(PANEL_CLASS, "", PxRect::default(), move |m| {
@@ -173,7 +196,7 @@ impl Shared {
         let Some(b) = self.bars.get(bar) else { return };
         let scale = b.scale;
         let layout = kabuk_ui::node::layout(
-            &self.volume_view(menu, with_track, &mixer),
+            &self.volume_view(menu, with_track, &mixer, selected),
             Point::default(),
             &self.gpu.text,
         );
@@ -230,6 +253,7 @@ impl Shared {
             dragging: None,
             mixer,
             _sessions: sessions,
+            selected,
         });
     }
 
@@ -239,7 +263,7 @@ impl Shared {
             return;
         };
         let layout = kabuk_ui::node::layout(
-            &self.volume_view(p.menu, p.with_track, &p.mixer),
+            &self.volume_view(p.menu, p.with_track, &p.mixer, p.selected),
             Point::default(),
             &self.gpu.text,
         );
@@ -316,8 +340,101 @@ impl Shared {
         self.redraw_volume_panel();
     }
 
+    /// A click on part `h` that is not a level (or Enter on it): mutes, an output, a
+    /// settings page.
+    fn volume_panel_click(&mut self, h: u32) -> Option<()> {
+        let p = self.volume_panel.as_mut()?;
+        match h {
+            MUTE => {
+                if let Some(a) = &self.audio {
+                    a.toggle_mute();
+                    self.live.volume = a.volume();
+                }
+                self.redraw_volume_panel();
+                self.render_all(false);
+            }
+            level if is_level(level) => {}
+            app if app >= FIRST_APP_MUTE => {
+                let row = p.mixer.get_mut(usize::try_from(app - FIRST_APP_MUTE).ok()?)?;
+                row.muted = !row.muted;
+                let pids = row.pids.clone();
+                tracing::info!(exe = %row.exe, muted = row.muted, "app muted from the mixer");
+                if let Some(a) = &self.audio {
+                    a.toggle_sessions_mute(&pids);
+                }
+                self.redraw_volume_panel();
+            }
+            output if output >= FIRST_OUTPUT => {
+                let (menu, with_track) = (p.menu, p.with_track);
+                let chosen = self
+                    .outputs(menu, with_track)
+                    .into_iter()
+                    .nth(usize::try_from(output - FIRST_OUTPUT).ok()?)?;
+                tracing::info!(name = %chosen.name, "audio output chosen");
+                if let Err(e) = kabuk_win::audio::set_default_output(&chosen.id) {
+                    tracing::warn!(error = %e, "audio output not changed");
+                    self.notify(crate::notify::Notice::Failed(crate::notify::Failure::Output));
+                }
+                // The level is the new device's: Core Audio says so, and the panel is
+                // drawn again then; this redraw shows the choice now.
+                self.redraw_volume_panel();
+            }
+            entry => {
+                let (_, _, page) = *p.menu.entries().get(usize::try_from(entry - FIRST_ENTRY).ok()?)?;
+                self.close_volume_panel();
+                tracing::info!(page, "volume panel entry");
+                if page == volume_panel::KABUK_SETTINGS {
+                    if let Err(e) = self.open_settings() {
+                        tracing::warn!(error = %e, "settings not opened");
+                        self.notify(crate::notify::Notice::Failed(crate::notify::Failure::Settings));
+                    }
+                } else {
+                    self.open_off_thread(page.into(), crate::notify::Failure::Settings);
+                }
+            }
+        }
+        Some(())
+    }
+
+    /// Level `which` (the output's [`TRACK`] or an app's) moved `way` (-1, +1) steps of a
+    /// wheel notch.
+    fn step_volume_level(&mut self, which: u32, way: i32) {
+        if which == TRACK {
+            if let Some(a) = &self.audio {
+                a.step(way * super::VOLUME_STEP);
+                self.live.volume = a.volume();
+            }
+            self.render_all(false);
+        } else if which >= FIRST_APP {
+            let i = usize::try_from(which - FIRST_APP).unwrap_or(usize::MAX);
+            let Some(row) = self.volume_panel.as_mut().and_then(|p| p.mixer.get_mut(i)) else {
+                return;
+            };
+            row.percent = popup_keys::stepped(row.percent, way, super::VOLUME_STEP);
+            if let Some(a) = &self.audio {
+                a.set_sessions_percent(&row.pids, row.percent);
+            }
+        }
+        self.redraw_volume_panel();
+    }
+
+    /// A key on the panel other than Esc.
+    fn volume_panel_key(&mut self, key: popup_keys::Key) {
+        let Some(p) = self.volume_panel.as_mut() else { return };
+        match popup_keys::step(&popup_keys::entries(&p.layout, volume_panel::HIT), p.selected, key) {
+            Step::Select(h) => {
+                p.selected = Some(h);
+                self.redraw_volume_panel();
+            }
+            Step::Activate(h) if !is_level(h) => {
+                self.volume_panel_click(h);
+            }
+            Step::Adjust(h, way) if is_level(h) => self.step_volume_level(h, way),
+            Step::Activate(_) | Step::Adjust(..) | Step::Same => {}
+        }
+    }
+
     pub(super) fn on_volume_panel(&mut self, m: Msg) -> Option<isize> {
-        let is_level = |h: u32| h == TRACK || (FIRST_APP..FIRST_APP_MUTE).contains(&h);
         match m.id {
             msg::LBUTTONDOWN => {
                 let p = self.volume_panel.as_ref()?;
@@ -354,60 +471,7 @@ impl Shared {
                     y: p.scale.dips(y),
                 };
                 let h = p.layout.hit_test(at).filter(|h| h.module == volume_panel::HIT)?.value;
-                match h {
-                    MUTE => {
-                        if let Some(a) = &self.audio {
-                            a.toggle_mute();
-                            self.live.volume = a.volume();
-                        }
-                        self.redraw_volume_panel();
-                        self.render_all(false);
-                    }
-                    level if is_level(level) => {}
-                    app if app >= FIRST_APP_MUTE => {
-                        let row = p.mixer.get_mut(usize::try_from(app - FIRST_APP_MUTE).ok()?)?;
-                        row.muted = !row.muted;
-                        let pids = row.pids.clone();
-                        tracing::info!(exe = %row.exe, muted = row.muted, "app muted from the mixer");
-                        if let Some(a) = &self.audio {
-                            a.toggle_sessions_mute(&pids);
-                        }
-                        self.redraw_volume_panel();
-                    }
-                    output if output >= FIRST_OUTPUT => {
-                        let (menu, with_track) = (p.menu, p.with_track);
-                        let chosen = self
-                            .outputs(menu, with_track)
-                            .into_iter()
-                            .nth(usize::try_from(output - FIRST_OUTPUT).ok()?)?;
-                        tracing::info!(name = %chosen.name, "audio output chosen");
-                        if let Err(e) = kabuk_win::audio::set_default_output(&chosen.id) {
-                            tracing::warn!(error = %e, "audio output not changed");
-                            self.notify(crate::notify::Notice::Failed(crate::notify::Failure::Output));
-                        }
-                        // The level is the new device's: Core Audio says so, and the
-                        // panel is drawn again then; this redraw shows the choice now.
-                        self.redraw_volume_panel();
-                    }
-                    entry => {
-                        let (_, _, page) = *p.menu.entries().get(usize::try_from(entry - FIRST_ENTRY).ok()?)?;
-                        self.close_volume_panel();
-                        tracing::info!(page, "volume panel entry");
-                        if page == volume_panel::KABUK_SETTINGS {
-                            if let Err(e) = self.open_settings() {
-                                tracing::warn!(error = %e, "settings not opened");
-                                self.notify(crate::notify::Notice::Failed(crate::notify::Failure::Settings));
-                            }
-                            return Some(0);
-                        }
-                        std::thread::spawn(move || {
-                            kabuk_win::system::com_init();
-                            if let Err(e) = kabuk_win::shellitems::open(page) {
-                                tracing::warn!(error = %e, page, "settings page not opened");
-                            }
-                        });
-                    }
-                }
+                self.volume_panel_click(h);
                 Some(0)
             }
             msg::MOUSEWHEEL if self.volume_panel.as_ref().is_some_and(|p| p.menu == Menu::Volume) => {
@@ -421,6 +485,11 @@ impl Shared {
             }
             msg::KEYDOWN if m.wparam == vk::ESCAPE => {
                 self.close_volume_panel();
+                Some(0)
+            }
+            msg::KEYDOWN => {
+                let key = popup_keys::Key::of(m.wparam, msgloop::shift_held(), false)?;
+                self.volume_panel_key(key);
                 Some(0)
             }
             msg::ACTIVATE => {

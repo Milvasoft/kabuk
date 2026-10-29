@@ -1,11 +1,13 @@
 //! An app's menu on the bar thread ([`crate::bar::app_menu`]), opened by a right click
 //! on the app, on a bar or on Rıhtım's dock, and placed like the power menu; an entry opens a recent file, another
-//! window, pins, unpins or closes; a click elsewhere or Esc closes it.
+//! window, pins, unpins or closes; a click elsewhere or Esc closes it. The keyboard
+//! selects and chooses entries as in every popup ([`crate::bar::popup_keys`]; a digit
+//! chooses the entry at that place).
 
 use kabuk_ui::geom::{Point, Scale};
 use kabuk_ui::node::Layout;
 use kabuk_ui::render::WindowSurface;
-use kabuk_win::msgloop::{msg, vk, Msg, PxRect, Window};
+use kabuk_win::msgloop::{self, msg, vk, Msg, PxRect, Window};
 use kabuk_win::window::Hwnd;
 
 use super::motion_host::Shown;
@@ -13,6 +15,7 @@ use super::tooltip::{self, TIP};
 use super::view::hit;
 use super::Shared;
 use crate::bar::app_menu::{self, Action, Subject};
+use crate::bar::popup_keys::{self, Step};
 use kabuk_core::jumplist::Launch;
 
 const MENU_CLASS: &str = "Kabuk.AppMenu";
@@ -47,12 +50,16 @@ struct Anchor {
 }
 
 pub(super) struct AppMenu {
-    _shown: Shown,
+    shown: Shown,
     layout: Layout,
     scale: Scale,
     /// The app's index in the list and its entries, as drawn.
     app: usize,
     entries: Vec<Action>,
+    /// What the menu shows, to draw it again with another entry selected.
+    subject: Subject,
+    /// The entry the keyboard is on.
+    selected: Option<u32>,
 }
 
 /// The name an app goes by, as Windows' taskbar names it: a packaged app's own name, a
@@ -183,8 +190,7 @@ impl Shared {
         let Some(a) = self.menu_anchor(host, index) else { return };
         let scale = a.scale;
         subject.pictures = self.jump_pictures(&subject, scale);
-        let node = app_menu::view(&self.i18n, self.look.style.text_scale, &TIP, &subject);
-        let layout = kabuk_ui::node::layout(&node, Point::default(), &self.gpu.text);
+        let layout = self.app_menu_layout(&subject, None);
         let size = (
             (layout.size.w * scale.0).ceil() as i32,
             (layout.size.h * scale.0).ceil() as i32,
@@ -209,12 +215,31 @@ impl Shared {
         let entries: Vec<Action> = app_menu::entries(&subject).into_iter().map(|(_, _, a)| a).collect();
         tracing::info!(source = %app.source, entries = entries.len(), "app menu opened");
         self.app_menu = Some(AppMenu {
-            _shown: shown,
+            shown,
             layout,
             scale,
             app: index,
             entries,
+            subject,
+            selected: None,
         });
+    }
+
+    /// The menu of `subject` laid out with entry `selected` drawn selected.
+    fn app_menu_layout(&self, subject: &Subject, selected: Option<u32>) -> Layout {
+        let node = app_menu::view(&self.i18n, self.look.style.text_scale, &TIP, subject);
+        let node = popup_keys::marked(node, app_menu::HIT, selected, &TIP);
+        kabuk_ui::node::layout(&node, Point::default(), &self.gpu.text)
+    }
+
+    /// A click on entry `i` (or Enter on it, or its digit).
+    fn app_menu_click(&mut self, i: u32) {
+        let Some(p) = self.app_menu.as_ref() else { return };
+        let Some(action) = usize::try_from(i).ok().and_then(|i| p.entries.get(i)).cloned() else {
+            return;
+        };
+        let app = p.app;
+        self.app_action(app, action);
     }
 
     /// Each jump list entry's picture, as Windows' taskbar shows it (a site's favicon, a
@@ -382,14 +407,29 @@ impl Shared {
                     x: p.scale.dips(x),
                     y: p.scale.dips(y),
                 };
-                let i = p.layout.hit_test(at).filter(|h| h.module == app_menu::HIT)?.value as usize;
-                let action = p.entries.get(i)?.clone();
-                let app = p.app;
-                self.app_action(app, action);
+                let i = p.layout.hit_test(at).filter(|h| h.module == app_menu::HIT)?.value;
+                self.app_menu_click(i);
                 Some(0)
             }
             msg::KEYDOWN if m.wparam == vk::ESCAPE => {
                 self.close_app_menu();
+                Some(0)
+            }
+            msg::KEYDOWN => {
+                let key = popup_keys::Key::of(m.wparam, msgloop::shift_held(), true)?;
+                let p = self.app_menu.as_ref()?;
+                match popup_keys::step(&popup_keys::entries(&p.layout, app_menu::HIT), p.selected, key) {
+                    Step::Select(i) => {
+                        let layout = self.app_menu_layout(&p.subject, Some(i));
+                        let p = self.app_menu.as_mut()?;
+                        p.shown.repaint(&self.gpu, &layout, &self.look.palette, p.scale);
+                        let _ = self.gpu.commit();
+                        p.layout = layout;
+                        p.selected = Some(i);
+                    }
+                    Step::Activate(i) => self.app_menu_click(i),
+                    Step::Same | Step::Adjust(..) => {}
+                }
                 Some(0)
             }
             msg::ACTIVATE => {
