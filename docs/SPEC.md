@@ -150,13 +150,13 @@ The 12 pages in the design, in the same order: Appearance, Wallpaper, Screen sav
 - **Wallpaper:** §2.8.
 - **Screen saver:** §2.7.
 - **Bar:** position, monitors, auto-hide, background (solid, blur, off), colour (the look's own, a swatch or any colour; it fills the solid bar and tints the blur, with a note when the look's text would be hard to read on it; requested by the user on 2026-10-15, DECISIONS D57), height, tray icons shown on the bar, modules (§2.1).
-- **Windows:** workspace layout (Tiling/Floating), float on drag, grab anywhere with Alt, window gap, new window direction, active window frame, windows follow the look (title bar colours and corners of other programs' windows, DECISIONS D30; requested by the user on 2026-10-13).
-- **Window rules:** §2.3.
+- **Windows:** workspace layout (Tiling/Floating), tiling layout (Dwindle/Master; a workspace switched with the layout shortcut keeps its own), how many workspaces (1-9) and how many the bar always shows, float on drag, grab anywhere with Alt, double-click to tile (§2.2), window gap, new window direction, active window frame, windows follow the look (title bar colours and corners of other programs' windows, DECISIONS D30; requested by the user on 2026-10-13).
+- **Window rules:** §2.3: the default rules on or off; a rule's every match and action set in an editor, a rule edited in place, a wrong value said under its field.
 - **Game mode:** §2.4, anti-cheat note.
 - **Launcher:** shortcut, search sources, indexed folders.
 - **Shortcuts:** list of all shortcuts, each one changeable.
 - **Language & region:** language (System language, Türkçe, English), time format (24/12), date and decimal separator preview.
-- **OLED care:** bar shift, idle dimming, dimming delay (30 s, 1 min, 2 min, Custom: number + s/min, an integer between 10 s and 60 min; error message for an out-of-range value; the row is disabled while dimming is off).
+- **OLED care:** bar shift, a still picture's drift and its step (1-120 min, §2.8), idle dimming, dimming delay (30 s, 1 min, 2 min, Custom: number + s/min, an integer between 10 s and 60 min; error message for an out-of-range value; the row is disabled while dimming is off).
 - **About:** version, number of running components, number of monitors, number of managed windows, RAM usage, check for updates (Kabuk's latest release on GitHub, `Milvasoft/kabuk`; a newer one is offered with a button that opens its release page, whose setup installs over the running copy and keeps the settings).
 
 ### 2.10 System theme
