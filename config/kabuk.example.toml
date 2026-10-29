@@ -22,6 +22,9 @@ cursor_size = "normal"    # with Kabuk's sets: normal, large, huge
 [system_theme]
 colors = false            # Windows' mode and accent colour follow Kabuk's (recorded, given back on exit)
 
+[notices]                 # Kabuk's own notices
+quiet = false             # do not disturb: held back and summed up when turned off
+
 [dropdown]                # the terminal Win+Enter drops down from the top of the monitor
 command = ""              # empty: Windows Terminal (else PowerShell); or a program with its arguments
 height = 40               # percent of the monitor's height, 20-90
@@ -105,6 +108,7 @@ quick_settings = true     # the quick settings button: Wi-Fi, Bluetooth, airplan
 [windows]
 workspaces = 9            # per monitor, 1-9
 shown_workspaces = 4      # always shown on the bar; occupied and active ones are shown too
+workspace_names = []      # by number from workspace 1, e.g. ["Web", "Code"]; a missing or empty one keeps its number
 default_layout = "tiling" # tiling, floating
 tiling_layout = "dwindle" # dwindle, master
 gap = 14                  # px, 0-32; remove the key to use the look's default

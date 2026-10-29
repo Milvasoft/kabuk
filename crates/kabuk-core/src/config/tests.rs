@@ -791,6 +791,42 @@ fn the_system_theme_is_off_unless_asked_for() {
     assert_eq!(errors("schema = 1\n[system_theme]\ncolors = 1\n").len(), 1);
 }
 
+/// PLAN M19 U20: Kabuk's notices are shown unless held back.
+#[test]
+fn kabuks_notices_are_shown_unless_held_back() {
+    assert!(!Config::default().notices.quiet);
+    let c = parse("schema = 1\n[notices]\nquiet = true\n").unwrap().config;
+    assert!(c.notices.quiet);
+    assert_eq!(errors("schema = 1\n[notices]\nquiet = \"yes\"\n").len(), 1);
+}
+
+/// PLAN M19 U20: workspaces are named by number; a name missing, empty or blank keeps
+/// the number, a long one is cut, and names past the ninth are never used.
+#[test]
+fn workspaces_take_the_names_given_by_number() {
+    let d = Config::default().windows;
+    assert!(d.workspace_names.is_empty());
+    assert_eq!(d.workspace_name(1), None);
+    let c = parse("schema = 1\n[windows]\nworkspace_names = [\"Web\", \"\", \" Kod \", \"   \"]\n")
+        .unwrap()
+        .config
+        .windows;
+    assert_eq!(c.workspace_name(1), Some("Web".into()));
+    assert_eq!(c.workspace_name(2), None);
+    assert_eq!(c.workspace_name(3), Some("Kod".into()));
+    assert_eq!(c.workspace_name(4), None);
+    assert_eq!(c.workspace_name(5), None);
+    assert_eq!(c.workspace_name(0), None);
+    let long = "ş".repeat(WORKSPACE_NAME_MAX + 5);
+    let w = Windows {
+        workspace_names: vec![long],
+        ..Windows::default()
+    };
+    assert_eq!(w.workspace_name(1).map(|n| n.chars().count()), Some(WORKSPACE_NAME_MAX));
+    assert_eq!(errors("schema = 1\n[windows]\nworkspace_names = \"Web\"\n").len(), 1);
+    assert_eq!(errors("schema = 1\n[windows]\nworkspace_names = [1, 2]\n").len(), 1);
+}
+
 /// D47: a still picture drifts by default, every ten minutes; the interval has bounds.
 #[test]
 fn a_still_picture_drifts_unless_turned_off() {

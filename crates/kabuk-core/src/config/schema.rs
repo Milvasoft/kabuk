@@ -31,6 +31,7 @@ pub struct Config {
     pub hot_corners: HotCorners,
     pub dropdown: Dropdown,
     pub gestures: Gestures,
+    pub notices: Notices,
     /// Layout profiles (DECISIONS D65), `[[profile]]`.
     #[serde(rename = "profile", skip_serializing_if = "Vec::is_empty")]
     pub profiles: Vec<Profile>,
@@ -182,6 +183,16 @@ pub struct SystemTheme {
     pub colors: bool,
 }
 
+/// `[notices]`: Kabuk's own notices (SPEC §2.6).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Notices {
+    /// Do not disturb (PLAN M19 U20): Kabuk's notices are held back, as in game mode, and
+    /// counted in one summary when it is turned off; a notice that the shell is in danger
+    /// still shows.
+    pub quiet: bool,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config {
@@ -202,6 +213,7 @@ impl Default for Config {
             hot_corners: HotCorners::default(),
             dropdown: Dropdown::default(),
             gestures: Gestures::default(),
+            notices: Notices::default(),
             profiles: Vec::new(),
         }
     }
@@ -869,9 +881,24 @@ pub struct Windows {
     pub follow_look: bool,
     /// How managed windows minimise and restore (with animations on in full).
     pub minimize_effect: MinimizeEffect,
+    /// The workspaces' names by number, from workspace 1 (PLAN M19 U20); a missing or
+    /// empty one keeps its number. Read through [`Windows::workspace_name`].
+    pub workspace_names: Vec<String>,
 }
 
 pub const WORKSPACE_RANGE: (u32, u32) = (1, 9);
+/// The longest a workspace's name is shown (characters); a longer one is cut.
+pub const WORKSPACE_NAME_MAX: usize = 24;
+
+impl Windows {
+    /// Workspace `n`'s name (1-based), trimmed and at most [`WORKSPACE_NAME_MAX`]
+    /// characters; `None` when it has none.
+    pub fn workspace_name(&self, n: u32) -> Option<String> {
+        let i = usize::try_from(n.checked_sub(1)?).ok()?;
+        let name = self.workspace_names.get(i)?.trim();
+        (!name.is_empty()).then(|| name.chars().take(WORKSPACE_NAME_MAX).collect())
+    }
+}
 pub const GAP_RANGE: (u32, u32) = (0, 32);
 
 impl Default for Windows {
@@ -889,6 +916,7 @@ impl Default for Windows {
             active_border: true,
             follow_look: true,
             minimize_effect: MinimizeEffect::Genie,
+            workspace_names: Vec::new(),
         }
     }
 }
