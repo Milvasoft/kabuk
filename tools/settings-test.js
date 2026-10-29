@@ -274,6 +274,22 @@ async function main() {
   check(/\[hot_corners\][^[]*top_left = "app_grid"/.test(toml()), "hot corners: top left opens every app");
   await page.selectOption(`[data-select="hot_corners.top_left"]`, "none"); await settled();
   check(/top_left = "none"/.test(toml()), "hot corners: back to nothing");
+  // PLAN M19 U20: the screen saver's page says which corner starts it, and that only while
+  // Kabuk runs; a corner chosen there takes it from another; the corner's row says so.
+  await go("saver");
+  const cornerHint = () => page.$eval("[data-saver-corner]", (e) => e.closest(".set-row").querySelector(".h").textContent);
+  check((await cornerHint()).startsWith("Hiçbir köşe"), `saver corner: none starts it (${await cornerHint()})`);
+  await page.selectOption("[data-saver-corner]", "top_right"); await settled();
+  check(/top_right = "screen_saver"/.test(toml()) && (await cornerHint()).includes("sağ üst köşeye") && (await cornerHint()).includes("Kabuk çalışırken"), `saver corner: top right starts it (${await cornerHint()})`);
+  await page.selectOption("[data-saver-corner]", "bottom_left"); await settled();
+  check(/top_right = "none"/.test(toml()) && /bottom_left = "screen_saver"/.test(toml()), "saver corner: another corner takes it");
+  await go("windows");
+  const saverRow = await page.$eval(`[data-select="hot_corners.bottom_left"]`, (e) => e.closest(".set-row").querySelector(".h").textContent);
+  check(saverRow.includes("Kabuk çalışırken"), `hot corners: the screen saver's corner says what it does (${saverRow})`);
+  await go("saver");
+  await page.selectOption("[data-saver-corner]", "none"); await settled();
+  check(!/screen_saver/.test(toml()), "saver corner: none again");
+  await go("windows");
 
   // Touchpad swipes (DECISIONS D68): off by default, the ways shown once on, the fingers
   // and each way's choice written; Windows' touchpad page a button away (not pressed here).

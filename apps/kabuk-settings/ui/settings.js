@@ -375,7 +375,19 @@
       ${gallery}
       <div class="set-grp">${rowFor("screensaver.wait_minutes", t("wait"), t("waitH"), segFor("screensaver.wait_minutes", t("wait"), SAVER_WAITS.map((m) => [m, `${m} ${t("min")}`])))}
       ${tgl("screensaver.respect_video", t("video"), t("videoH"))}
+      ${saverCornerRow()}
       ${row(t("preview"), t("previewH"), `<button class="set-btn ghost" type="button" data-preview-saver ${kind === "none" ? "disabled" : ""}>${t("previewBtn")}</button>`)}</div>`;
+  }
+
+  /* The hot corner that starts the screen saver (PLAN M19 U20): which one, chosen here as
+     on the windows page, and that it works only while Kabuk runs. */
+  function saverCornerRow() {
+    const c = cfg().hot_corners;
+    const now = (CORNERS.find(([k]) => c[k] === "screen_saver") || ["none"])[0];
+    const name = (CORNERS.find(([k]) => k === now) || [])[1];
+    const hint = name ? tv("setSaverCornerOn", t(name).toLocaleLowerCase(S.lang)) : t("setSaverCornerOff");
+    const options = [["none", "hcNone"], ...CORNERS].map(([v, n]) => `<option value="${v}"${v === now ? " selected" : ""}>${t(n)}</option>`).join("");
+    return row(t("setSaverCorner"), hint, `<span class="num"><select data-saver-corner aria-label="${t("setSaverCorner")}">${options}</select></span>`);
   }
 
   // The bar's colour (DECISIONS D57): dark tones that keep any look's text readable, one
@@ -479,7 +491,8 @@
   const CORNER_ACTIONS = [["none", "hcNone"], ["app_grid", "hcAppGrid"], ["overview", "hcOverview"], ["launcher", "hcLauncher"], ["screen_saver", "hcSaver"]];
   function hotCornersGroup() {
     const c = cfg().hot_corners;
-    const rows = CORNERS.map(([k, name]) => row(t(name), "", `<span class="num"><select data-select="hot_corners.${k}" aria-label="${t(name)}">${CORNER_ACTIONS.map(([v, n]) => `<option value="${v}"${c[k] === v ? " selected" : ""}>${t(n)}</option>`).join("")}</select></span>`)).join("");
+    // A corner that starts the screen saver says what that does, and when (PLAN M19 U20).
+    const rows = CORNERS.map(([k, name]) => row(t(name), c[k] === "screen_saver" ? t("hcSaverH") : "", `<span class="num"><select data-select="hot_corners.${k}" aria-label="${t(name)}">${CORNER_ACTIONS.map(([v, n]) => `<option value="${v}"${c[k] === v ? " selected" : ""}>${t(n)}</option>`).join("")}</select></span>`)).join("");
     return `<div class="set-grp"><span class="gl">${t("hc")}. ${t("hcH")}</span>${rows}</div>`;
   }
 
@@ -963,6 +976,12 @@
     if (el.id === "dim-value" || el.id === "dim-unit") { const sec = readDim(); if (sec != null) set("oled.dim_after_secs", sec); }
     if (el.id === "bar-color") set("bar.color", el.value.toUpperCase());
     if (el.dataset.select) set(el.dataset.select, el.value);
+    if (el.dataset.saverCorner !== undefined) {
+      // One corner starts the screen saver: the one chosen takes it from any other.
+      const c = cfg().hot_corners;
+      CORNERS.filter(([k]) => k !== el.value && c[k] === "screen_saver").forEach(([k]) => set("hot_corners." + k, "none"));
+      if (el.value !== "none") set("hot_corners." + el.value, "screen_saver");
+    }
     if (el.dataset.text) {
       // Another address: what Ollama said at the old one no longer holds.
       if (el.dataset.text === "create.ollama_url") ui.ollama = null;
