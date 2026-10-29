@@ -119,6 +119,7 @@ pub fn popup_parts(
             rect: client_rect(d.rect, Point::default(), scale),
             click: client_point(d.reach, Point::default(), scale),
             focused: selected == Some(d.hit.value),
+            range: None,
         });
     }
     out
@@ -147,6 +148,7 @@ pub fn bar_parts(
                 rect: client_rect(d.rect, origin, scale),
                 click: client_point(d.reach, origin, scale),
                 focused: false,
+                range: None,
             })
         })
         .collect()

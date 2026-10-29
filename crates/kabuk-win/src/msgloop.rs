@@ -238,7 +238,7 @@ impl Window {
     pub fn set_accessible(&self, container: crate::uia::Container, name: &str, parts: Vec<crate::uia::Part>) {
         // SAFETY: the slot lives as long as this Window (it is freed only in Drop).
         let slot = unsafe { &*self.slot };
-        let focus = {
+        let told = {
             let Ok(mut access) = slot.access.try_borrow_mut() else {
                 return;
             };
@@ -247,8 +247,24 @@ impl Window {
                 .set(container, name, parts)
         };
         // Told once the slot is free: UI Automation may ask the window again meanwhile.
-        if let Some(part) = focus {
-            crate::uia::tell_focus(&part);
+        for t in &told {
+            crate::uia::tell(t);
+        }
+    }
+
+    /// Says `text` aloud through a listening screen reader, as a notice of this window
+    /// (DECISIONS D97); once it was given its parts ([`Window::set_accessible`]).
+    pub fn announce(&self, text: &str) {
+        // SAFETY: the slot lives as long as this Window (it is freed only in Drop).
+        let slot = unsafe { &*self.slot };
+        let root = slot
+            .access
+            .try_borrow()
+            .ok()
+            .and_then(|a| a.as_ref().map(crate::uia::Accessible::root));
+        // Said once the slot is free: UI Automation may ask the window meanwhile.
+        if let Some(root) = root {
+            crate::uia::announce(&root, text);
         }
     }
 
