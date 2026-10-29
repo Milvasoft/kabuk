@@ -414,10 +414,7 @@ fn a_tray_icon_shows_its_tooltip_and_takes_double_clicks() {
     )
     .unwrap();
     assert!(
-        wait_until(SETTLE, || sandbox
-            .last_log_line(&["tooltip shown", &tip])
-            .is_some())
-        .is_some(),
+        wait_until(SETTLE, || sandbox.last_log_line(&["tooltip shown", &tip]).is_some()).is_some(),
         "{}",
         story(&sandbox)
     );

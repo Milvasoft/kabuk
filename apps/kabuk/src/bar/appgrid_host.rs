@@ -362,30 +362,32 @@ impl Shared {
         let key = crate::bar::apps::image_key(&format!("appgrid-screen|{}", m.device));
         let control = self.control.as_ref().map(Window::hwnd)?;
         let out = self.app_grid.screen_blurred.clone();
-        let spawned = std::thread::Builder::new().name("appgrid-screen".into()).spawn(move || {
-            kabuk_win::system::background_thread();
-            let started = Instant::now();
-            let px = backdrop::blurred(
-                &bgr,
-                w as usize,
-                h as usize,
-                style::BLUR_RADIUS,
-                style::BLUR_PASSES,
-                style::SCREEN_DIM,
-            );
-            tracing::debug!(ms = started.elapsed().as_millis() as u64, "app grid screen blurred");
-            if let Ok(mut o) = out.lock() {
-                *o = Some((key, w, h, px));
-            }
-            let _ = msgloop::post_message(
-                control,
-                Msg {
-                    id: MSG_APP_GRID_SCREEN,
-                    wparam: 0,
-                    lparam: 0,
-                },
-            );
-        });
+        let spawned = std::thread::Builder::new()
+            .name("appgrid-screen".into())
+            .spawn(move || {
+                kabuk_win::system::background_thread();
+                let started = Instant::now();
+                let px = backdrop::blurred(
+                    &bgr,
+                    w as usize,
+                    h as usize,
+                    style::BLUR_RADIUS,
+                    style::BLUR_PASSES,
+                    style::SCREEN_DIM,
+                );
+                tracing::debug!(ms = started.elapsed().as_millis() as u64, "app grid screen blurred");
+                if let Ok(mut o) = out.lock() {
+                    *o = Some((key, w, h, px));
+                }
+                let _ = msgloop::post_message(
+                    control,
+                    Msg {
+                        id: MSG_APP_GRID_SCREEN,
+                        wparam: 0,
+                        lparam: 0,
+                    },
+                );
+            });
         if let Err(e) = spawned {
             tracing::warn!(error = %e, "app grid screen not blurred");
         }

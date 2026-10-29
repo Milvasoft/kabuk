@@ -120,7 +120,11 @@ mod tests {
         // its way).
         let dropped = std::time::Instant::now();
         drop(ticker.borrow_mut().take());
-        assert!(dropped.elapsed() < Duration::from_millis(5), "dropping waited {:?}", dropped.elapsed());
+        assert!(
+            dropped.elapsed() < Duration::from_millis(5),
+            "dropping waited {:?}",
+            dropped.elapsed()
+        );
         ml::run_until(&[], Some(Duration::from_millis(30)));
         count.set(0);
         ml::run_until(&[], Some(Duration::from_millis(200)));

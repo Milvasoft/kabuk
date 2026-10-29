@@ -3312,14 +3312,20 @@ impl Shared {
             view::hit::STATS => match value {
                 view::hit::STAT_CPU => self.live.stats.cpu.map(|c| figure("lbl-cpu", pct(c))),
                 view::hit::STAT_RAM => self.live.stats.ram_gib.map(|r| {
-                    figure("lbl-ram", i18n.tr_args("bar-ram", &[("value", i18n.decimal(r, 2).into())]))
+                    figure(
+                        "lbl-ram",
+                        i18n.tr_args("bar-ram", &[("value", i18n.decimal(r, 2).into())]),
+                    )
                 }),
                 view::hit::STAT_GPU => self
                     .live
                     .gpu_c
                     .map(|g| figure("lbl-gpu", i18n.tr_args("bar-temp", &[("value", g.to_string().into())]))),
                 view::hit::STAT_NET => self.live.stats.net_mbs.map(|n| {
-                    figure("lbl-net", i18n.tr_args("bar-net-rate", &[("value", i18n.decimal(n, 2).into())]))
+                    figure(
+                        "lbl-net",
+                        i18n.tr_args("bar-net-rate", &[("value", i18n.decimal(n, 2).into())]),
+                    )
                 }),
                 _ => None,
             },
@@ -3338,7 +3344,9 @@ impl Shared {
                 (tip, (view::hit::TRAY, i as u32))
             }
             Hovered::Module(module, value) => {
-                let Some(tip) = self.module_tip(module, value) else { return };
+                let Some(tip) = self.module_tip(module, value) else {
+                    return;
+                };
                 (tip, (module, value))
             }
         };
@@ -4600,7 +4608,6 @@ impl Shared {
 
     /// Redraws bars whose data changed (or all, when `force`).
     fn render_all(&mut self, force: bool) {
-        let palette = self.look.palette.clone();
         let style = self.look.style;
         let size = self.look.size;
         let shift = kabuk_core::oled::shift_at(if self.config().oled.bar_shift {
@@ -4689,7 +4696,15 @@ impl Shared {
             };
             if let (Some(surface), Some(dirty)) = (bar.surface.as_mut(), dirty) {
                 drew = true;
-                match surface.render(&self.gpu, &layout, &palette, scale, (origin.x, origin.y), dirty) {
+                // The palette is borrowed, not copied (two maps; PLAN M19 P12).
+                match surface.render(
+                    &self.gpu,
+                    &layout,
+                    &self.look.palette,
+                    scale,
+                    (origin.x, origin.y),
+                    dirty,
+                ) {
                     Ok(()) => {}
                     Err(RenderError::DeviceLost) => lost = true,
                     Err(e) => tracing::error!(error = %e, "bar render failed"),
