@@ -10,6 +10,10 @@ use crate::node::{Draw, HitId, Layout};
 pub struct Part {
     pub rect: Rect,
     pub hit: HitId,
+    /// A point a click reaches it at: its middle, unless a region nested in it covers that
+    /// (found by a test: the clock's middle was the temperature beside its time), then the
+    /// nearest one along its middle row or column; its middle when nothing of it is left.
+    pub reach: Point,
     /// The texts drawn in it (not in a region nested in it), in paint order, joined by
     /// a space; empty for a region that only holds icons or pictures.
     pub text: String,
@@ -39,12 +43,42 @@ pub fn parts(layout: &Layout) -> Vec<Part> {
         .hits
         .iter()
         .zip(words)
-        .map(|((rect, hit), words)| Part {
+        .enumerate()
+        .map(|(i, ((rect, hit), words))| Part {
             rect: *rect,
             hit: hit.clone(),
             text: words.join(" "),
+            reach: reach(layout, i),
         })
         .collect()
+}
+
+/// A point of region `i` of `layout` a click reaches (see [`Part::reach`]).
+fn reach(layout: &Layout, i: usize) -> Point {
+    let r = layout.hits[i].0;
+    let middle = Point {
+        x: r.x + r.w / 2.0,
+        y: r.y + r.h / 2.0,
+    };
+    let reaches = |p: Point| layout.hits.iter().rposition(|(r, _)| r.contains(p)) == Some(i);
+    // One DIP apart, outward from the middle, along the row and then the column.
+    let along = |half: f32, at: &dyn Fn(f32) -> Point| {
+        (0..=half.ceil() as u32)
+            .flat_map(|d| [d as f32, -(d as f32)])
+            .map(at)
+            .find(|p| reaches(*p))
+    };
+    along(r.w / 2.0, &|d| Point {
+        x: middle.x + d,
+        ..middle
+    })
+    .or_else(|| {
+        along(r.h / 2.0, &|d| Point {
+            y: middle.y + d,
+            ..middle
+        })
+    })
+    .unwrap_or(middle)
 }
 
 #[cfg(test)]
@@ -129,6 +163,52 @@ mod tests {
             (p[1].hit.module, p[1].hit.value, p[1].text.as_str()),
             ("switch", 7, "On")
         );
+    }
+
+    /// Found by the bar's screen reader test: the clock's middle was the temperature drawn
+    /// beside its time, so invoking the clock clicked the temperature.
+    #[test]
+    fn a_region_is_reached_beside_one_nested_over_its_middle() {
+        let clock = Node::row(vec![text("20:31"), text("52").hit("temp", 0), text("21:00")]).hit("clock", 0);
+        let l = layout(&clock, Point::default(), &Fake);
+        let p = parts(&l);
+        for part in &p {
+            let hit = l.hit_test(part.reach).unwrap();
+            assert_eq!((hit.module, hit.value), (part.hit.module, part.hit.value), "{part:?}");
+            assert!(part.rect.contains(part.reach), "{part:?}");
+        }
+        // Not covered: its middle.
+        assert_eq!(
+            p[1].reach,
+            Point {
+                x: p[1].rect.x + p[1].rect.w / 2.0,
+                y: p[1].rect.y + p[1].rect.h / 2.0
+            }
+        );
+    }
+
+    #[test]
+    fn a_region_covered_whole_is_reached_at_its_middle() {
+        let l = Layout {
+            hits: vec![
+                (
+                    Rect::new(0.0, 0.0, 10.0, 10.0),
+                    HitId {
+                        module: "under",
+                        value: 0,
+                    },
+                ),
+                (
+                    Rect::new(0.0, 0.0, 10.0, 10.0),
+                    HitId {
+                        module: "over",
+                        value: 0,
+                    },
+                ),
+            ],
+            ..Layout::default()
+        };
+        assert_eq!(parts(&l)[0].reach, Point { x: 5.0, y: 5.0 });
     }
 
     #[test]

@@ -490,16 +490,31 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             }
         }
         let handler = &slot.handler;
+        let handle = |m: Msg| {
+            contain(None, || match handler {
+                Handler::Exclusive(cell) => cell.try_borrow_mut().ok().and_then(|mut f| f(m)),
+                Handler::Reentrant(f) => f(m),
+            })
+        };
+        if msg == crate::uia::invoke_message() {
+            // A screen reader's Invoke: the click on the part where it is now.
+            let clicks = slot
+                .access
+                .try_borrow()
+                .ok()
+                .and_then(|a| a.as_ref().map(|a| a.clicks(wparam.0 as u64)))
+                .unwrap_or_default();
+            for m in clicks {
+                handle(m);
+            }
+            return LRESULT(0);
+        }
         let m = Msg {
             id: msg,
             wparam: wparam.0,
             lparam: lparam.0,
         };
-        let result = contain(None, || match handler {
-            Handler::Exclusive(cell) => cell.try_borrow_mut().ok().and_then(|mut f| f(m)),
-            Handler::Reentrant(f) => f(m),
-        });
-        if let Some(result) = result {
+        if let Some(result) = handle(m) {
             return LRESULT(result);
         }
     }

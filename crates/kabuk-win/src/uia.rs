@@ -2,8 +2,8 @@
 //! nothing of it. A window given parts ([`crate::msgloop::Window::set_accessible`]) answers
 //! UI Automation's `WM_GETOBJECT` with a small provider: the window is the root fragment
 //! and each part (a button, a list item, a menu item) its child, with a name, a control
-//! type, a place on the screen and the Invoke pattern, which posts the window the same
-//! click the mouse would make in the part's middle.
+//! type, a place on the screen and the Invoke pattern, which makes the window the same
+//! click the mouse would make on the part (where it is when the window takes it).
 //!
 //! Nothing runs unless a client asks: the owner hands over its parts after each drawing
 //! (a list swapped under a lock), and the provider reads them when a client calls. The
@@ -13,7 +13,7 @@
 //! [`read`] and [`invoke`] are the client side, as a screen reader sees a window (tests).
 
 use std::io;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use windows::core::{implement, IUnknownImpl, Interface, BSTR};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
@@ -80,8 +80,14 @@ impl Container {
 /// One part of a window for screen readers.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Part {
+    /// Who it is across redraws (its kind and value, [`part_id`]): a reader's object for
+    /// it stays it when the parts before it come or go.
+    pub id: u64,
     /// What a screen reader says, in the user's language.
     pub name: String,
+    /// Where an Invoke clicks it (client pixels): a point a click reaches it at, which
+    /// is not its middle when another part lies over that.
+    pub click: (i32, i32),
     pub role: Role,
     /// Where it is in the window's client area, in physical pixels.
     pub rect: PxRect,
@@ -163,19 +169,32 @@ struct Root {
     shared: Shared,
 }
 
-/// Part `index` of a window.
+/// A part's id from its kind (e.g. the module it is) and its value.
+pub fn part_id(kind: &str, value: u32) -> u64 {
+    // FNV-1a: stable across runs, unlike the standard hasher.
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0100_0000_01b3;
+    kind.bytes()
+        .chain(value.to_le_bytes())
+        .fold(OFFSET, |h, b| (h ^ u64::from(b)).wrapping_mul(PRIME))
+}
+
+/// A part of a window, found by its id (found by a test: by its place in the list, a
+/// reader's object pointed at another part once the figures came after the first bars,
+/// and invoking the clock clicked a figure).
 #[implement(IRawElementProviderSimple, IRawElementProviderFragment, IInvokeProvider)]
 struct Item {
     shared: Shared,
     root: IRawElementProviderFragmentRoot,
-    index: usize,
+    id: u64,
 }
 
 fn item(shared: &Shared, root: &IRawElementProviderFragmentRoot, index: usize) -> IRawElementProviderFragment {
+    let id = lock(shared).parts.get(index).map_or(0, |p| p.id);
     Item {
         shared: shared.clone(),
         root: root.clone(),
-        index,
+        id,
     }
     .into()
 }
@@ -280,8 +299,13 @@ impl Item_Impl {
     fn part(&self) -> windows::core::Result<(Hwnd, Part)> {
         let inner = lock(&self.shared);
         let hwnd = inner.hwnd.ok_or_else(gone)?;
-        let part = inner.parts.get(self.index).cloned().ok_or_else(gone)?;
+        let part = inner.parts.iter().find(|p| p.id == self.id).cloned().ok_or_else(gone)?;
         Ok((hwnd, part))
+    }
+
+    /// Its place among the window's parts now.
+    fn index(&self) -> Option<usize> {
+        lock(&self.shared).parts.iter().position(|p| p.id == self.id)
     }
 }
 
@@ -324,10 +348,11 @@ impl IRawElementProviderFragment_Impl for Item_Impl {
             return self.root.cast();
         }
         let count = lock(&self.shared).parts.len();
+        let Some(at) = self.index() else { return nothing() };
         let index = if direction == NavigateDirection_NextSibling {
-            Some(self.index + 1).filter(|i| *i < count)
+            Some(at + 1).filter(|i| *i < count)
         } else if direction == NavigateDirection_PreviousSibling {
-            self.index.checked_sub(1).filter(|i| *i < count)
+            at.checked_sub(1).filter(|i| *i < count)
         } else {
             None
         };
@@ -340,7 +365,8 @@ impl IRawElementProviderFragment_Impl for Item_Impl {
     fn GetRuntimeId(&self) -> windows::core::Result<*mut SAFEARRAY> {
         let id = [
             UiaAppendRuntimeId as i32,
-            i32::try_from(self.index).unwrap_or(i32::MAX).saturating_add(1),
+            // The id's low bits: stable while the part is there.
+            (self.id & 0x7fff_ffff) as i32,
         ];
         // SAFETY: a new one-dimensional array of 32-bit integers, filled within its
         // bounds; UI Automation takes it over.
@@ -384,17 +410,40 @@ impl IRawElementProviderFragment_Impl for Item_Impl {
 }
 
 impl IInvokeProvider_Impl for Item_Impl {
-    /// The click the mouse would make in the part's middle, posted (Invoke must not wait
-    /// on what the click does).
+    /// The part's id, posted (Invoke must not wait on what the click does); the window
+    /// clicks it where it is when it takes the message ([`clicks_of`]).
     fn Invoke(&self) -> windows::core::Result<()> {
         let (hwnd, part) = self.part()?;
-        let (x, y) = (part.rect.x + part.rect.w / 2, part.rect.y + part.rect.h / 2);
-        let lparam = ((y & 0xffff) << 16 | (x & 0xffff)) as isize;
-        for (id, wparam) in [(msg::LBUTTONDOWN, msg::MK_LBUTTON), (msg::LBUTTONUP, 0)] {
-            post_message(hwnd, Msg { id, wparam, lparam }).map_err(|_| gone())?;
-        }
-        Ok(())
+        let invoke = Msg {
+            id: invoke_message(),
+            wparam: part.id as usize,
+            lparam: 0,
+        };
+        post_message(hwnd, invoke).map_err(|_| gone())
     }
+}
+
+/// The message [`Item`]'s Invoke posts its window, the part's id in `wparam`. By the
+/// part's place when Invoke was called, a click could land on another part: found by the
+/// bar's screen reader test, where the figures came in between and the clock's click
+/// opened a figure.
+pub(crate) fn invoke_message() -> u32 {
+    static ID: OnceLock<u32> = OnceLock::new();
+    *ID.get_or_init(|| crate::system::register_message("Kabuk.UiaInvoke"))
+}
+
+/// The mouse messages of a click in the middle of part `id` of `parts` (left down, then
+/// up), or none when it is gone.
+pub(crate) fn clicks_of(parts: &[Part], id: u64) -> Vec<Msg> {
+    let Some(p) = parts.iter().find(|p| p.id == id) else {
+        return Vec::new();
+    };
+    let (x, y) = p.click;
+    let lparam = ((y & 0xffff) << 16 | (x & 0xffff)) as isize;
+    [(msg::LBUTTONDOWN, msg::MK_LBUTTON), (msg::LBUTTONUP, 0)]
+        .into_iter()
+        .map(|(id, wparam)| Msg { id, wparam, lparam })
+        .collect()
 }
 
 /// A window's provider, kept by its [`crate::msgloop::Window`].
@@ -437,6 +486,11 @@ impl Accessible {
         }
         let root = self.root.cast::<IRawElementProviderFragmentRoot>().ok()?;
         item(&self.shared, &root, focused?).cast().ok()
+    }
+
+    /// The click to make for an Invoke of part `id` ([`invoke_message`]), on its place now.
+    pub(crate) fn clicks(&self, id: u64) -> Vec<Msg> {
+        clicks_of(&lock(&self.shared).parts, id)
     }
 
     /// The window's root provider.
@@ -574,9 +628,11 @@ mod tests {
 
     fn part(name: &str, role: Role, x: i32) -> Part {
         Part {
+            id: part_id(name, 0),
             name: name.into(),
             role,
             rect: PxRect { x, y: 4, w: 40, h: 30 },
+            click: (x + 20, 19),
             focused: false,
         }
     }
@@ -691,6 +747,60 @@ mod tests {
         // Drawn again with fewer parts: read as they are now.
         w.swap();
         assert_eq!(read(w.hwnd).unwrap(), seen(&then));
+    }
+
+    /// Found by the bar's screen reader test: the figures came after the first bars and a
+    /// reader's object for the clock, held from before, clicked a figure.
+    #[test]
+    fn a_part_held_by_a_reader_stays_itself_when_parts_come_before_it() {
+        let first = vec![
+            part("Workspace 1", Role::Button, 10),
+            part("Saat: 20:31", Role::Button, 60),
+        ];
+        let mut clock = part("Saat: 20:31", Role::Button, 160);
+        clock.id = first[1].id;
+        let then = vec![
+            part("Workspace 1", Role::Button, 10),
+            part("CPU 4%", Role::Button, 60),
+            part("GPU 2%", Role::Button, 110),
+            clock,
+        ];
+        let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let w = TestWindow::new("held", first, then);
+        let held = children(w.hwnd).unwrap().remove(1);
+        w.swap();
+        // SAFETY: plain UI Automation client calls on an element found above.
+        unsafe {
+            let pattern: IUIAutomationInvokePattern = held.GetCurrentPatternAs(UIA_InvokePatternId).unwrap();
+            pattern.Invoke().unwrap();
+        }
+        assert_eq!(w.clicks.recv_timeout(WAIT).unwrap(), (msg::LBUTTONDOWN, 180, 19));
+    }
+
+    #[test]
+    fn an_invoke_clicks_the_middle_of_the_part_where_it_is_now() {
+        let mut moved = part("Saat: 20:31", Role::Button, 160);
+        moved.id = 7;
+        let ids = |m: &[Msg]| {
+            m.iter()
+                .map(|m| (m.id, m.wparam, msg::point(m.lparam)))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            ids(&clicks_of(&[part("CPU 4%", Role::Button, 10), moved], 7)),
+            [
+                (msg::LBUTTONDOWN, msg::MK_LBUTTON, (180, 19)),
+                (msg::LBUTTONUP, 0, (180, 19))
+            ]
+        );
+        assert!(clicks_of(&[part("CPU 4%", Role::Button, 10)], 7).is_empty());
+    }
+
+    #[test]
+    fn the_same_kind_and_value_give_the_same_id() {
+        assert_eq!(part_id("clock", 0), part_id("clock", 0));
+        assert_ne!(part_id("clock", 0), part_id("clock", 1));
+        assert_ne!(part_id("clock", 0), part_id("stats", 0));
     }
 
     #[test]

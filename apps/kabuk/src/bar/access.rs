@@ -89,6 +89,11 @@ pub fn client_rect(r: Rect, origin: Point, scale: Scale) -> PxRect {
     }
 }
 
+/// `p` (DIPs of a layout drawn at `origin`) in the window's physical pixels.
+pub fn client_point(p: Point, origin: Point, scale: Scale) -> (i32, i32) {
+    (scale.px(p.x + origin.x), scale.px(p.y + origin.y))
+}
+
 /// The parts of a popup drawn as `layout` at its window's corner: its regions of
 /// `module`, each named by `name` (from its value and the words drawn in it; `None` or
 /// an empty name leaves it out), the one valued `selected` holding the keyboard.
@@ -108,9 +113,11 @@ pub fn popup_parts(
             continue;
         };
         out.push(Part {
+            id: kabuk_win::uia::part_id(d.hit.module, d.hit.value),
             name: said,
             role,
             rect: client_rect(d.rect, Point::default(), scale),
+            click: client_point(d.reach, Point::default(), scale),
             focused: selected == Some(d.hit.value),
         });
     }
@@ -134,9 +141,11 @@ pub fn bar_parts(
         .iter()
         .filter_map(|d| {
             Some(Part {
+                id: kabuk_win::uia::part_id(d.hit.module, d.hit.value),
                 name: name(d)?,
                 role: Role::Button,
                 rect: client_rect(d.rect, origin, scale),
+                click: client_point(d.reach, origin, scale),
                 focused: false,
             })
         })
