@@ -8,6 +8,15 @@ No open decisions (the user decided D39, D43, D44 and the still pictures' drift 
 
 ## Decided and proposed
 
+### D97 · Accessibility: screen readers and high contrast, the basics — Decided by the user (2026-10-29)
+Everything Kabuk shows is drawn by Kabuk, so Narrator saw nothing of it, and Windows' high contrast was ignored. Chosen from three (only high contrast; the basics; every surface): the basics. The bars' buttons and modules, the launcher's results and the panels' entries are given to screen readers through UI Automation with their names and roles; while Windows' high contrast is on, Kabuk's colours become the system's high-contrast colours. The app grid, the overview and the other surfaces may follow later.
+
+### D96 · One word for each idea in both languages — Decided by the user (2026-10-29)
+The strings used two words for the same thing ("workspace" and "çalışma alanı"; "look" and "theme"; four names for the app grid). Chosen: Turkish "çalışma alanı" and "bar", English "workspace" and "theme"; the app grid is "Tüm uygulamalar" / "All apps" everywhere. Applied to `locales/` and the design page's strings alike.
+
+### D95 · Notices and the volume and brightness OSD on the monitor in use — Decided by the user (2026-10-29)
+They always came on Monitor 1 (main), even when the volume was changed from Monitor 2's bar. Chosen from three (the monitor in use; the mouse's monitor; always the main one): the monitor in use. A change made on a bar (the wheel, a click) shows on that bar's monitor; otherwise on the monitor of the window in front; with none, on the main one.
+
 ### D94 · A right click on an empty part of the bar opens Windows' taskbar menu — Decided by the user (2026-10-29)
 Asked for by the user: a right click on an empty part of the bar did nothing; on Windows it opens the taskbar's menu. Windows 11's menu holds Task Manager and the taskbar's settings; Kabuk's holds Task Manager and Kabuk's settings (which hold the bar's), in the system icons' menu look, under the place clicked. The same click again closes it.
 
