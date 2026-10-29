@@ -10,11 +10,13 @@ cli-usage =
       kabuk --uninstall       Undoes everything and removes Kabuk; your settings stay
       kabuk --startup on|off  Starts Kabuk when you sign in, or not
       kabuk msg <command>     Sends a command to the running Kabuk:
-                                workspace <1-9>, move-to <1-9>, focus <left|down|up|right>,
-                                float toggle, scratchpad <toggle|send>,
-                                layout <dwindle|master|floating|tiling>, reload,
-                                query <state|windows|monitors>, launcher, overview, saver, apps,
-                                restore
+                                workspace <1-9|next|prev>, move-to <1-9>,
+                                focus <left|down|up|right>, move <left|down|up|right>,
+                                float toggle, close, scratchpad <toggle|send>,
+                                group <toggle|next>, layout <dwindle|master|floating|tiling|cycle>,
+                                dropdown, desktop, launcher, overview, apps, keys, saver,
+                                panel <quick|network|calendar|volume>, profile <name>, reload,
+                                query <state|windows|monitors|tray>, restore
     Options:
       --state-dir <folder>    Folder for the state file and logs
       --config <file>         Configuration file

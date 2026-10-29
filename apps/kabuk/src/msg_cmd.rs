@@ -89,3 +89,35 @@ pub fn main(common: &Common, words: &[String]) -> i32 {
         Err(_) => fail(&i18n, &Message::new("cli-msg-unreadable", vec![]), exit::COMMAND_FAILED),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    //! Edge cases: the usage text in both languages names every command (PLAN M19 U4),
+    //! with the arguments of the ones that take a choice.
+    use kabuk_i18n::{I18n, Lang};
+
+    #[test]
+    fn the_usage_lists_every_command_in_both_languages() {
+        for lang in [Lang::En, Lang::Tr] {
+            let usage = I18n::new(lang).tr("cli-usage");
+            let words: Vec<&str> = usage
+                .split(|c: char| c.is_whitespace() || c == ',')
+                .filter(|w| !w.is_empty())
+                .collect();
+            for name in kabuk_core::ipc::COMMANDS {
+                assert!(words.contains(name), "{lang:?}: `{name}` missing from:\n{usage}");
+            }
+            for form in [
+                "<1-9|next|prev>",
+                "<left|down|up|right>",
+                "<toggle|send>",
+                "<toggle|next>",
+                "<dwindle|master|floating|tiling|cycle>",
+                "<quick|network|calendar|volume>",
+                "<state|windows|monitors|tray>",
+            ] {
+                assert!(usage.contains(form), "{lang:?}: `{form}` missing from:\n{usage}");
+            }
+        }
+    }
+}

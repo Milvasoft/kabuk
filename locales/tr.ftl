@@ -10,11 +10,13 @@ cli-usage =
       kabuk --uninstall       Her şeyi geri alır ve Kabuk'u kaldırır; ayarların kalır
       kabuk --startup on|off  Kabuk oturum açınca başlasın ya da başlamasın
       kabuk msg <komut>       Çalışan Kabuk'a komut gönderir:
-                                workspace <1-9>, move-to <1-9>, focus <left|down|up|right>,
-                                float toggle, scratchpad <toggle|send>,
-                                layout <dwindle|master|floating|tiling>, reload,
-                                query <state|windows|monitors>, launcher, overview, saver, apps,
-                                restore
+                                workspace <1-9|next|prev>, move-to <1-9>,
+                                focus <left|down|up|right>, move <left|down|up|right>,
+                                float toggle, close, scratchpad <toggle|send>,
+                                group <toggle|next>, layout <dwindle|master|floating|tiling|cycle>,
+                                dropdown, desktop, launcher, overview, apps, keys, saver,
+                                panel <quick|network|calendar|volume>, profile <ad>, reload,
+                                query <state|windows|monitors|tray>, restore
     Seçenekler:
       --state-dir <klasör>    Durum dosyası ve log klasörü
       --config <dosya>        Yapılandırma dosyası
