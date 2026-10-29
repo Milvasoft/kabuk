@@ -44,7 +44,7 @@
   const LOOK_NAMES = { a: "ada", b: "cizgi", c: "devre", d: "ray", e: "konsol", f: "rihtim", g: "etkinlik", h: "pano", i: "izgara", j: "defter" };
   const DIM_MIN = 10, DIM_MAX = 3600, DIM_PRESETS = [30, 60, 120];
   const SAVER_WAITS = [3, 5, 10, 15];
-  const RANGES = { height: [24, 72], tray: [0, 12], gap: [0, 32], bright: [10, 100, 5], dropdown: [20, 90, 5], workspaces: [1, 9], drift: [1, 120], monitor: [1, 16], minWidth: [1, 16384] };
+  const RANGES = { height: [24, 72], tray: [0, 12], gap: [0, 32], bright: [10, 100, 5], dropdown: [20, 90, 5], workspaces: [1, 9], drift: [1, 120], minWidth: [1, 16384] };
 
   const cfg = () => S.config;
   const at = (root, path) => path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), root);
@@ -499,7 +499,7 @@
   /* ---------- window rules (SPEC §2.3) ---------- */
   const RULE_TEXTS = [["exe", "setRuleExe", "setRuleExePh"], ["class", "setRuleClass", "setRuleClassPh"], ["title", "setRuleTitle", "setRuleTitlePh"]];
   const RULE_SWITCHES = [["float", "setRuleFloat", "setRuleFloatH"], ["ignore", "setRuleIgnore", "setRuleIgnoreH"], ["no_grab", "setRuleNoGrab", "setRuleNoGrabH"]];
-  const RULE_NUMBERS = [["monitor", "setRuleMon", "setRuleMonH", RANGES.monitor], ["min_width", "setRuleMin", "setRuleMinH", RANGES.minWidth]];
+  const RULE_NUMBERS = [["min_width", "setRuleMin", "setRuleMinH", RANGES.minWidth]];
   const PLACEMENTS = ["left", "right", "top", "bottom", "center"];
   const ruleName = (r) => r.exe || r.class || r.title;
   function ruleText(r) {
@@ -556,7 +556,7 @@
     if (!r || r.path !== "rules.rule" || !f) return "";
     const where = /^rules\.rule\[(\d+)\](?:\.(\w+))?$/.exec(r.at || "");
     const index = f.index ?? (cfg().rules.rule || []).length;
-    const known = [...RULE_TEXTS, ...RULE_NUMBERS].map(([k]) => k).concat(["workspace"]);
+    const known = [...RULE_TEXTS, ...RULE_NUMBERS].map(([k]) => k).concat(["workspace", "monitor"]);
     const key = where && Number(where[1]) === index && known.includes(where[2]) ? where[2] : "";
     if (key !== field) return "";
     ui.refusalShown = true;
@@ -565,6 +565,15 @@
   const ruleInput = (k, label, ph, numeric) => `<span class="num"><input type="text" id="rule-${k}" data-rule-field="${k}" ${numeric ? `inputmode="numeric" aria-describedby="rule-${k}-h"` : `spellcheck="false" style="width:260px"`} value="${escapeHtml(ui.ruleForm[k])}" placeholder="${escapeHtml(ph)}" aria-label="${escapeHtml(label)}"></span>`;
   const ruleSwitch = (k, label, hint) => row(label, hint, `<button class="tgl" type="button" role="switch" aria-checked="${ui.ruleForm[k]}" aria-label="${escapeHtml(label)}" data-rule-flag="${k}"></button>`);
   const ruleSelect = (k, label, options) => `<span class="num"><select id="rule-${k}" data-rule-field="${k}" aria-label="${escapeHtml(label)}">${[["", t("setRuleAny")], ...options].map(([v, n]) => `<option value="${v}"${ui.ruleForm[k] === String(v) ? " selected" : ""}>${n}</option>`).join("")}</select></span>`;
+  /* The connected monitors by Windows' number, the main one named so (PLAN M19 U11: the
+     monitor was a number to type), and the rule's own monitor while it is not connected. */
+  function monitorOptions(chosen) {
+    const screens = (S.info && S.info.screens) || [];
+    const options = screens.map((m) => [m.number, tv(m.primary ? "setRuleMonitorMain" : "setRuleMonitor", m.number)]);
+    const n = Number(chosen);
+    if (chosen && !screens.some((m) => m.number === n)) options.push([n, tv("setRuleMonitorAway", n)]);
+    return options.sort((a, b) => a[0] - b[0]);
+  }
   // The open windows to fill the rule from (SPEC §2.3 "Pick an open window").
   function rulePicker() {
     if (!ui.rulePicking) return `<div><button class="set-btn ghost" type="button" data-rule-pick>${t("pickWin")}</button></div>`;
@@ -591,6 +600,7 @@
         <span class="gl">${t("setRuleDo")}. ${t("setRuleDoH")}</span>
         ${RULE_SWITCHES.map(([k, label, hint]) => ruleSwitch(k, t(label), t(hint))).join("")}
         ${row(t("setRuleWs"), t("setRuleWsH") + ruleFault("workspace"), ruleSelect("workspace", t("setRuleWs"), workspaces))}
+        ${row(t("setRuleMon"), t("setRuleMonH") + ruleFault("monitor"), ruleSelect("monitor", t("setRuleMon"), monitorOptions(f.monitor)))}
         ${numbers}
         ${row(t("setRulePlace"), t("setRulePlaceH"), ruleSelect("placement", t("setRulePlace"), PLACEMENTS.map((p) => [p, t("setRulePlace-" + p)])))}
         <span class="h" data-rule-note="action" role="status"></span>
@@ -805,7 +815,7 @@
     let el;
     if ((el = on("[data-page]"))) {
       ui.page = el.dataset.page; ui.refused = null; ui.capture = null; capture(false); ui.ruleForm = null; ui.rulePicking = false; ui.dimCustom = null;
-      if (ui.page === "about" || ui.page === "wall") post({ op: "info" });
+      if (ui.page === "about" || ui.page === "wall" || ui.page === "rules") post({ op: "info" });
       render();
       document.querySelector(`[data-page="${ui.page}"]`)?.focus({ preventScroll: true });
       return;

@@ -10,7 +10,8 @@
 //!   the value is not valid: why, in the user's language, and the key the mistake is at
 //!   (`rules.rule[2].title`; `null` when not known).
 //! - `{"op":"info"}` → `{"op":"info", …}`: monitors, managed windows, memory, from the
-//!   running shell over its command pipe (asked only while it runs).
+//!   running shell over its command pipe (asked only while it runs), and the connected
+//!   monitors (`screens`: Windows' number, the main one marked) read from Windows.
 //! - `{"op":"windows"}` → `{"op":"windows","windows":[{"exe":…,"class":…,"title":…}, …]}`:
 //!   every window Windows' taskbar would show now, read from Windows, for "Pick an open
 //!   window" (SPEC §2.3; a test passes `"windows"` as `query windows` gives them).
@@ -591,7 +592,7 @@ impl Bridge {
         });
         let state = running.then(|| self.ask(&["query", "state"])).flatten();
         let windows = state.as_ref().and_then(|_| self.ask(&["query", "windows"]));
-        let info = match state {
+        let mut info = match state {
             Some(s) => {
                 let pid = s["pid"].as_u64().and_then(|p| u32::try_from(p).ok());
                 let memory = pid
@@ -607,8 +608,25 @@ impl Bridge {
             }
             None => json!({ "running": false, "monitors": kabuk_win::shell::monitors().len() }),
         };
+        info["screens"] = Value::Array(screens(&kabuk_win::shell::monitors()));
         json!({ "op": "info", "info": info })
     }
+}
+
+/// The connected monitors by Windows' number, the main one marked: a rule's monitor is
+/// chosen from them (PLAN M19 U11: it was a number to type). A monitor whose number
+/// Windows does not give cannot be a rule's.
+fn screens(monitors: &[kabuk_win::shell::Monitor]) -> Vec<Value> {
+    let mut list: Vec<(u32, bool)> = monitors
+        .iter()
+        .filter(|m| m.number > 0)
+        .map(|m| (m.number, m.primary))
+        .collect();
+    list.sort_unstable();
+    list.dedup_by_key(|(n, _)| *n);
+    list.into_iter()
+        .map(|(number, primary)| json!({ "number": number, "primary": primary }))
+        .collect()
 }
 
 /// How long the update check waits for GitHub.
@@ -1053,6 +1071,38 @@ mod tests {
         assert!(listed.is_subset(&seen), "listed {listed:?}, seen {seen:?}");
         let stayed: BTreeSet<String> = before.intersection(&after).cloned().collect();
         assert!(stayed.is_subset(&listed), "stayed {stayed:?}, listed {listed:?}");
+    }
+
+    /// PLAN M19 U11: a rule's monitor is chosen from the connected ones, by Windows'
+    /// number, the main one marked; one Windows gives no number (0) is not offered, one
+    /// listed twice once. The live information always holds them.
+    #[test]
+    fn connected_monitors_are_offered_by_their_number() {
+        let monitor = |number, primary| kabuk_win::shell::Monitor {
+            rect: kabuk_core::state::Rect::default(),
+            work_area: kabuk_core::state::Rect::default(),
+            primary,
+            device: format!("\\\\.\\DISPLAY{number}"),
+            number,
+            dpi: 96,
+            handle: 0,
+        };
+        let list = [
+            monitor(2, false),
+            monitor(1, true),
+            monitor(0, false),
+            monitor(2, false),
+        ];
+        assert_eq!(
+            screens(&list),
+            vec![
+                json!({ "number": 1, "primary": true }),
+                json!({ "number": 2, "primary": false }),
+            ]
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let info = reply(&bridge(&dir, None), json!({"op": "info"}));
+        assert!(info["info"]["screens"].is_array(), "{info}");
     }
 
     /// PLAN M19 U1: with a mistake in the file the page is told what is wrong and where,

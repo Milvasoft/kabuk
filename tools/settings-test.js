@@ -483,6 +483,10 @@ async function main() {
   // said under its field; a rule edited in place, not added again; "Pick an open window"
   // fills the form from the shell's windows; rules removed.
   await go("rules");
+  // The connected monitors as Windows numbers them, here two (as the bridge's `info`
+  // gives them from Windows).
+  const screens = async (list) => { await fromRust({ op: "info", info: { running: false, monitors: list.length, screens: list } }); };
+  await screens([{ number: 1, primary: true }, { number: 2, primary: false }]);
   await page.click(`[data-rule-new]`); await settled();
   const saveOff = () => page.locator("[data-rule-save]").isDisabled();
   const note = (g) => page.locator(`[data-rule-note="${g}"]`).innerText();
@@ -491,12 +495,14 @@ async function main() {
   check((await saveOff()) && (await note("match")) === "" && (await note("action")).length > 0, "rule: a program but nothing to do, nothing saved");
   await page.selectOption("#rule-workspace", "5");
   check(!(await saveOff()) && (await note("action")) === "", "rule: a program and a workspace can be saved");
-  await page.fill("#rule-monitor", "17");
+  // PLAN M19 U11: the monitor is one of the connected ones, the main one named so.
+  const monitors = () => page.$$eval("#rule-monitor option", (os) => os.map((o) => [o.value, o.textContent]));
+  const offered = await monitors();
+  check(JSON.stringify(offered.map(([v]) => v)) === '["","1","2"]' && offered[1][1] === "Monitör 1 (ana)" && offered[2][1] === "Monitör 2", `rule: the connected monitors offered (${offered.map(([, n]) => n)})`);
+  await page.selectOption("#rule-monitor", "2");
   const wrong = (id) => page.$eval(`#${id}`, (e) => e.getAttribute("aria-invalid") === "true" && document.getElementById(e.id + "-h").classList.contains("err"));
-  check((await saveOff()) && (await wrong("rule-monitor")), "rule: monitor 17 refused under its field");
-  await page.fill("#rule-monitor", "2");
   await page.fill("#rule-min_width", "0");
-  check((await saveOff()) && (await wrong("rule-min_width")) && !(await wrong("rule-monitor")), "rule: width 0 refused under its field");
+  check((await saveOff()) && (await wrong("rule-min_width")), "rule: width 0 refused under its field");
   await page.fill("#rule-min_width", "800");
   check(!(await saveOff()), "rule: right again, it can be saved");
   await page.fill("#rule-class", "Chrome_WidgetWin_1");
@@ -521,6 +527,10 @@ async function main() {
   await go("rules");
   await page.click(`[data-rule-edit="0"]`); await settled();
   check((await page.locator(".rules-t .rule-edit-row [data-rule-editor]").count()) === 1 && (await page.inputValue("#rule-monitor")) === "2" && (await page.inputValue("#rule-workspace")) === "5", "rule: edited in place, its fields filled");
+  // Its monitor disconnected meanwhile: still chosen, and said to be away.
+  await screens([{ number: 1, primary: true }]);
+  const away = await page.$eval("#rule-monitor", (s) => s.selectedOptions[0].textContent);
+  check((await page.inputValue("#rule-monitor")) === "2" && away === "Monitör 2 (bağlı değil)" && (await monitors()).length === 3, `rule: a monitor not connected stays chosen, said so (${away})`);
   await page.fill("#rule-title", "(Discord");
   await page.click(`[data-rule-flag="regex"]`); await settled();
   const before = toml();
