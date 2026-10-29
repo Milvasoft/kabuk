@@ -211,6 +211,36 @@ pub fn cell_parts(cells: &[(u32, PxRect, String)], selected: Option<usize>) -> V
 /// The kind of an overview cell's part (its value: the workspace's number).
 const CELL: &str = "overview-cell";
 
+/// What a screen reader reads of a notice: its title, then its second line when it has
+/// one.
+pub fn notice_words(i18n: &I18n, title: &str, sub: &str) -> String {
+    if sub.trim().is_empty() {
+        return title.to_string();
+    }
+    i18n.tr_args("acc-part", &[("label", title.into()), ("value", sub.into())])
+}
+
+/// A notice's window as a screen reader finds it: its `words` to read, over the whole of
+/// it (`size`, its pixels).
+pub fn notice_part(words: &str, (w, h): (u32, u32)) -> Part {
+    let (w, h) = (
+        i32::try_from(w).unwrap_or(i32::MAX),
+        i32::try_from(h).unwrap_or(i32::MAX),
+    );
+    Part {
+        id: kabuk_win::uia::part_id(NOTICE, 0),
+        name: words.to_string(),
+        role: Role::Text,
+        rect: PxRect { x: 0, y: 0, w, h },
+        click: (w / 2, h / 2),
+        focused: false,
+        range: None,
+    }
+}
+
+/// The kind of a notice's part.
+const NOTICE: &str = "notice";
+
 /// What a screen reader calls a mute button (`app`: an app's in the mixer, else the
 /// output's), by what pressing it does now.
 pub fn mute_name(i18n: &I18n, app: Option<&str>, muted: bool) -> String {
@@ -508,5 +538,30 @@ mod tests {
         // Who a cell is follows its workspace, not its place.
         assert_eq!(parts[1].id, cell_parts(&cells[1..], None)[0].id);
         assert!(cell_parts(&cells, None).iter().all(|p| !p.focused));
+    }
+
+    #[test]
+    fn a_notice_is_read_whole() {
+        let en = I18n::new(Lang::En);
+        assert_eq!(
+            notice_words(&en, "Kabuk started again", "Its log says why."),
+            "Kabuk started again: Its log says why."
+        );
+        assert_eq!(notice_words(&en, "Window is floating", " "), "Window is floating");
+        let p = notice_part("Window is floating", (300, 80));
+        assert_eq!(
+            (p.role, p.rect, p.click),
+            (
+                Role::Text,
+                PxRect {
+                    x: 0,
+                    y: 0,
+                    w: 300,
+                    h: 80
+                },
+                (150, 40)
+            )
+        );
+        assert_eq!(p.range, None);
     }
 }

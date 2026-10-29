@@ -4600,6 +4600,17 @@ fn a_wheel_step_on_the_brightness_shows_its_osd() {
     let before = work_areas();
     let sandbox = Sandbox::new();
     std::fs::write(sandbox.config_file(), "schema = 1\n[game]\ndetect = false\n").unwrap();
+
+/// PLAN M19 U17: Kabuk's notices were drawn only. A screen reader hears a notice as it
+/// comes, and finds its words in its window.
+#[test]
+fn a_screen_reader_hears_and_reads_a_notice() {
+    use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_OPEN_MISSING};
+    use kabuk_win::msgloop::{post_message, Msg};
+    use kabuk_win::uia::{self, Role};
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
     let _shell = sandbox.shell_with_bar(&[]);
     assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
     let pid = sandbox.state().kabuk_pid.expect("pid");
@@ -4661,6 +4672,35 @@ fn a_wheel_step_on_the_brightness_shows_its_osd() {
             assert!(osd().is_none());
         }
     }
+
+    let i18n = kabuk_win::system::i18n(None);
+    let title = i18n.tr("notify-failed-open");
+    // Listening everywhere: the notice's window is not there yet.
+    let ear = uia::listen(None).unwrap();
+    post_message(
+        control,
+        Msg {
+            id: MSG_TEST_OPEN_MISSING,
+            wparam: 0,
+            lparam: 0,
+        },
+    )
+    .unwrap();
+    // Other programs may speak too.
+    let heard = std::iter::from_fn(|| ear.heard.recv_timeout(SETTLE).ok()).find(|h| h.starts_with(&title));
+    let heard = heard.expect("the notice was not heard");
+    assert!(heard.contains(&i18n.tr("notify-failed-s")), "{heard}");
+    let notice = kabuk_win::window::windows_of_class("Kabuk.Notice")
+        .into_iter()
+        .find(|h| h.pid() == Some(pid) && h.is_visible())
+        .expect("no notice");
+    let seen = uia::read(notice).unwrap();
+    assert_eq!(seen.len(), 1, "{seen:?}");
+    assert_eq!(
+        (seen[0].name.as_str(), seen[0].role),
+        (heard.as_str(), Some(Role::Text))
+    );
+    assert!(uia::invoke(notice, &heard).is_err(), "words to read were invoked");
     assert_eq!(sandbox.restore().0, 0);
     assert!(wait_until(SETTLE, || restored(&before)).is_some());
 }

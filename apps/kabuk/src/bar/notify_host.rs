@@ -294,6 +294,10 @@ impl Shared {
         self.notices.toast = self.popup(TOAST_CLASS, &node, motion::NOTICE, |size| {
             notify::place::toast(&style, monitor, bar, pad, size)
         });
+        if let Some(t) = &self.notices.toast {
+            let words = crate::bar::access::notice_words(&self.i18n, &title, &sub);
+            super::access_host::tell_notice(t, &self.i18n.tr("acc-notice"), &words);
+        }
         tracing::info!(title = %title, sub = %sub, "notice shown");
         if let Some(c) = &self.control {
             c.set_timer(

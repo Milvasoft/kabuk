@@ -835,8 +835,9 @@ impl IUIAutomationNotificationEventHandler_Impl for Ear_Impl {
     }
 }
 
-/// Listens to the notices `window` says ([`announce`]), as a screen reader does.
-pub fn listen(window: Hwnd) -> io::Result<Listening> {
+/// Listens to the notices `window` says ([`announce`]), as a screen reader does; every
+/// window's (`None`, the whole desktop), to hear one from a window not there yet.
+pub fn listen(window: Option<Hwnd>) -> io::Result<Listening> {
     use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
     crate::system::com_init_mta();
     // SAFETY: plain creation of the UI Automation client object; the newer class gives
@@ -847,7 +848,11 @@ pub fn listen(window: Hwnd) -> io::Result<Listening> {
     let handler: IUIAutomationNotificationEventHandler = Ear(Mutex::new(tx)).into();
     // SAFETY: plain UI Automation client calls; the handler lives in `Listening`.
     let element = unsafe {
-        let element = uia.ElementFromHandle(window.raw()).map_err(io::Error::other)?;
+        let element = match window {
+            Some(w) => uia.ElementFromHandle(w.raw()),
+            None => uia.GetRootElement(),
+        }
+        .map_err(io::Error::other)?;
         uia.AddNotificationEventHandler(&element, TreeScope_Subtree, None, &handler)
             .map_err(io::Error::other)?;
         element
@@ -1169,15 +1174,19 @@ mod tests {
     }
 
     /// PLAN M19 U17: Kabuk's notices were drawn only. A screen reader listening to a
-    /// window hears what it says.
+    /// window, or to every window, hears what it says.
     #[test]
     fn a_screen_reader_hears_what_a_window_says() {
         let parts = vec![part(SAID, Role::Text, 10)];
         let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let w = TestWindow::new("said", parts.clone(), parts);
-        let ear = listen(w.hwnd).unwrap();
+        let ear = listen(Some(w.hwnd)).unwrap();
+        let everywhere = listen(None).unwrap();
         w.swap();
         assert_eq!(ear.heard.recv_timeout(WAIT).unwrap(), SAID);
+        // Other programs may speak too.
+        let heard = || everywhere.heard.recv_timeout(WAIT).ok();
+        assert!(std::iter::from_fn(heard).any(|h| h == SAID), "not heard everywhere");
     }
 
     #[test]

@@ -93,6 +93,19 @@ pub(super) fn tell_popup(
     shown.window().set_accessible(container, name, parts);
 }
 
+/// Tells screen readers notice `words` (PLAN M19 U17): its window holds them to read,
+/// and they are said aloud at once, as Windows' own notifications are.
+pub(super) fn tell_notice(shown: &super::motion_host::Shown, name: &str, words: &str) {
+    let size = shown
+        .surface()
+        .map(kabuk_ui::render::WindowSurface::size)
+        .unwrap_or_default();
+    shown
+        .window()
+        .set_accessible(Container::Panel, name, vec![access::notice_part(words, size)]);
+    shown.window().announce(words);
+}
+
 /// [`tell_popup`] for a menu named `name`: its entries of `module` are menu items named
 /// by their words.
 pub(super) fn tell_menu(
