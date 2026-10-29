@@ -273,6 +273,8 @@ pub struct WmHandle {
     queue: Arc<Mutex<VecDeque<Command>>>,
     view: Arc<Mutex<WmView>>,
     listener: Listener,
+    /// The only class it manages, in test mode.
+    manage_class: Option<String>,
 }
 
 /// What the bar keeps to talk to the window manager.
@@ -282,6 +284,7 @@ pub struct WmLink {
     queue: Arc<Mutex<VecDeque<Command>>>,
     view: Arc<Mutex<WmView>>,
     listener: Listener,
+    manage_class: Option<String>,
 }
 
 impl WmLink {
@@ -291,6 +294,12 @@ impl WmLink {
 
     pub fn view(&self) -> WmView {
         self.view.lock().map(|v| v.clone()).unwrap_or_default()
+    }
+
+    /// The only window class it manages, in test mode: the bar lists no other windows
+    /// either (the user's own stay out of the tests).
+    pub fn manage_class(&self) -> Option<&str> {
+        self.manage_class.as_deref()
     }
 
     /// `window` gets message `id` whenever the workspace summary changes, and once now:
@@ -343,6 +352,7 @@ impl WmHandle {
         let view = Arc::new(Mutex::new(WmView::default()));
         let listener: Listener = Arc::new(Mutex::new(None));
         let snapshot: SharedSnapshot = Arc::new(Mutex::new(Snapshot::default()));
+        let manage_class = options.manage_class.clone();
         if let Ok(mut s) = snapshot.lock() {
             s.set_config(&options.config);
             s.monitors = kabuk_win::shell::monitors().iter().map(|m| m.rect).collect();
@@ -376,6 +386,7 @@ impl WmHandle {
                     queue,
                     view,
                     listener,
+                    manage_class,
                 })
             }
             Ok(Err(e)) => {
@@ -395,6 +406,7 @@ impl WmHandle {
             queue: self.queue.clone(),
             view: self.view.clone(),
             listener: self.listener.clone(),
+            manage_class: self.manage_class.clone(),
         }
     }
 
@@ -1300,6 +1312,14 @@ impl Wm {
             }
             return;
         }
+        // Not one Kabuk manages (a full-screen program, one a rule leaves alone): Windows
+        // brings it forward.
+        if !self.desk.contains(hwnd) {
+            if !h.focus() {
+                tracing::debug!(hwnd, "focus refused by Windows");
+            }
+            return;
+        }
         let effects = self.desk.reveal(hwnd);
         tracing::info!(hwnd, "window revealed from the launcher");
         self.apply(effects);
@@ -1505,7 +1525,18 @@ impl Wm {
                 return;
             }
         }
-        let facts = hwnd.facts();
+        // Whether it runs elevated is asked only of a window the filter takes: asking opens
+        // its process, and a window left alone (a tool window, a popup) was asked again on
+        // every rename (found by a review of the code, M19 P5).
+        let mut facts = hwnd.facts_but_rights();
+        let left_alone = policy::classify(&policy::WindowFacts {
+            minimized: false,
+            ..facts.clone()
+        }) == Verdict::Ignore;
+        if left_alone {
+            return;
+        }
+        facts.elevated = hwnd.pid().is_some_and(kabuk_win::process::runs_elevated);
         // A window minimised now (open before Kabuk started, or started minimised) is taken
         // on as minimised: on the bar at once, in the layout once restored. Found by a
         // friend of the user: such apps were missing from the bar until restored.

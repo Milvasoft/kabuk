@@ -312,8 +312,41 @@ impl Hwnd {
         unsafe { IsZoomed(self.raw()) }.as_bool()
     }
 
+    /// Whether Windows' taskbar would show a button for it ([`kabuk_core::wm::on_taskbar`]):
+    /// a few cheap queries, no process opened.
+    pub fn on_taskbar(self) -> bool {
+        // Most top-level windows are hidden: nothing more is asked of them.
+        if !self.is_visible() {
+            return false;
+        }
+        let style = self.long(GWL_STYLE);
+        let ex = self.long(GWL_EXSTYLE);
+        let has = |bits: u32, flag: u32| bits & flag == flag;
+        kabuk_core::wm::on_taskbar(&kabuk_core::wm::WindowFacts {
+            class: self.class_name(),
+            visible: true,
+            cloaked: self.is_cloaked(),
+            child: has(style, WS_CHILD.0),
+            tool_window: has(ex, WS_EX_TOOLWINDOW.0),
+            app_window: has(ex, WS_EX_APPWINDOW.0),
+            no_activate: has(ex, WS_EX_NOACTIVATE.0),
+            owned: self.owner().is_some(),
+            ..Default::default()
+        })
+    }
+
     /// Everything the window manager's filter needs ([`kabuk_core::wm::classify`]).
     pub fn facts(self) -> kabuk_core::wm::WindowFacts {
+        kabuk_core::wm::WindowFacts {
+            elevated: self.pid().is_some_and(crate::process::runs_elevated),
+            ..self.facts_but_rights()
+        }
+    }
+
+    /// [`Hwnd::facts`] without asking whether it runs elevated (`elevated` false): that
+    /// opens its process, and only decides between floating and tiling a window the
+    /// filter does not ignore anyway.
+    pub fn facts_but_rights(self) -> kabuk_core::wm::WindowFacts {
         let style = self.long(GWL_STYLE);
         let ex = self.long(GWL_EXSTYLE);
         let has = |bits: u32, flag: u32| bits & flag == flag;
@@ -335,7 +368,7 @@ impl Hwnd {
             popup: has(style, WS_POPUP.0),
             owned: owner.is_some(),
             owner_visible: owner.is_some_and(Hwnd::is_visible),
-            elevated: self.pid().is_some_and(crate::process::runs_elevated),
+            elevated: false,
             full_screen: !has(style, WS_CAPTION.0) && self.covers_its_monitor(),
         }
     }

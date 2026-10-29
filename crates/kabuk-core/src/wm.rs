@@ -100,6 +100,19 @@ pub fn classify(f: &WindowFacts) -> Verdict {
     Verdict::Tile
 }
 
+/// Whether Windows' taskbar would show a button for the window: shown and not hidden by
+/// DWM, not part of the shell, and either asking for a button (`WS_EX_APPWINDOW`) or an
+/// unowned window that is no tool window and takes focus. Minimised, full-screen and
+/// fixed-size windows count, as they do there; elevation and size are not looked at. The
+/// bar's apps take these in beside the managed windows (asked for by the user on
+/// 2026-10-29: apps were missing from the bar; DECISIONS D93).
+pub fn on_taskbar(f: &WindowFacts) -> bool {
+    if !f.visible || f.cloaked || f.child || BLOCKED_CLASSES.contains(&f.class.as_str()) {
+        return false;
+    }
+    f.app_window || (!f.tool_window && !f.owned && !f.no_activate)
+}
+
 /// A window-manager shortcut action (SPEC §6).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
@@ -199,6 +212,124 @@ mod tests {
             resizable: true,
             ..WindowFacts::default()
         }
+    }
+
+    /// M19 P5: the window manager asks whether a window runs elevated (it opens its
+    /// process) only once the filter takes it, so elevation must never decide whether a
+    /// window is left alone, only whether it floats.
+    #[test]
+    fn elevation_never_decides_whether_a_window_is_left_alone() {
+        let kinds = [
+            app(),
+            WindowFacts {
+                visible: false,
+                ..app()
+            },
+            WindowFacts { cloaked: true, ..app() },
+            WindowFacts { child: true, ..app() },
+            WindowFacts {
+                tool_window: true,
+                ..app()
+            },
+            WindowFacts {
+                has_title: false,
+                ..app()
+            },
+            WindowFacts {
+                full_screen: true,
+                caption: false,
+                ..app()
+            },
+            WindowFacts {
+                popup: true,
+                caption: false,
+                resizable: false,
+                ..app()
+            },
+            WindowFacts {
+                class: "Progman".into(),
+                ..app()
+            },
+            WindowFacts {
+                owned: true,
+                owner_visible: true,
+                ..app()
+            },
+            WindowFacts {
+                resizable: false,
+                ..app()
+            },
+        ];
+        for f in kinds {
+            let plain = classify(&f);
+            let raised = classify(&WindowFacts {
+                elevated: true,
+                ..f.clone()
+            });
+            assert_eq!(plain == Verdict::Ignore, raised == Verdict::Ignore, "{f:?}");
+            if plain != Verdict::Ignore {
+                assert_eq!(raised, Verdict::Float, "{f:?}");
+            }
+        }
+    }
+
+    /// Asked for by the user on 2026-10-29 (apps missing from the bar): what Windows'
+    /// taskbar shows, minimised and full-screen windows included, and what it does not.
+    #[test]
+    fn the_taskbar_shows_unowned_app_windows_minimised_or_not() {
+        assert!(on_taskbar(&app()));
+        assert!(on_taskbar(&WindowFacts {
+            minimized: true,
+            ..app()
+        }));
+        assert!(on_taskbar(&WindowFacts {
+            full_screen: true,
+            caption: false,
+            ..app()
+        }));
+        assert!(on_taskbar(&WindowFacts {
+            has_title: false,
+            ..app()
+        }));
+        for hidden in [
+            WindowFacts {
+                visible: false,
+                ..app()
+            },
+            WindowFacts { cloaked: true, ..app() },
+            WindowFacts { child: true, ..app() },
+            WindowFacts {
+                tool_window: true,
+                ..app()
+            },
+            WindowFacts {
+                owned: true,
+                owner_visible: true,
+                ..app()
+            },
+            WindowFacts {
+                no_activate: true,
+                ..app()
+            },
+            WindowFacts {
+                class: "Shell_TrayWnd".into(),
+                ..app()
+            },
+        ] {
+            assert!(!on_taskbar(&hidden), "{hidden:?}");
+        }
+        // Asking for a button wins over being a tool window or owned.
+        assert!(on_taskbar(&WindowFacts {
+            tool_window: true,
+            owned: true,
+            app_window: true,
+            ..app()
+        }));
+        assert!(!on_taskbar(&WindowFacts {
+            app_window: true,
+            class: "Progman".into(),
+            ..app()
+        }));
     }
 
     /// D72: a window covering its monitor without a caption (a game, a full-screen video)

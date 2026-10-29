@@ -330,12 +330,22 @@ impl Shared {
             return had;
         }
         let view = self.wm.as_ref().map(wm::WmLink::view).unwrap_or_default();
-        let z: HashMap<u64, usize> = kabuk_win::window::top_level_windows()
-            .into_iter()
-            .enumerate()
-            .map(|(i, h)| (h.0, i))
-            .collect();
+        let top = kabuk_win::window::top_level_windows();
+        let z: HashMap<u64, usize> = top.iter().enumerate().map(|(i, h)| (h.0, i)).collect();
         let mut windows: Vec<u64> = view.windows.iter().map(|w| w.hwnd).collect();
+        // Windows' taskbar shows more than the window manager takes: full-screen
+        // programs, windows a rule leaves alone, every window without the window manager
+        // (asked for by the user on 2026-10-29: apps were missing from the bar, D93).
+        // Kabuk's own windows are not apps.
+        let me = std::process::id();
+        let only = self.wm.as_ref().and_then(wm::WmLink::manage_class);
+        let extra: Vec<u64> = top
+            .iter()
+            .filter(|h| !windows.contains(&h.0) && h.on_taskbar() && h.pid() != Some(me))
+            .filter(|h| only.is_none_or(|c| h.class_name() == c))
+            .map(|h| h.0)
+            .collect();
+        windows.extend(extra);
         windows.sort_by_key(|h| z.get(h).copied().unwrap_or(usize::MAX));
         let mut running = Vec::new();
         for hwnd in windows {

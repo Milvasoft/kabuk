@@ -8,6 +8,12 @@ No open decisions (the user decided D39, D43, D44 and the still pictures' drift 
 
 ## Decided and proposed
 
+### D94 · A right click on an empty part of the bar opens Windows' taskbar menu — Decided by the user (2026-10-29)
+Asked for by the user: a right click on an empty part of the bar did nothing; on Windows it opens the taskbar's menu. Windows 11's menu holds Task Manager and the taskbar's settings; Kabuk's holds Task Manager and Kabuk's settings (which hold the bar's), in the system icons' menu look, under the place clicked. The same click again closes it.
+
+### D93 · The bar's apps follow what Windows' taskbar shows — Decided by the user (2026-10-29)
+Reported by the user: apps were missing from the bar. The bar listed only the windows the window manager takes, and it leaves alone full-screen programs, windows a rule ignores, splash-like popups that still ask for a button, and every window when Kabuk runs without it, though Windows' taskbar shows them. The bar now also lists every top-level window Windows' taskbar would show a button for (shown, not cloaked, not part of the shell, and either asking for a button or an unowned window that is no tool window and takes focus; `kabuk_core::wm::on_taskbar`), Kabuk's own aside. A click on one the window manager does not manage brings it forward through Windows.
+
 ### D92 · A click on an app with several windows shows their previews — Decided by the user (2026-10-29)
 Asked for by the user: a click on an app with more than one window went to its windows in turn; Windows' taskbar shows their previews instead. Now a click on such an app shows the same previews the mouse resting on it shows, to pick a window from (a click on a card brings it forward, its × closes it); a second click takes them away. Shown by resting the mouse, a click keeps them. An app with one window is unchanged: in front, a click minimises it; else it comes forward. A middle or Shift click still starts another window, and a drag resting on the app still brings its last window forward (D86).
 

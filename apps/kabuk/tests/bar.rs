@@ -4142,3 +4142,113 @@ fn a_click_on_an_app_with_several_windows_shows_their_previews() {
     assert_eq!(sandbox.restore().0, 0);
     assert!(wait_until(SETTLE, || restored(&before)).is_some());
 }
+
+/// Asked for by the user on 2026-10-29: apps were missing from the bar (DECISIONS D93).
+/// A window the window manager leaves alone (here by a rule) is still on Windows'
+/// taskbar; so it is on the bar, and a click on it brings it forward.
+#[test]
+fn a_window_the_window_manager_leaves_alone_is_on_the_bar() {
+    use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_APP_CLICK};
+    use kabuk_win::msgloop::{post_message, Msg};
+    let before = work_areas();
+    let alone = title("left-alone");
+    let sandbox = Sandbox::new();
+    std::fs::write(
+        sandbox.config_file(),
+        format!("schema = 1\n[[rules.rule]]\ntitle = \"{alone}\"\nignore = true\n"),
+    )
+    .unwrap();
+    let _shell = sandbox.shell_with_bar_and_wm();
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let w = TestWindow::open(&["--minimized", "--title", &alone]);
+    assert!(wait_until(SETTLE, || w.hwnd.is_minimized()).is_some());
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(
+        sandbox.log_lines(&format!("managing window hwnd={}", w.hwnd.0)),
+        0,
+        "the rule did not leave it alone"
+    );
+    post_message(
+        control,
+        Msg {
+            id: MSG_TEST_APP_CLICK,
+            wparam: w.hwnd.0 as usize,
+            lparam: 0,
+        },
+    )
+    .expect("post to the bar");
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("app shown from the bar") == 1).is_some(),
+        "the window left alone is not on the bar"
+    );
+    assert!(
+        wait_until(SETTLE, || !w.hwnd.is_minimized()).is_some(),
+        "not brought back"
+    );
+    drop(w);
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}
+
+/// Asked for by the user on 2026-10-29: a right click on an empty part of the bar opens
+/// what Windows' taskbar menu holds (Task Manager, the bar's settings), where it came.
+#[test]
+fn a_right_click_on_an_empty_part_of_the_bar_opens_the_taskbar_menu() {
+    use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_VOLUME_PANEL};
+    use kabuk_win::msgloop::{post_message, Msg};
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
+    let post = |what: usize| {
+        post_message(
+            control,
+            Msg {
+                id: MSG_TEST_VOLUME_PANEL,
+                wparam: what,
+                lparam: 0,
+            },
+        )
+        .unwrap();
+    };
+    post(4);
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("menu=Bar") == 1).is_some(),
+        "no menu for an empty part of the bar: {:?}",
+        sandbox.last_log_line(&["bar click"])
+    );
+    let menu = kabuk_win::window::windows_of_class("Kabuk.VolumePanel")
+        .into_iter()
+        .find(|h| h.pid() == Some(pid) && h.is_visible())
+        .expect("the menu's window");
+    // Where the click came: over the bar's start, not its middle or end.
+    let spot = sandbox
+        .last_log_line(&["bar click", "Right"])
+        .and_then(|l| l.split(" x=").nth(1)?.split_whitespace().next()?.parse::<i32>().ok())
+        .expect("the click's place");
+    let bar = primary_window_of("Kabuk.Bar", pid).window_rect().unwrap();
+    let r = menu.window_rect().unwrap();
+    assert!(
+        r.left <= bar.left + spot && bar.left + spot <= r.right + 1,
+        "the menu {r:?} is not at the click {spot}"
+    );
+    // The same again closes it.
+    post(4);
+    assert!(
+        wait_until(SETTLE, || !menu.is_visible()).is_some(),
+        "a second click left it"
+    );
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}
