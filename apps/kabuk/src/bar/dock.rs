@@ -22,7 +22,7 @@ pub fn tiles() -> std::ops::RangeInclusive<u8> {
 /// An app tile (DECISIONS D17): the program's picture and whether it runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DockApp {
-    pub image: u64,
+    pub image: Option<u64>,
     pub running: bool,
 }
 
@@ -139,7 +139,7 @@ fn app_tile(a: &DockApp, dock_edge: Edge, s: &DockStyle, side: f32) -> Node {
     } else {
         dot
     };
-    let picture = Node::image(a.image, side - s.run_dot - s.run_gap);
+    let picture = super::view::app_picture(a.image, side - s.run_dot - s.run_gap, Role::Dim);
     let node = match dock_edge {
         Edge::Top | Edge::Bottom => Node::column(vec![picture, dot]),
         Edge::Right => Node::row(vec![picture, dot]),
@@ -340,7 +340,7 @@ mod tests {
     fn apps() -> Vec<DockApp> {
         (0..6)
             .map(|i| DockApp {
-                image: 100 + i,
+                image: Some(100 + i),
                 running: (1..4).contains(&i),
             })
             .collect()

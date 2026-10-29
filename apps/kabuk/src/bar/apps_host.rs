@@ -32,6 +32,10 @@ const PIN_FOLDER: [&str; 5] = [
 /// App icons are loaded at this many times their drawn size and scaled down when drawn,
 /// so they stay smooth (the shell's own small sizes look coarse, reported by the user).
 pub(super) const OVERSAMPLE: u32 = 2;
+/// The pins have been read off the bar thread.
+pub(super) const MSG_PINS_READ: u32 = kabuk_win::msgloop::msg::APP + 73;
+/// The apps' pictures have come from their worker.
+pub(super) const MSG_APP_PICTURES: u32 = kabuk_win::msgloop::msg::APP + 72;
 /// Integration tests click the app owning window `wparam`, as a click on its icon would;
 /// `lparam` 1: as if that window were in front.
 pub const MSG_TEST_APP_CLICK: u32 = kabuk_win::msgloop::msg::APP + 28;
@@ -63,6 +67,31 @@ pub(super) struct AppsState {
     side: u32,
     /// Each app's name by its program (or pin), for a look listing the apps as tasks.
     names: std::cell::RefCell<HashMap<String, String>>,
+    /// The apps' pictures, loaded off the bar thread: the first bar frame does not wait
+    /// for them (M19 P3).
+    pub(super) pictures: crate::bar::pictures::Pictures,
+    /// The pins' worker's answer: the Windows taskbar's and Kabuk's file.
+    pins_read: std::sync::Arc<std::sync::Mutex<Option<PinSources>>>,
+    /// Whether the pins have been read (until then they are not written).
+    pins_loaded: bool,
+}
+
+/// The Windows taskbar's pins and Kabuk's pins file, each with its app ids.
+type PinSources = (Vec<Pin>, Option<PinsFile>);
+
+/// Reads the pins' sources (COM must be initialised).
+fn read_pin_sources(file: Option<&Path>) -> PinSources {
+    let theirs = kabuk_win::shellitems::known_folder(kabuk_win::shellitems::Folder::RoamingAppData)
+        .map(|base| windows_pins(&PIN_FOLDER.iter().fold(base, |p, part| p.join(part))))
+        .unwrap_or_default();
+    let saved = file
+        .and_then(|f| std::fs::read_to_string(f).ok())
+        .and_then(|t| read_pins_file(&t))
+        .map(|file| PinsFile {
+            pins: with_app_ids(file.pins),
+            ..file
+        });
+    (with_app_ids(theirs), saved)
 }
 
 /// Kabuk's pins file: the pins in their order and the Windows pins already taken in.
@@ -174,24 +203,46 @@ impl Shared {
         Some(wm::lock(&self.state).path().parent()?.join(PINS_FILE))
     }
 
+    /// Reads the pins off the bar thread (each shortcut is opened through the shell: over
+    /// a second on a busy machine, M19 P3); [`Shared::pins_read`] takes them when they come.
+    pub(super) fn load_pins(&mut self) {
+        let Some(control) = self.control.as_ref().map(kabuk_win::msgloop::Window::hwnd) else {
+            return;
+        };
+        let file = self.pins_file();
+        let out = self.apps.pins_read.clone();
+        let spawned = std::thread::Builder::new().name("pins".into()).spawn(move || {
+            kabuk_win::system::com_init();
+            let started = std::time::Instant::now();
+            let read = read_pin_sources(file.as_deref());
+            tracing::debug!(ms = started.elapsed().as_millis() as u64, "pins loaded");
+            if let Ok(mut o) = out.lock() {
+                *o = Some(read);
+            }
+            let _ = kabuk_win::msgloop::post_message(
+                control,
+                kabuk_win::msgloop::Msg {
+                    id: MSG_PINS_READ,
+                    wparam: 0,
+                    lparam: 0,
+                },
+            );
+        });
+        if let Err(e) = spawned {
+            tracing::error!(error = %e, "pins not read");
+        }
+    }
+
     /// Kabuk's pins, or, until the user changes them, the Windows taskbar's; pins added
     /// on Windows' taskbar since are taken in once (found on the user's machine: Windows'
     /// packaged pins were missing).
-    pub(super) fn load_pins(&mut self) {
-        let theirs = kabuk_win::shellitems::known_folder(kabuk_win::shellitems::Folder::RoamingAppData)
-            .map(|base| windows_pins(&PIN_FOLDER.iter().fold(base, |p, part| p.join(part))))
-            .unwrap_or_default();
-        let saved = self
-            .pins_file()
-            .and_then(|f| std::fs::read_to_string(f).ok())
-            .and_then(|t| read_pins_file(&t));
-        let theirs = with_app_ids(theirs);
+    pub(super) fn pins_read(&mut self) {
+        let Some((theirs, saved)) = self.apps.pins_read.lock().ok().and_then(|mut r| r.take()) else {
+            return;
+        };
+        self.apps.pins_loaded = true;
         match saved {
             Some(file) => {
-                let file = PinsFile {
-                    pins: with_app_ids(file.pins),
-                    ..file
-                };
                 let mut seen = file.seen;
                 let before = file.pins.len();
                 self.apps.pins = apps::merged(file.pins, &mut seen, &theirs);
@@ -212,9 +263,16 @@ impl Shared {
                 tracing::debug!(pins = self.apps.pins.len(), "taskbar pins read");
             }
         }
+        self.refresh_apps();
+        self.render_all(true);
     }
 
     fn write_pins(&mut self, pins: &[Pin]) {
+        // Not before the file was read: it would be written over with what is shown.
+        if !self.apps.pins_loaded {
+            tracing::warn!("pins not saved: not read yet");
+            return;
+        }
         for p in pins {
             if !self.apps.seen.iter().any(|s| s.eq_ignore_ascii_case(&p.link)) {
                 self.apps.seen.push(p.link.clone());
@@ -298,6 +356,7 @@ impl Shared {
                     // while Visual Studio was putting a program's package back stayed blank
                     // for as long as the shell ran).
                     self.gpu.images.forget([self.picture_key(&icon)]);
+                    self.apps.pictures.forget(&icon);
                     self.apps.exes.insert(pid, (exe.clone(), icon.clone()));
                     (exe, icon)
                 }
@@ -331,6 +390,9 @@ impl Shared {
         let list = apps::apps(&self.apps.pins, &running, &self.apps.order, focused);
         let side = self.picture_side();
         let changed = list != self.apps.list || side != self.apps.side;
+        if side != self.apps.side {
+            self.apps.pictures.clear();
+        }
         self.apps.list = list;
         self.apps.side = side;
         if changed {
@@ -353,25 +415,34 @@ impl Shared {
 
     /// The key of an app's picture at the current size.
     pub(super) fn picture_key(&self, icon: &str) -> u64 {
-        apps::image_key(&format!("{icon}@{}", self.apps.side))
+        self.apps.pictures.key(icon, self.apps.side)
     }
 
+    /// The key of app `a`'s picture once it is loaded (until then the bar draws a
+    /// stand-in).
+    fn app_picture(&self, a: &App) -> Option<u64> {
+        Some(self.picture_key(&a.icon)).filter(|k| self.gpu.images.contains(*k))
+    }
+
+    /// Asks for the apps' pictures not loaded yet; they are drawn as they come.
     fn load_app_images(&mut self) {
-        let side = self.apps.side;
-        for app in &self.apps.list {
-            let key = self.picture_key(&app.icon);
-            if self.gpu.images.contains(key) {
-                continue;
-            }
-            let px = kabuk_win::icon::shell_item_icon_pixels(&app.icon, side)
-                .or_else(|| kabuk_win::icon::file_icon_pixels(Path::new(&app.icon), side));
-            match px {
-                Some(px) => {
-                    self.gpu.images.set(key, side, px);
-                    tracing::debug!(icon = %app.icon, "app icon loaded");
-                }
-                None => tracing::debug!(icon = %app.icon, "app icon unavailable"),
-            }
+        self.apps.pictures.forget_dropped(&self.gpu.images);
+        let missing: Vec<String> = self
+            .apps
+            .list
+            .iter()
+            .filter(|a| !self.gpu.images.contains(self.picture_key(&a.icon)))
+            .map(|a| a.icon.clone())
+            .collect();
+        self.apps.pictures.ask(missing, self.apps.side);
+    }
+
+    /// Some apps' pictures came: they are drawn.
+    pub(super) fn app_pictures_arrived(&mut self) {
+        let count = self.apps.pictures.arrived(&self.gpu.images);
+        tracing::debug!(count, pending = self.apps.pictures.pending(), "app icons loaded");
+        if count > 0 {
+            self.render_all(false);
         }
     }
 
@@ -442,7 +513,7 @@ impl Shared {
             .enumerate()
             .map(|(i, a)| AppIcon {
                 label: if tasks { self.app_name(a) } else { String::new() },
-                image: self.picture_key(&a.icon),
+                image: self.app_picture(a),
                 running: !a.windows.is_empty(),
                 focused: a.focused,
                 grow: self.app_growth(i),
@@ -460,7 +531,7 @@ impl Shared {
             .list
             .iter()
             .map(|a| DockApp {
-                image: self.picture_key(&a.icon),
+                image: self.app_picture(a),
                 running: !a.windows.is_empty(),
             })
             .collect()

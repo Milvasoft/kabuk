@@ -56,7 +56,7 @@ fn main() {
             };
             keep.push(Box::new(kabuk_win::media::Media::start(n)));
         }
-        "hook" => keep.push(Box::new(kabuk_win::events::ForegroundWatch::start(|_| {}).unwrap())),
+        "hook" => keep.push(Box::new(kabuk_win::events::ForegroundWatch::start(|_, _| {}).unwrap())),
         "timers" => {
             let w = Window::new("Kabuk.Probe2", "", |_| Some(0)).unwrap();
             w.set_timer(1, Duration::from_secs(2));

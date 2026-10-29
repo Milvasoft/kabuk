@@ -5,6 +5,7 @@ pub mod app_preview;
 pub mod apps;
 pub mod calendar_panel;
 pub mod dock;
+pub mod figures;
 pub mod geometry;
 pub mod keyboard_panel;
 pub mod keys_card;

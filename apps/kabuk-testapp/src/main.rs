@@ -46,6 +46,8 @@
 //! reports a resize by those edges the same way.
 //! `OPEN_MENU` (`WM_APP + 4`) opens a popup menu at the window's corner, as a program's
 //! tray icon menu (`TrackPopupMenu`), and `CLOSE_MENU` (`WM_APP + 5`) closes it.
+//! `RETITLE` (`WM_APP + 6`, wparam = n) renames the window n times in a row, as a busy
+//! terminal or a game showing its frame rate does.
 
 use std::io::Write;
 use std::sync::OnceLock;
@@ -74,6 +76,7 @@ const FAKE_DRAG: u32 = WM_APP + 2;
 const FAKE_RESIZE: u32 = WM_APP + 3;
 const OPEN_MENU: u32 = WM_APP + 4;
 const CLOSE_MENU: u32 = WM_APP + 5;
+const RETITLE: u32 = WM_APP + 6;
 const TRAY_ID: u32 = 1;
 /// Sizes the self-resizing window alternates between.
 const RESIZE_STEPS: [(i32, i32); 2] = [(500, 400), (700, 520)];
@@ -436,6 +439,15 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             }
             CLOSE_MENU => {
                 let _ = EndMenu();
+                return LRESULT(0);
+            }
+            RETITLE => {
+                for i in 0..wparam.0 {
+                    let _ = SetWindowTextW(
+                        hwnd,
+                        &HSTRING::from(format!("{} {i}", o.title.as_deref().unwrap_or(DEFAULT_TITLE))),
+                    );
+                }
                 return LRESULT(0);
             }
             FAKE_RESIZE => {

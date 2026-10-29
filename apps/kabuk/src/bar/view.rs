@@ -156,7 +156,7 @@ pub struct AppIcon {
     /// Its name, for a look that lists the apps as tasks (Pano); empty otherwise.
     pub label: String,
     /// The key of its picture in the GPU's image store.
-    pub image: u64,
+    pub image: Option<u64>,
     pub running: bool,
     pub focused: bool,
     /// How far it has grown under the mouse, 0-1 (asked for by the user).
@@ -711,6 +711,16 @@ fn media(d: &BarData, s: &Style, i18n: &I18n) -> Option<Node> {
     Some(node.gap(s.media_gap).hit(hit::MEDIA, 0))
 }
 
+/// Decimals the bar writes RAM and network figures with.
+const STAT_DECIMALS: usize = 1;
+
+/// A figure as the bar writes it: the bar is laid out again only when what it writes
+/// changes, not for every change in a digit it does not show.
+pub fn as_written(value: f64) -> f64 {
+    let step = 10f64.powi(STAT_DECIMALS as i32);
+    (value * step).round() / step
+}
+
 fn stats(d: &BarData, s: &Style, i18n: &I18n) -> Vec<Node> {
     let v = d.vertical();
     let value_size = s.size(if v { s.mod_size_vertical } else { s.mod_size });
@@ -753,7 +763,7 @@ fn stats(d: &BarData, s: &Style, i18n: &I18n) -> Vec<Node> {
             module(
                 "mem",
                 "lbl-ram",
-                i18n.tr_args("bar-ram", &[("value", i18n.decimal(ram, 1).into())]),
+                i18n.tr_args("bar-ram", &[("value", i18n.decimal(ram, STAT_DECIMALS).into())]),
             )
             .hit(hit::STATS, hit::STAT_RAM),
         );
@@ -773,7 +783,7 @@ fn stats(d: &BarData, s: &Style, i18n: &I18n) -> Vec<Node> {
             module(
                 "down",
                 "lbl-net",
-                i18n.tr_args("bar-net-rate", &[("value", i18n.decimal(net, 1).into())]),
+                i18n.tr_args("bar-net-rate", &[("value", i18n.decimal(net, STAT_DECIMALS).into())]),
             )
             .hit(hit::STATS, hit::STAT_NET),
         );
@@ -1043,7 +1053,7 @@ fn app_icons(d: &BarData, s: &Style) -> Option<Vec<Node>> {
             let slot = s.app_icon * APP_HOVER;
             let size = s.app_icon * (1.0 + (APP_HOVER - 1.0) * a.grow.clamp(0.0, 1.0));
             // Only the picture moves; the place, which clicks and drags find, stays.
-            let picture = Node::layer(vec![Node::image(a.image, size)
+            let picture = Node::layer(vec![app_picture(a.image, size, s.mod_icon_color)
                 .padding(Insets::all((slot - size) / 2.0))
                 .offset(a.shift.0, a.shift.1)]);
             Node::column(vec![picture, mark])
@@ -1055,6 +1065,14 @@ fn app_icons(d: &BarData, s: &Style) -> Option<Vec<Node>> {
     Some(icons)
 }
 
+/// An app's picture, or a plain app glyph while its picture loads.
+pub(super) fn app_picture(image: Option<u64>, size: f32, color: Role) -> Node {
+    match image {
+        Some(key) => Node::image(key, size),
+        None => Node::icon("app", size, color),
+    }
+}
+
 /// Pano's task list: each app a button with its icon and name, the focused one on the
 /// selection surface with the accent's tick; down a side bar only the icons.
 fn tasks(d: &BarData, s: &Style, t: &super::style::Tasks) -> Vec<Node> {
@@ -1064,7 +1082,7 @@ fn tasks(d: &BarData, s: &Style, t: &super::style::Tasks) -> Vec<Node> {
         .enumerate()
         .map(|(i, a)| {
             let size = s.size(t.size);
-            let mut row = vec![Node::image(a.image, t.icon)];
+            let mut row = vec![app_picture(a.image, t.icon, s.mod_icon_color)];
             if !v && !a.label.is_empty() {
                 let color = if a.focused { Role::Fg } else { Role::Dim };
                 row.push(Node::text(TextSpec {
@@ -1554,6 +1572,14 @@ mod tests {
     use kabuk_core::config::Look;
     use kabuk_i18n::{ClockStyle, Lang};
     use kabuk_ui::node::{Kind, TextMetrics};
+
+    #[test]
+    fn a_figure_changing_in_a_digit_not_written_stays_the_same() {
+        assert_eq!(as_written(12.34), as_written(12.31));
+        assert_eq!(as_written(12.34), 12.3);
+        assert_ne!(as_written(12.34), as_written(12.36));
+        assert_eq!(as_written(0.04), 0.0);
+    }
 
     struct Fake;
     impl TextMeasure for Fake {
@@ -2111,7 +2137,7 @@ mod tests {
         let apps: Vec<AppIcon> = (0..16)
             .map(|i| AppIcon {
                 label: format!("Program number {i}"),
-                image: i,
+                image: Some(i),
                 running: true,
                 focused: i == 0,
                 grow: 0.0,
@@ -2144,7 +2170,7 @@ mod tests {
         let tr = I18n::new(Lang::Tr);
         let app = |image, label: &str, focused| AppIcon {
             label: label.into(),
-            image,
+            image: Some(image),
             running: true,
             focused,
             grow: 0.0,
@@ -2206,6 +2232,38 @@ mod tests {
         );
     }
 
+    /// M19 P3: the apps' pictures load off the bar thread; until one comes its app shows
+    /// a plain glyph in the same place, not a hole.
+    #[test]
+    fn an_app_whose_picture_is_loading_shows_a_glyph() {
+        let tr = I18n::new(Lang::Tr);
+        let d = BarData {
+            apps: vec![AppIcon {
+                label: String::new(),
+                image: None,
+                running: true,
+                focused: false,
+                grow: 0.0,
+                shift: (0.0, 0.0),
+            }],
+            ..data(&tr)
+        };
+        let l = render(&d, &tr);
+        let place = l.hits.iter().find(|(_, h)| h.module == hit::APP).map(|(r, _)| *r);
+        let place = place.expect("the app has its place");
+        let inside = |r: &kabuk_ui::geom::Rect| r.x >= place.x && r.x + r.w <= place.x + place.w + 0.01;
+        assert!(
+            l.draws
+                .iter()
+                .any(|x| matches!(x, Draw::Icon { rect, spec } if spec.name == "app" && inside(rect))),
+            "no glyph in the app's place"
+        );
+        assert!(!l
+            .draws
+            .iter()
+            .any(|x| matches!(x, Draw::Image { rect, .. } if inside(rect))));
+    }
+
     /// Asked for by the user (macOS's dock): a dragged or sliding app's picture is drawn
     /// off its place, while its place, which clicks and drags find, stays.
     #[test]
@@ -2213,7 +2271,7 @@ mod tests {
         let tr = I18n::new(Lang::Tr);
         let icon = |shift| AppIcon {
             label: String::new(),
-            image: 31,
+            image: Some(31),
             running: true,
             focused: false,
             grow: 0.0,
@@ -2261,7 +2319,7 @@ mod tests {
             apps: vec![
                 AppIcon {
                     label: String::new(),
-                    image: 21,
+                    image: Some(21),
                     running: true,
                     focused: true,
                     grow: 0.0,
@@ -2269,7 +2327,7 @@ mod tests {
                 },
                 AppIcon {
                     label: String::new(),
-                    image: 22,
+                    image: Some(22),
                     running: false,
                     focused: false,
                     grow: 0.0,
@@ -2354,7 +2412,7 @@ mod tests {
         let tr = I18n::new(Lang::Tr);
         let icon = AppIcon {
             label: String::new(),
-            image: 31,
+            image: Some(31),
             running: false,
             focused: false,
             grow: 0.0,
@@ -2814,7 +2872,7 @@ mod tests {
         let apps: Vec<AppIcon> = (0..40)
             .map(|i| AppIcon {
                 label: format!("Program {i}"),
-                image: i,
+                image: Some(i),
                 running: true,
                 focused: false,
                 grow: 0.0,

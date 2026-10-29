@@ -191,7 +191,8 @@ impl Shared {
         for m in kabuk_win::shell::monitors() {
             self.app_grid_backdrop(&m);
         }
-        self.app_grid_capture(true);
+        // The screen taking (a GPU device, ~150 ms to make) is made with the icons ahead,
+        // not before the first bar frame (M19 P3).
         // The first pages' icons, loaded ahead off the thread (found trying the grid:
         // opened soon after Kabuk started, it showed tiles until they came); a while after
         // the start, once the apps' list has been read.
@@ -201,10 +202,14 @@ impl Shared {
         self.bind_app_grid_keys();
     }
 
-    /// Asks for the first pages' icons (the timer after the start).
+    /// Asks for the first pages' icons and makes the screen taking (the timer after the
+    /// start).
     pub(super) fn app_grid_ahead(&mut self) {
         if let Some(c) = &self.control {
             c.kill_timer(timer::APP_GRID_AHEAD);
+        }
+        if self.game_devices.is_empty() {
+            self.app_grid_capture(true);
         }
         if let Some(primary) = kabuk_win::shell::monitors().into_iter().find(|m| m.primary) {
             let scale = primary.dpi as f32 / kabuk_layout::desk::BASE_DPI as f32;
@@ -317,6 +322,10 @@ impl Shared {
             (rect.w.max(1) as u32 / style::BLUR_SHRINK).max(1),
             (rect.h.max(1) as u32 / style::BLUR_SHRINK).max(1),
         );
+        // Opened before the timer made it: made now (never beside a game, D87).
+        if self.game_devices.is_empty() {
+            self.app_grid_capture(true);
+        }
         let wait = Duration::from_millis(style::SCREEN_WAIT_MS);
         let started = Instant::now();
         let bgr = self.app_grid.capture.as_ref()?.picture(m.handle, w, h, wait);

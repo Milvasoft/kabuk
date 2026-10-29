@@ -14,6 +14,8 @@ fn time<T>(name: &str, n: u32, mut f: impl FnMut() -> T) {
 }
 
 fn main() {
+    // The first enumeration in a process, apart: it can cost far more than the others.
+    time("net first", 1, kabuk_win::stats::counted_interfaces);
     time("cpu", 200, kabuk_win::stats::cpu_times);
     time("memory", 200, kabuk_win::stats::memory_used_gib);
     time("net list", 50, kabuk_win::stats::counted_interfaces);

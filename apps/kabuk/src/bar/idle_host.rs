@@ -23,6 +23,13 @@ pub(super) struct IdleState {
     lifted_at: Option<Instant>,
 }
 
+impl IdleState {
+    /// Whether the screens are dimmed for no input.
+    pub(super) fn dimmed(&self) -> bool {
+        !self.overlays.is_empty()
+    }
+}
+
 impl Shared {
     /// Looks at the idle time: dims, starts the screen saver where Kabuk does, or sets
     /// the one timer for the soonest time left.
@@ -79,6 +86,7 @@ impl Shared {
         }
         self.idle.overlays = overlays;
         tracing::info!(overlays = self.idle.overlays.len(), "dimmed after no input");
+        self.schedule_figures();
     }
 
     /// Input came: the overlays go and the wait starts again.
@@ -102,5 +110,6 @@ impl Shared {
             }
         }
         tracing::info!("dimming lifted");
+        self.schedule_figures();
     }
 }

@@ -18,7 +18,16 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use crate::window::Hwnd;
 
-type Sink = Box<dyn FnMut(Option<Hwnd>)>;
+type Sink = Box<dyn FnMut(Option<Hwnd>, Change)>;
+
+/// What happened to the window in front.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Change {
+    /// Another window came to the front (or the same one again).
+    Focus,
+    /// The window in front changed its title.
+    Title,
+}
 
 struct Watch {
     sink: Sink,
@@ -37,7 +46,8 @@ pub fn foreground() -> Option<Hwnd> {
     (!h.is_invalid()).then(|| Hwnd::from_raw(h))
 }
 
-/// Calls the sink whenever the foreground window changes or retitles itself. One per thread.
+/// Calls the sink whenever the foreground window changes or retitles itself, saying which.
+/// One per thread.
 pub struct ForegroundWatch {
     foreground_hook: HWINEVENTHOOK,
 }
@@ -56,10 +66,13 @@ unsafe extern "system" fn on_event(_: HWINEVENTHOOK, event: u32, hwnd: HWND, obj
         WATCH.with(|w| {
             let Ok(mut w) = w.try_borrow_mut() else { return };
             let Some(w) = w.as_mut() else { return };
-            if event == EVENT_SYSTEM_FOREGROUND {
+            let change = if event == EVENT_SYSTEM_FOREGROUND {
                 follow_titles(w, fg);
-            }
-            (w.sink)(fg);
+                Change::Focus
+            } else {
+                Change::Title
+            };
+            (w.sink)(fg, change);
         });
     });
 }
@@ -99,7 +112,7 @@ fn follow_titles(w: &mut Watch, fg: Option<Hwnd>) {
 }
 
 impl ForegroundWatch {
-    pub fn start(sink: impl FnMut(Option<Hwnd>) + 'static) -> std::io::Result<ForegroundWatch> {
+    pub fn start(sink: impl FnMut(Option<Hwnd>, Change) + 'static) -> std::io::Result<ForegroundWatch> {
         // SAFETY: out-of-context hook (no DLL injection); the callback only touches this
         // thread's WATCH. Unhooked in Drop.
         let foreground_hook = unsafe {

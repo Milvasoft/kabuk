@@ -402,7 +402,7 @@ impl Sandbox {
 }
 
 /// How many of a failed test's last log lines are printed.
-const FAILED_LOG_LINES: usize = 40;
+const FAILED_LOG_LINES: usize = 120;
 
 impl Drop for Sandbox {
     fn drop(&mut self) {

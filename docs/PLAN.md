@@ -445,6 +445,38 @@ What Windows' taskbar shows at its right, on Kabuk's bar, each a module that tur
 
 ---
 
+## M19 · Performance and usability review (requested by the user on 2026-10-29) `[~]`
+
+A review of the code on 2026-10-29 (`adcedd7`) listed costs on hot paths and gaps in what the user sees. Each item: checked in the code first, a failing test, the fix, `tools/check.ps1`, tried on the desktop, a small commit. Targets from SPEC §8.10-11: idle CPU below 0.1 %, shortcut to layout below 16 ms, the launcher's first frame below 100 ms.
+
+*Baseline on 2026-10-29 (installed 1.0.8, the user at the desktop, 60 s): 0.75 % CPU from cycles; the `input` thread 0.29 %, the main thread 0.05 %. The perf suite is still to run (the test VM's agent does not answer; its evaluation licence expired).*
+
+Performance, in this order:
+- P1 A title change of the focused window only redraws the title; the foreground work (step aside, keep on top, apps, keyboard) runs once per real focus change, coalesced. *Done: `a_renaming_window_in_front_costs_no_foreground_work` (30 renames, no foreground work). Found on the way: a focus change that came while the bar thread was busy was lost; it is now looked at once free.*
+- P2 The auto-hidden bar's slide does not call Explorer on every frame; Explorer's tray window is cached. *Done: the auto-hide test counts Explorer told at most twice per slide (was every frame).*
+- P4 The stats and GPU timers stop while nobody sees them (dimmed, displays off, bars away, game, no stats module); a number that is drawn the same does not lay the bar out again. *Done: `the_figures_stop_while_no_bar_shows_them`, `a_figure_changing_in_a_digit_not_written_stays_the_same`, `a_display_watch_posts_only_changes`.*
+- P3 The first bar frame does not wait for app icons, the screen capture device, pins, the network or the figures. *Done. Measured on the user's machine (busy: Docker, Hyper-V, three Claude windows) with per-step times in the log: the screen saver's setting waited 5 s on a Settings app that did not answer (`SPIF_SENDCHANGE`; now announced without waiting, 50 ms); listing the network interfaces took 2.5-3.5 s at first and 0.2-0.9 s after (the figures and the wired link, now each on a worker); the pins 1.7 s (a worker). The first bars came after 6.3-7.1 s before, 4.3 s with the worker figures and network still on the thread, and the late start no longer holds the thread for seconds. The wallpaper picture is still made on the bar thread when its files are missing (first run only).*
+- P5-P18 The remaining items of the review (WM classification cache, D2D bitmap and brush caches, state file writes, keyboard hook locks, shared `WmView`, text cache, icon geometry cache, a partial layout, fewer window enumerations, app grid capture on a worker, one capture device, one frame ticker, the watchdog's search, the small ones).
+
+Usability, in this order:
+- U1-U3 Configuration errors reach the user: a notice when `kabuk.toml` is refused, Settings shows the file's problems instead of defaults, says why a value was refused, and the shortcut recorder names a conflict or a reserved chord.
+- U5 Notices and the volume OSD on the monitor in use (a product decision: asked first).
+- U6-U7 A notice when an action fails; float/tile and layout changes always say so.
+- U4 `kabuk msg` covers every action.
+- U8-U20 Launcher cursor keys, overview and panel keyboard, Settings for toml-only keys, restart notice, elevated windows notice, attention state, tooltips, wheel, accessibility (asked first), brightness OSD, terminology (asked first), the small ones.
+
+Asked for by the user on 2026-10-29, during the review:
+- B1 Apps missing from the bar: every window Windows' taskbar would show has its app on the bar.
+- B2 Tray icons missing: every icon Windows' notification area would show is in Kabuk's tray.
+- B3 A right click on an empty part of the bar opens a menu with what Windows' taskbar menu holds.
+
+**Done criteria**
+- [ ] Each item above done or stated as not done with its reason.
+- [ ] Before/after measurements written here for every performance item.
+- [ ] `tools/check.ps1` clean; the perf suite run.
+
+---
+
 ## Realistic expectations
 
 The whole plan will not be finished in one session. A good first night: M0 and M1, maybe the start of M2. The window manager (M3) and the tray (M4) are the two hardest milestones; if rushed, they are where the bugs that will burn the user the most come from. The criteria are not loosened for speed.

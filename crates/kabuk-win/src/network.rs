@@ -286,7 +286,12 @@ pub fn ethernet() -> bool {
 
 /// How the computer reaches the network now: Ethernet before Wi-Fi.
 pub fn link(wlan: Option<&Wlan>) -> Link {
-    if ethernet() {
+    link_with(ethernet(), wlan)
+}
+
+/// As [`link`], with whether a wired link is up already known ([`EthernetWatch`]).
+pub fn link_with(ethernet: bool, wlan: Option<&Wlan>) -> Link {
+    if ethernet {
         return Link::Ethernet;
     }
     match wlan.and_then(Wlan::current) {
@@ -306,6 +311,48 @@ pub fn internet() -> bool {
     // SAFETY: a plain query on the manager.
     unsafe { m.GetConnectivity() }
         .is_ok_and(|c| c.0 & (NLM_CONNECTIVITY_IPV4_INTERNET.0 | NLM_CONNECTIVITY_IPV6_INTERNET.0) != 0)
+}
+
+/// Whether a wired link is up, read on a worker thread: listing the interfaces
+/// ([`ethernet`]) took seconds on a busy machine with many virtual adapters (found by M19
+/// P3: Kabuk's start waited on it). Asked, the worker reads it and posts `message` to
+/// `window`; [`EthernetWatch::up`] then has the answer.
+pub struct EthernetWatch {
+    ask: std::sync::mpsc::Sender<()>,
+    /// 0: not read yet, 1: down, 2: up.
+    up: std::sync::Arc<std::sync::atomic::AtomicU8>,
+}
+
+impl EthernetWatch {
+    pub fn start(window: Hwnd, message: u32) -> io::Result<EthernetWatch> {
+        use std::sync::atomic::Ordering;
+        let (ask, asked) = std::sync::mpsc::channel::<()>();
+        let up = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0));
+        let out = up.clone();
+        let notify = Notify { window, message };
+        std::thread::Builder::new().name("ethernet".into()).spawn(move || {
+            while asked.recv().is_ok() {
+                // Asked several times meanwhile: one read answers them all.
+                while asked.try_recv().is_ok() {}
+                out.store(if ethernet() { 2 } else { 1 }, Ordering::Relaxed);
+                notify.post(0);
+            }
+        })?;
+        Ok(EthernetWatch { ask, up })
+    }
+
+    /// Reads it again; the window is told when the answer is in.
+    pub fn ask(&self) {
+        let _ = self.ask.send(());
+    }
+
+    /// Whether a wired link was up at the last read (`None`: not read yet).
+    pub fn up(&self) -> Option<bool> {
+        match self.up.load(std::sync::atomic::Ordering::Relaxed) {
+            0 => None,
+            v => Some(v == 2),
+        }
+    }
 }
 
 /// Where the watch's notices go.
@@ -460,6 +507,30 @@ mod tests {
         let watch = Watch::start(w.hwnd(), crate::msgloop::msg::APP + 901);
         assert_eq!(watch.wlan().is_some(), wlan.is_some());
         drop(watch);
+    }
+
+    /// M19 P3: the wired link is read off the asking thread and told when in.
+    #[test]
+    fn the_wired_link_is_read_on_a_worker_and_told() {
+        const MSG: u32 = crate::msgloop::msg::APP + 906;
+        let told = std::rc::Rc::new(std::cell::Cell::new(0));
+        let t = told.clone();
+        let w = crate::msgloop::MessageWindow::new("Kabuk.Test.Ethernet", "", move |m| {
+            (m.id == MSG).then(|| {
+                t.set(t.get() + 1);
+                0
+            })
+        })
+        .unwrap();
+        let watch = EthernetWatch::start(w.hwnd(), MSG).unwrap();
+        assert_eq!(watch.up(), None, "not read before asked");
+        watch.ask();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while told.get() == 0 && std::time::Instant::now() < deadline {
+            crate::msgloop::run_until(&[], Some(std::time::Duration::from_millis(50)));
+        }
+        assert!(told.get() > 0, "told");
+        assert_eq!(watch.up(), Some(ethernet()));
     }
 
     #[test]

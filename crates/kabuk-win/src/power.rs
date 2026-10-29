@@ -3,6 +3,7 @@
 //! facts the animated wallpaper pauses for: the battery and the displays turned off.
 
 use crate::msgloop::Window;
+use crate::window::Hwnd;
 
 /// Locks the session, like Win+L.
 pub fn lock() -> std::io::Result<()> {
@@ -217,7 +218,13 @@ pub struct DisplayWatch {
     handle: windows::Win32::System::Power::HPOWERNOTIFY,
     // Read by the callback until the registration ends; kept here for that long.
     _params: Box<windows::Win32::System::Power::DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS>,
-    state: Box<std::sync::atomic::AtomicBool>,
+    state: Box<DisplayState>,
+}
+
+/// What the callback writes: whether the displays are on, and where to post a change.
+struct DisplayState {
+    on: std::sync::atomic::AtomicBool,
+    notify: Option<(Hwnd, u32)>,
 }
 
 unsafe extern "system" fn on_display_state(
@@ -231,29 +238,53 @@ unsafe extern "system" fn on_display_state(
     }
     // SAFETY: for PBT_POWERSETTINGCHANGE Windows passes a POWERBROADCAST_SETTING whose
     // data (`DataLength` bytes, a DWORD for this setting) follows it; `context` is the
-    // AtomicBool the watch keeps alive while registered.
-    unsafe {
+    // DisplayState the watch keeps alive while registered.
+    let (state, on) = unsafe {
         let s = &*(setting as *const POWERBROADCAST_SETTING);
-        if s.PowerSetting == DISPLAY_STATE && s.DataLength as usize >= std::mem::size_of::<u32>() {
-            let value = std::ptr::read_unaligned(s.Data.as_ptr() as *const u32);
-            (*(context as *const std::sync::atomic::AtomicBool))
-                .store(displays_on_for(value), std::sync::atomic::Ordering::Relaxed);
+        if s.PowerSetting != DISPLAY_STATE || (s.DataLength as usize) < std::mem::size_of::<u32>() {
+            return 0;
         }
+        let value = std::ptr::read_unaligned(s.Data.as_ptr() as *const u32);
+        (&*(context as *const DisplayState), displays_on_for(value))
+    };
+    let was = state.on.swap(on, std::sync::atomic::Ordering::Relaxed);
+    if let (Some((window, message)), true) = (state.notify, was != on) {
+        let _ = crate::msgloop::post_message(
+            window,
+            crate::msgloop::Msg {
+                id: message,
+                wparam: usize::from(on),
+                lparam: 0,
+            },
+        );
     }
     0
 }
 
 impl DisplayWatch {
     pub fn start() -> std::io::Result<DisplayWatch> {
+        Self::with(None)
+    }
+
+    /// As [`DisplayWatch::start`], and posts `message` to `window` when the displays go off
+    /// or come on (`wparam`: 1 on, 0 off).
+    pub fn notifying(window: Hwnd, message: u32) -> std::io::Result<DisplayWatch> {
+        Self::with(Some((window, message)))
+    }
+
+    fn with(notify: Option<(Hwnd, u32)>) -> std::io::Result<DisplayWatch> {
         use windows::Win32::Foundation::HANDLE;
         use windows::Win32::System::Power::{
             PowerSettingRegisterNotification, DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS, HPOWERNOTIFY,
         };
         use windows::Win32::UI::WindowsAndMessaging::DEVICE_NOTIFY_CALLBACK;
-        let state = Box::new(std::sync::atomic::AtomicBool::new(true));
+        let state = Box::new(DisplayState {
+            on: std::sync::atomic::AtomicBool::new(true),
+            notify,
+        });
         let params = Box::new(DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS {
             Callback: Some(on_display_state),
-            Context: (&*state as *const std::sync::atomic::AtomicBool).cast_mut().cast(),
+            Context: (&*state as *const DisplayState).cast_mut().cast(),
         });
         let mut handle: *mut core::ffi::c_void = std::ptr::null_mut();
         // SAFETY: the parameters and the state they point to are boxed and live as long
@@ -282,7 +313,7 @@ impl DisplayWatch {
 
     /// False while Windows has the displays turned off.
     pub fn displays_on(&self) -> bool {
-        self.state.load(std::sync::atomic::Ordering::Relaxed)
+        self.state.on.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
@@ -304,6 +335,28 @@ mod tests {
         assert!(!displays_on_for(0));
         assert!(displays_on_for(1));
         assert!(displays_on_for(2), "dimmed is still seen");
+    }
+
+    /// M19 P4: the bar stops its figures while the displays are off, so it must hear
+    /// the change. Windows tells the current state at the start; only a change is posted.
+    #[test]
+    fn a_display_watch_posts_only_changes() {
+        const MSG: u32 = crate::msgloop::msg::APP + 903;
+        let told = std::rc::Rc::new(std::cell::Cell::new(0));
+        let t = told.clone();
+        let w = crate::msgloop::MessageWindow::new("Kabuk.Test.Display", "", move |m| {
+            (m.id == MSG).then(|| {
+                t.set(t.get() + 1);
+                0
+            })
+        })
+        .unwrap();
+        let watch = DisplayWatch::notifying(w.hwnd(), MSG).expect("registered");
+        crate::msgloop::run_until(&[], Some(std::time::Duration::from_millis(500)));
+        // The displays are on while the tests run: the first answer is no change.
+        assert!(watch.displays_on());
+        assert_eq!(told.get(), 0, "no change, nothing posted");
+        drop(watch);
     }
 
     #[test]

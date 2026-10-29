@@ -193,7 +193,7 @@ fn main() {
         // With --apps <n>, that many placeholder apps, every other one running.
         let apps: Vec<kabuk::bar::dock::DockApp> = (0..number("--apps"))
             .map(|i| kabuk::bar::dock::DockApp {
-                image: square(&gpu, 300 + i as u64),
+                image: Some(square(&gpu, 300 + i as u64)),
                 running: i % 2 == 0,
             })
             .collect();
@@ -262,7 +262,7 @@ fn main() {
                 } else {
                     String::new()
                 },
-                image: square(&gpu, 200 + i as u64),
+                image: Some(square(&gpu, 200 + i as u64)),
                 running: i % 3 != 2,
                 focused: i == 0,
                 grow: if i == 1 { 1.0 } else { 0.0 },

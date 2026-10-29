@@ -34,6 +34,7 @@ pub(super) struct Leaving {
 impl Shown {
     /// Starts `surface` (drawn at `scale`) hidden and plays its entrance at `level`.
     /// The caller commits.
+    #[track_caller]
     pub(super) fn enter(
         gpu: &Gpu,
         surface: Option<WindowSurface>,
@@ -112,6 +113,7 @@ impl Shown {
 
 /// Starts `s` (drawn at `scale`) hidden and plays `entrance` at `level`; the caller
 /// commits. A surface the compositor cannot animate is shown at once.
+#[track_caller]
 pub(super) fn play_entrance(
     gpu: &Gpu,
     s: &WindowSurface,
@@ -127,7 +129,9 @@ pub(super) fn play_entrance(
         let _ = s.set_pose(Pose::SHOWN, scale);
         return Motion::at_rest(Pose::SHOWN, now);
     }
-    tracing::info!(level = ?level, ms = ms(t.seconds), "popup enters");
+    // Where from: which popup came, for a test that counts them.
+    let from = std::panic::Location::caller();
+    tracing::info!(level = ?level, ms = ms(t.seconds), %from, "popup enters");
     motion
 }
 

@@ -149,6 +149,8 @@ fn an_auto_hiding_bar_makes_room_while_shown_and_slides_in_when_the_mouse_rests(
     assert_eq!(top(), hidden, "it came in for a mouse passing the edge");
     assert_eq!(sandbox.log_lines("mouse rested at the edge"), 0);
     // Resting there: it comes in.
+    let told = || sandbox.log_lines("appbar told of a move");
+    let told_before = told();
     move_to(edge);
     assert!(
         wait_until(SETTLE, || top() == primary.rect.top).is_some(),
@@ -157,6 +159,14 @@ fn an_auto_hiding_bar_makes_room_while_shown_and_slides_in_when_the_mouse_rests(
         sandbox.last_log_line(&["auto-hiding"]).unwrap_or_default()
     );
     assert_eq!(sandbox.log_lines("mouse rested at the edge"), 1);
+    // Found by a review of the code (M19 P2): Explorer was told of every frame of the
+    // slide, each call waiting on it. Once the slide ends (and once for its last frame).
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        told() - told_before <= 2,
+        "Explorer told of the slide {} times",
+        told() - told_before
+    );
     // Shown, it makes room: the windows' area starts under it.
     assert!(
         wait_until(SETTLE, || primary_work_area().top >= bar.window_rect().unwrap().bottom).is_some(),
@@ -2148,7 +2158,10 @@ fn an_open_panel_is_drawn_again_in_place() {
         .into_iter()
         .find(|h| h.pid() == Some(pid))
         .expect("bar control window");
-    let entered = sandbox.log_lines("popup enters");
+    // The quick settings' own entrances (a fresh shell also greets with the shortcut
+    // card, another popup).
+    let entrances = || sandbox.log_lines("quick_host.rs:");
+    let entered = entrances();
     post_message(
         control,
         Msg {
@@ -2166,11 +2179,22 @@ fn an_open_panel_is_drawn_again_in_place() {
         wait_until(SETTLE, || sandbox.log_lines("popup drawn again") == 1).is_some(),
         "the panel was not drawn again in place"
     );
-    assert_eq!(
-        sandbox.log_lines("popup enters"),
-        entered + 1,
-        "the panel entered again"
-    );
+    // What came and went, for a failure's message.
+    let popups = || -> String {
+        std::fs::read_dir(sandbox.state_dir().join("logs"))
+            .unwrap()
+            .flatten()
+            .filter_map(|e| std::fs::read_to_string(e.path()).ok())
+            .flat_map(|t| t.lines().map(str::to_string).collect::<Vec<_>>())
+            .filter(|l| {
+                ["popup", "panel", "card", "greet", "quick"]
+                    .iter()
+                    .any(|k| l.contains(k))
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert_eq!(entrances(), entered + 1, "the panel entered again:\n{}", popups());
     assert_eq!(sandbox.restore().0, 0);
     assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
 }
@@ -3967,3 +3991,102 @@ fn an_overlay_over_a_full_screen_game_does_not_keep_the_bar() {
     assert_eq!(sandbox.restore().0, 0);
     assert!(wait_until(SETTLE, || restored(&before)).is_some());
 }
+
+/// Found by a review of the code (M19 P1): every title change of the window in front ran
+/// the full-screen check, the bars' care, the apps and the keyboard, each enumerating
+/// every window. A rename only draws the title; a change of focus does the rest.
+#[test]
+fn a_renaming_window_in_front_costs_no_foreground_work() {
+    use kabuk_win::msgloop::{post_message, Msg};
+    const RETITLE: u32 = 0x8000 + 6;
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let busy = TestWindow::open(&["--title", &title("renames")]);
+    assert!(wait_until(SETTLE, || busy.hwnd.is_visible()).is_some());
+    assert!(wait_until(SETTLE, || busy.hwnd.focus()).is_some());
+    let work = || sandbox.log_lines("foreground work");
+    assert!(
+        wait_until(SETTLE, || work() >= 1).is_some(),
+        "focus moving did no foreground work: {:?}",
+        sandbox.last_log_line(&["focus moved"])
+    );
+    std::thread::sleep(Duration::from_millis(500));
+    let settled = work();
+    post_message(
+        busy.hwnd,
+        Msg {
+            id: RETITLE,
+            wparam: 30,
+            lparam: 0,
+        },
+    )
+    .unwrap();
+    assert!(wait_until(SETTLE, || busy.hwnd.title().ends_with(" 29")).is_some());
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(
+        work(),
+        settled,
+        "a rename did foreground work: {:?}",
+        sandbox.last_log_line(&["focus moved"])
+    );
+
+    // A change of focus still does it.
+    let other = TestWindow::open(&["--title", &title("other")]);
+    assert!(wait_until(SETTLE, || other.hwnd.focus()).is_some());
+    assert!(
+        wait_until(SETTLE, || work() > settled).is_some(),
+        "a change of focus did no foreground work"
+    );
+    drop(other);
+    drop(busy);
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}
+
+/// Found by a review of the code (M19 P4): the figures' timers ran while nobody could see
+/// them, each tick laying every bar out again. They stop while the bars are away (here an
+/// auto-hiding bar slid off) and while no figure is on the bar at all.
+#[test]
+fn the_figures_stop_while_no_bar_shows_them() {
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n[bar]\nautohide = true\n").unwrap();
+    let primary = kabuk_win::shell::monitors().into_iter().find(|m| m.primary).unwrap();
+    assert!(kabuk_win::input::set_cursor_pos(
+        (primary.rect.left + primary.rect.right) / 2,
+        (primary.rect.top + primary.rect.bottom) / 2,
+    ));
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("bars built") == 1).is_some());
+    let pid = sandbox.state().kabuk_pid.unwrap();
+    let bar = primary_window_of("Kabuk.Bar", pid);
+    assert!(wait_until(SETTLE, || bar.window_rect().unwrap().top < primary.rect.top).is_some());
+    // Started before it slid off and stopped since, or never started.
+    std::thread::sleep(Duration::from_millis(500));
+    let last = sandbox.last_log_line(&["figures scheduled"]).unwrap_or_default();
+    assert!(
+        !last.contains("=true"),
+        "the figures still run with the bar away: {last}"
+    );
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+
+    // No figure on the bar: their timers never start.
+    let quiet = Sandbox::new();
+    std::fs::write(
+        quiet.config_file(),
+        "schema = 1\n[bar.modules]\ncpu = false\nram = false\nnet = false\ngpu = false\n",
+    )
+    .unwrap();
+    let _quiet_shell = quiet.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    std::thread::sleep(Duration::from_secs(1));
+    assert_eq!(quiet.log_lines("stats=true"), 0);
+    assert_eq!(quiet.log_lines("gpu=true"), 0);
+    assert_eq!(quiet.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}
+

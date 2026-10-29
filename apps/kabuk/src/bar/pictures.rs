@@ -1,7 +1,7 @@
 //! Shell items' pictures (an app's icon takes 10-60 ms to load) loaded off the bar
 //! thread: a worker loads what it is asked for, one at a time, and tells the control
-//! window when some are done; they are drawn as they come. The launcher and the app grid
-//! each keep their own.
+//! window when some are done; they are drawn as they come. The launcher, the app grid
+//! and the bar's apps each keep their own.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{mpsc, Arc, Mutex};
@@ -92,6 +92,23 @@ impl Pictures {
         });
     }
 
+    /// Forgets `source`'s picture, so it is asked for again (its program came back new).
+    pub fn forget(&mut self, source: &str) {
+        self.loaded.remove(source);
+        self.asked.remove(source);
+    }
+
+    /// Forgets every picture, so each is asked for again (at a new side).
+    pub fn clear(&mut self) {
+        self.loaded.clear();
+        self.asked.clear();
+    }
+
+    /// Whether `source`'s picture is loaded.
+    pub fn has(&self, source: &str) -> bool {
+        self.loaded.contains_key(source)
+    }
+
     /// Asks the worker for the `sources` not loaded or asked for yet, at `side` pixels.
     pub fn ask(&mut self, sources: impl IntoIterator<Item = String>, side: u32) {
         let Some(w) = &self.worker else { return };
@@ -132,5 +149,46 @@ impl Pictures {
             }
         }
         count
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Edge cases: a picture forgotten is asked for again; all cleared (a new side) are
+    //! asked for again; one already asked for is not asked twice.
+    use super::*;
+
+    #[test]
+    fn a_forgotten_picture_is_asked_for_again() {
+        const MSG: u32 = msgloop::msg::APP + 904;
+        let window = msgloop::MessageWindow::new("Kabuk.Test.Pictures", "", |m| (m.id == MSG).then_some(0)).unwrap();
+        let store = Images::default();
+        let mut p = Pictures::start("test", window.hwnd(), MSG);
+        let source = std::env::current_exe().unwrap().to_string_lossy().into_owned();
+        let wait = |p: &mut Pictures| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while p.pending() > 0 && std::time::Instant::now() < deadline {
+                msgloop::run_until(&[], Some(std::time::Duration::from_millis(50)));
+                p.arrived(&store);
+            }
+        };
+        p.ask([source.clone()], 32);
+        p.ask([source.clone()], 32);
+        assert_eq!(p.pending(), 1, "asked once");
+        wait(&mut p);
+        assert!(p.has(&source));
+        assert!(store.contains(p.key(&source, 32)));
+        p.ask([source.clone()], 32);
+        assert_eq!(p.pending(), 0, "loaded: not asked again");
+        p.forget(&source);
+        assert!(!p.has(&source));
+        p.ask([source.clone()], 32);
+        assert_eq!(p.pending(), 1, "forgotten: asked again");
+        wait(&mut p);
+        p.clear();
+        p.ask([source.clone()], 48);
+        assert_eq!(p.pending(), 1, "cleared: asked again at the new side");
+        wait(&mut p);
+        assert!(store.contains(p.key(&source, 48)));
     }
 }

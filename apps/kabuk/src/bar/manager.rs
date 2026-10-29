@@ -36,7 +36,7 @@ use kabuk_win::media::{Media, MediaInfo};
 use kabuk_win::msgloop::{self, msg, Msg, PxRect, Window};
 use kabuk_win::process::ExitWatch;
 use kabuk_win::shell::{self, Monitor};
-use kabuk_win::stats::{Sample, Sampler, Wants};
+use kabuk_win::stats::{Sample, Wants};
 use kabuk_win::taskbar_guard::TaskbarGuard;
 use kabuk_win::tray::{TrayEvent, TrayHost};
 use kabuk_win::window::Hwnd;
@@ -218,12 +218,24 @@ mod timer {
     pub const GAME_LEAVE: usize = 37;
     /// A language chord ended a moment ago: the input language is read (D88).
     pub const KEYBOARD_READ: usize = 38;
+    /// Focus moved a moment ago and has settled: what depends on the window in front.
+    pub const FOREGROUND: usize = 39;
+    /// The window manager told of a change a moment ago: the apps are looked at.
+    pub const APPS: usize = 40;
 }
 
 /// An auto-hiding bar (SPEC §2.1): how much of it stays on screen for the mouse to reach
 /// (DIPs), how long the mouse may be away before it slides off, and how often its slide
 /// is stepped.
 const AUTOHIDE_PEEK: f32 = 2.0;
+
+/// Runs a step of the start and logs how long it took (M19 P3: the start's time).
+fn timed<R>(step: &str, f: impl FnOnce() -> R) -> R {
+    let started = std::time::Instant::now();
+    let r = f();
+    tracing::debug!(step, ms = started.elapsed().as_millis() as u64, "start step");
+    r
+}
 
 /// Whether auto-hiding `who` pushes the windows while shown (D73): the bars do; Rıhtım's
 /// dock comes over them as macOS's dock does (asked for by the user with a video; D90).
@@ -244,6 +256,12 @@ const MSG_VOLUME_KEY: u32 = msgloop::msg::APP + 42;
 const MSG_DRAG: u32 = msgloop::msg::APP + 55;
 /// A game holding game mode was closed, hidden or minimised: game mode looked at again (D87).
 const MSG_GAME_GONE: u32 = msgloop::msg::APP + 57;
+/// The first bars are up: what can come after them starts ([`Shared::late_start`]).
+const MSG_LATE_START: u32 = msgloop::msg::APP + 74;
+/// The figures' worker has a new sample ([`crate::bar::figures`]).
+const MSG_FIGURES: u32 = msgloop::msg::APP + 75;
+/// The displays went off or came on (`wparam`: 1 on): the figures stop or start (M19 P4).
+const MSG_DISPLAY: u32 = msgloop::msg::APP + 71;
 /// A frame of the screen while an auto-hiding bar slides ([`kabuk_win::ticker`]).
 const MSG_SLIDE_FRAME: u32 = msgloop::msg::APP + 53;
 /// A frame of the screen while the dock's tiles grow or settle ([`kabuk_win::ticker`]).
@@ -313,6 +331,9 @@ pub const STATS_INTERVAL: Duration = Duration::from_secs(2);
 pub const GPU_INTERVAL: Duration = Duration::from_secs(5);
 /// How often a full-screen program that keeps renaming itself is looked at again (D85).
 const GAME_RECHECK: Duration = Duration::from_secs(2);
+/// How long focus rests before what depends on the window in front is looked at: a
+/// burst of focus changes (a menu, a dialog opening and closing) costs one look.
+const FOREGROUND_SETTLE: Duration = Duration::from_millis(50);
 /// How long something else may stay in front of a full-screen game before game mode ends
 /// (D87): a launcher, a notice or an overlay passes; the user going to another window
 /// stays.
@@ -395,6 +416,8 @@ const MSG_AUDIO: u32 = msg::APP + 1;
 /// The network changed (`wparam`: [`kabuk_win::network::CHANGED`] or
 /// [`kabuk_win::network::SCANNED`]; D88).
 const MSG_NETWORK: u32 = msg::APP + 58;
+/// The wired link has been read off the bar thread ([`kabuk_win::network::EthernetWatch`]).
+const MSG_ETHERNET: u32 = msg::APP + 76;
 /// The battery's charge or the power source changed (D88).
 const MSG_BATTERY: u32 = msg::APP + 60;
 /// One of Windows' input-language chords ended (D88).
@@ -598,10 +621,13 @@ struct Shared {
     bars: Vec<Bar>,
     dock: Option<Dock>,
     live: Live,
-    sampler: Sampler,
+    /// Reads the figures off the bar thread.
+    figures_worker: crate::bar::figures::Figures,
     audio: Option<Audio>,
     /// Network and Wi-Fi changes (D88), while the network module is on.
     network_watch: Option<kabuk_win::network::Watch>,
+    /// Reads whether a wired link is up off the bar thread.
+    ethernet_watch: Option<kabuk_win::network::EthernetWatch>,
     /// Battery changes (D88), while the battery module is on and there is a battery.
     battery_watch: Option<kabuk_win::power::BatteryWatch>,
     /// Windows' language chords seen (D88), while the keyboard module is on.
@@ -645,15 +671,17 @@ struct Shared {
     notices: notify_host::NotifyState,
     /// The monitors in game mode (SPEC §2.4).
     game_devices: Vec<String>,
+    /// Tells when Windows turns the displays off and on.
+    displays: Option<kabuk_win::power::DisplayWatch>,
+    /// Whether the figures' timers run (stats, GPU): only while a bar showing them is seen.
+    figures: (bool, bool),
     /// The games holding their monitors in game mode (D87).
     held_games: Vec<kabuk_core::fullscreen::Held>,
     /// Tells of a held game going (D87).
     game_watch: Option<kabuk_win::events::GoneWatch>,
     /// The look's change came during a game: made once it is over (D87).
     look_after_game: bool,
-    /// The window in front at the last foreground or title event, and when a renaming
-    /// full-screen program was last looked at (D85).
-    last_front: Option<u64>,
+    /// When a renaming full-screen program was last looked at (D85).
     last_game_check: std::time::Instant,
     /// Idle dimming's overlays while dimmed.
     idle: idle_host::IdleState,
@@ -884,8 +912,9 @@ impl BarManager {
         shortcuts: bool,
         instance: String,
     ) -> Result<BarManager, BarError> {
+        let started = std::time::Instant::now();
         kabuk_win::system::com_init();
-        let gpu = Gpu::with(RASTER)?;
+        let gpu = timed("gpu", || Gpu::with(RASTER))?;
         let windows_light = windows_light(app_mode_file.as_deref());
         let look = resolve_look(&config, windows_light, kabuk_win::system::local_time().hour);
         gpu.text.set_families(theme::families(&look.tokens));
@@ -914,9 +943,10 @@ impl BarManager {
                     active_ws: 1,
                     ..Live::default()
                 },
-                sampler: Sampler::default(),
+                figures_worker: Default::default(),
                 audio: None,
                 network_watch: None,
+                ethernet_watch: None,
                 battery_watch: None,
                 language_keys: None,
                 keyboard_panel: None,
@@ -940,10 +970,11 @@ impl BarManager {
                 colors_turn: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
                 notices: notify_host::NotifyState::default(),
                 game_devices: Vec::new(),
+                displays: None,
+                figures: (false, false),
                 held_games: Vec::new(),
                 game_watch: None,
                 look_after_game: false,
-                last_front: None,
                 last_game_check: std::time::Instant::now(),
                 idle: idle_host::IdleState::default(),
                 gestures: gesture_host::GestureState::default(),
@@ -1008,10 +1039,10 @@ impl BarManager {
         };
         {
             let mut s = shared.borrow_mut();
-            s.audio = Audio::new(notify_audio)
+            s.audio = timed("audio", || Audio::new(notify_audio))
                 .map_err(|e| tracing::warn!(error = %e, "volume unavailable"))
                 .ok();
-            s.media = Some(Media::start(notify_media));
+            s.media = Some(timed("media", || Media::start(notify_media)));
             if s.shortcuts && s.audio.is_some() {
                 s.volume_keys = kabuk_win::keyhook::VolumeKeys::take(&control, MSG_VOLUME_KEY)
                     .map_err(|e| tracing::warn!(error = %e, "volume keys left to Windows"))
@@ -1021,35 +1052,31 @@ impl BarManager {
             let v = s.live.volume;
             s.volume_seen(v);
             s.live.title = events::foreground().and_then(|h| Title::split(&h.title()));
-            s.live.stats = s.sample();
-            s.live.gpu_c = kabuk_win::stats::gpu_temperature_c();
+            s.live.gpu_c = timed("gpu_temperature", kabuk_win::stats::gpu_temperature_c);
             s.live.time = Some(kabuk_win::system::local_time());
-            s.notif_counter =
+            s.notif_counter = timed("notification_counter", || {
                 kabuk_win::notifications::Counter::start(control.hwnd(), MSG_NOTIF_COUNT, MSG_NOTIF_CHANGED)
-                    .map_err(|e| tracing::warn!(error = %e, "notification count unavailable"))
-                    .ok();
+            })
+            .map_err(|e| tracing::warn!(error = %e, "notification count unavailable"))
+            .ok();
+            s.apps.pictures =
+                crate::bar::pictures::Pictures::start("apps", control.hwnd(), apps_host::MSG_APP_PICTURES);
+            s.figures_worker = crate::bar::figures::Figures::start(control.hwnd(), MSG_FIGURES, STATS_INTERVAL);
             s.control = Some(control);
-            s.count_notifications();
-            s.watch_network();
-            s.watch_battery();
-            s.watch_keyboard();
-            s.watch_privacy();
-            s.create_launcher();
-            // The app menus' names and ids, read ahead (it takes a few hundred ms).
-            kabuk_win::shellitems::refresh_installed_apps();
-            s.bind_overview_keys();
-            s.bind_saver_keys();
-            s.create_app_grid();
-            s.bind_keys_card_keys();
-            s.schedule_greeting();
-            s.load_pins();
-            s.apply_cursors();
-            s.apply_system_colors();
-            s.apply_saver();
-            s.apply_wallpaper();
-            s.schedule_idle();
-            s.apply_gestures();
+            timed("count_notifications", || s.count_notifications());
+            timed("bind_overview_keys", || s.bind_overview_keys());
+            timed("bind_saver_keys", || s.bind_saver_keys());
+            timed("bind_keys_card_keys", || s.bind_keys_card_keys());
+            timed("schedule_greeting", || s.schedule_greeting());
+            timed("load_pins", || s.load_pins());
+            timed("apply_cursors", || s.apply_cursors());
+            timed("apply_system_colors", || s.apply_system_colors());
+            timed("apply_saver", || s.apply_saver());
+            timed("apply_wallpaper", || s.apply_wallpaper());
+            timed("schedule_idle", || s.schedule_idle());
+            timed("apply_gestures", || s.apply_gestures());
             s.rebuild();
+            tracing::info!(ms = started.elapsed().as_millis() as u64, "first bars drawn");
             s.schedule_clock();
             s.schedule_mode_flip();
             if s.hides_taskbar {
@@ -1057,47 +1084,64 @@ impl BarManager {
                 s.start_tray_soon();
             }
             if let Some(c) = &s.control {
-                c.set_timer(timer::STATS, STATS_INTERVAL);
-                c.set_timer(timer::GPU, GPU_INTERVAL);
                 c.set_timer(timer::SHIFT, kabuk_core::oled::SHIFT_INTERVAL);
+                s.displays = kabuk_win::power::DisplayWatch::notifying(c.hwnd(), MSG_DISPLAY)
+                    .map_err(|e| tracing::warn!(error = %e, "display state not watched"))
+                    .ok();
+            }
+            s.schedule_figures();
+            // What can come after the first bars, a moment later (M19 P3: the network's
+            // first look alone took seconds on a busy machine).
+            if let Some(c) = &s.control {
+                let _ = msgloop::post_message(
+                    c.hwnd(),
+                    msgloop::Msg {
+                        id: MSG_LATE_START,
+                        wparam: 0,
+                        lparam: 0,
+                    },
+                );
             }
         }
 
         let weak = Rc::downgrade(&shared);
-        let foreground = ForegroundWatch::start(move |fg| {
+        let control_hwnd = shared.borrow().control.as_ref().map(Window::hwnd);
+        let foreground = ForegroundWatch::start(move |fg, change| {
             if let Some(rc) = weak.upgrade() {
-                if let Ok(mut s) = rc.try_borrow_mut() {
-                    tracing::trace!("foreground event");
-                    // The window in front renamed itself while a full-screen program covers a
-                    // monitor: a game showing its frame rate in its title does it all the
-                    // time, and each did a full-screen check, the bars' care and drawing
-                    // (D85, found by the user: games stuttered). Only the title is kept.
-                    let same = fg.map(|h| h.0) == s.last_front;
-                    s.last_front = fg.map(|h| h.0);
-                    if same && !s.game_devices.is_empty() {
-                        s.live.title = fg.and_then(|h| Title::split(&h.title()));
-                        // Still looked at now and then: the game may have left full screen
-                        // in its own window, with nothing else in front.
-                        if s.last_game_check.elapsed() >= GAME_RECHECK {
+                let Ok(mut s) = rc.try_borrow_mut() else {
+                    // Busy (a call that pumps messages, as COM's do): looked at once free.
+                    // A timer's message comes again until the timer is killed, so it is
+                    // not lost as an event would be (found by a test: a window that came
+                    // forward while the late start ran was never seen).
+                    if let Some(c) = control_hwnd {
+                        msgloop::set_timer(c, timer::FOREGROUND, FOREGROUND_SETTLE);
+                    }
+                    return;
+                };
+                {
+                    if change == events::Change::Focus {
+                        tracing::debug!(fg = ?fg.map(|h| h.0), "focus moved");
+                    }
+                    s.live.title = fg.and_then(|h| Title::split(&h.title()));
+                    if change == events::Change::Title {
+                        // A browser, a terminal or a player renames itself often, a game
+                        // showing its frame rate all the time (D85, found by the user:
+                        // games stuttered): only the title is drawn again.
+                        if !s.game_devices.is_empty() && s.last_game_check.elapsed() >= GAME_RECHECK {
+                            // Still looked at now and then: the game may have left full
+                            // screen in its own window, with nothing else in front.
                             s.last_game_check = std::time::Instant::now();
                             s.step_aside_for_fullscreen();
                         }
+                        s.render_all(false);
                         return;
                     }
-                    // Explorer's taskbar came forward: keep programs finding Kabuk's tray.
-                    if let Some(t) = &s.tray_host {
-                        if !t.in_front() {
-                            t.raise();
-                        }
-                    }
-                    s.live.title = fg.and_then(|h| Title::split(&h.title()));
                     s.tray_panel_foreground(fg);
-                    // Each window types in its own language (D88).
-                    s.read_keyboard();
-                    s.step_aside_for_fullscreen();
-                    s.keep_bars_on_top();
-                    s.refresh_apps();
                     s.render_all(false);
+                    // The rest once focus has settled: a burst of changes is one look.
+                    if let Some(c) = &s.control {
+                        c.set_timer(timer::FOREGROUND, FOREGROUND_SETTLE);
+                    }
                 }
             }
         })
@@ -1445,11 +1489,7 @@ impl Shared {
                     // a game stuttered with Kabuk running), and the game's bar is away.
                     timer::STATS if !self.game_devices.is_empty() => {}
                     timer::GPU if !self.game_devices.is_empty() => {}
-                    timer::STATS => {
-                        self.live.stats = self.sample();
-                        self.drop_dead_tray_icons();
-                        self.render_all(false);
-                    }
+                    timer::STATS => {}
                     timer::GPU => {
                         if self.config().bar.modules.gpu {
                             self.live.gpu_c = kabuk_win::stats::gpu_temperature_c();
@@ -1496,6 +1536,15 @@ impl Shared {
                     timer::APP_PREVIEW => self.preview_due(),
                     timer::DRAG_REVEAL => self.drag_reveal_due(),
                     timer::KEYBOARD_READ => self.keyboard_read_due(),
+                    timer::FOREGROUND => {
+                        self.kill(timer::FOREGROUND);
+                        self.foreground_settled();
+                    }
+                    timer::APPS => {
+                        self.kill(timer::APPS);
+                        self.refresh_apps();
+                        self.render_all(false);
+                    }
                     timer::GAME_LEAVE => {
                         self.kill(timer::GAME_LEAVE);
                         self.step_aside_for_fullscreen();
@@ -1550,6 +1599,10 @@ impl Shared {
             }
             MSG_NETWORK => {
                 self.network_changed(m.wparam);
+                Some(0)
+            }
+            MSG_ETHERNET => {
+                self.ethernet_read();
                 Some(0)
             }
             MSG_BATTERY => {
@@ -1610,8 +1663,12 @@ impl Shared {
                 let notices = self.wm.as_ref().map(|l| l.view().notices).unwrap_or_default();
                 self.wm_notices(&notices);
                 self.sync_tab_strips();
-                self.refresh_apps();
                 self.render_all(false);
+                // The apps once the window manager's burst has settled; a focus change
+                // looks at them anyway, so one look serves both.
+                if let Some(c) = &self.control {
+                    c.set_timer(timer::APPS, FOREGROUND_SETTLE);
+                }
                 Some(0)
             }
             #[cfg(feature = "integration")]
@@ -1621,6 +1678,23 @@ impl Shared {
             }
             MSG_GAME_GONE => {
                 self.step_aside_for_fullscreen();
+                Some(0)
+            }
+            MSG_FIGURES => {
+                if let Some(sample) = self.figures_worker.take() {
+                    self.live.stats = sample;
+                }
+                self.drop_dead_tray_icons();
+                self.render_all(false);
+                Some(0)
+            }
+            MSG_LATE_START => {
+                self.late_start();
+                Some(0)
+            }
+            MSG_DISPLAY => {
+                tracing::info!(on = m.wparam == 1, "displays changed");
+                self.schedule_figures();
                 Some(0)
             }
             #[cfg(feature = "integration")]
@@ -1667,6 +1741,14 @@ impl Shared {
             }
             appgrid_host::MSG_APP_GRID_PICTURES => {
                 self.app_grid_pictures_arrived();
+                Some(0)
+            }
+            apps_host::MSG_APP_PICTURES => {
+                self.app_pictures_arrived();
+                Some(0)
+            }
+            apps_host::MSG_PINS_READ => {
+                self.pins_read();
                 Some(0)
             }
             appgrid_host::MSG_APP_GRID_BACKDROP => {
@@ -1800,6 +1882,43 @@ impl Shared {
     /// them: topmost as they are, they were found under ordinary windows on the user's
     /// machine, and the window motion's overlay with them, so a window coming back showed
     /// over its genie (DECISIONS D78). Looked at as the window in front changes.
+    /// What starts once the first bars are up: the system indicators' watches, the
+    /// launcher and the app grid.
+    fn late_start(&mut self) {
+        let started = std::time::Instant::now();
+        timed("watch_network", || self.watch_network());
+        timed("watch_battery", || self.watch_battery());
+        timed("watch_keyboard", || self.watch_keyboard());
+        timed("watch_privacy", || self.watch_privacy());
+        timed("create_launcher", || self.create_launcher());
+        // The app menus' names and ids, read ahead (it takes a few hundred ms).
+        timed("refresh_installed_apps", kabuk_win::shellitems::refresh_installed_apps);
+        timed("create_app_grid", || self.create_app_grid());
+        self.render_all(false);
+        tracing::info!(ms = started.elapsed().as_millis() as u64, "late start done");
+    }
+
+    /// Focus moved and has settled: what depends on the window in front, once per burst.
+    fn foreground_settled(&mut self) {
+        tracing::debug!("foreground work");
+        let fg = events::foreground();
+        self.live.title = fg.and_then(|h| Title::split(&h.title()));
+        self.tray_panel_foreground(fg);
+        // Explorer's taskbar came forward: keep programs finding Kabuk's tray.
+        if let Some(t) = &self.tray_host {
+            if !t.in_front() {
+                t.raise();
+            }
+        }
+        // Each window types in its own language (D88).
+        self.read_keyboard();
+        self.step_aside_for_fullscreen();
+        self.keep_bars_on_top();
+        self.kill(timer::APPS);
+        self.refresh_apps();
+        self.render_all(false);
+    }
+
     fn keep_bars_on_top(&self) {
         let windows = self
             .bars
@@ -1961,6 +2080,7 @@ impl Shared {
                 self.schedule_rebuild();
             }
         }
+        self.schedule_figures();
     }
 
     /// Watches the games holding game mode: one closed, hidden or minimised ends it at once,
@@ -2004,15 +2124,48 @@ impl Shared {
     }
 
     /// Reads only the figures whose modules are on.
-    fn sample(&mut self) -> Sample {
+    /// Starts or stops the figures' timers: they run only while a bar that shows them can
+    /// be seen (not dimmed, the displays on, no game, a bar on screen; ARCHITECTURE §5).
+    /// Started again, the figures are read at once.
+    pub(super) fn schedule_figures(&mut self) {
         let m = &self.config.current().bar.modules;
-        let wants = Wants {
-            cpu: m.cpu,
-            ram: m.ram,
-            net: m.net,
-            gpu: false,
-        };
-        self.sampler.sample(wants)
+        let seen = !self.idle.dimmed()
+            && self.game_devices.is_empty()
+            && self
+                .displays
+                .as_ref()
+                .is_none_or(kabuk_win::power::DisplayWatch::displays_on)
+            && self.bars.iter().any(|b| !b.aside && b.peek.is_none_or(|p| p.to > 0.0));
+        let want = (seen && (m.cpu || m.ram || m.net), seen && m.gpu);
+        if want == self.figures {
+            return;
+        }
+        tracing::debug!(stats = want.0, gpu = want.1, "figures scheduled");
+        let Some(c) = &self.control else { return };
+        if want.0 != self.figures.0 {
+            // Read off the bar thread, the first sample at once.
+            self.figures_worker.want(want.0.then_some(Wants {
+                cpu: m.cpu,
+                ram: m.ram,
+                net: m.net,
+                gpu: false,
+            }));
+        }
+        if want.1 != self.figures.1 {
+            if want.1 {
+                c.set_timer(timer::GPU, GPU_INTERVAL);
+            } else {
+                c.kill_timer(timer::GPU);
+            }
+        }
+        let started = (want.0 && !self.figures.0, want.1 && !self.figures.1);
+        self.figures = want;
+        if started.1 {
+            self.live.gpu_c = kabuk_win::stats::gpu_temperature_c();
+        }
+        if started.1 {
+            self.render_all(false);
+        }
     }
 
     /// The mouse reached a hot corner (`wparam`: the action's place in
@@ -2135,6 +2288,8 @@ impl Shared {
         self.apply_wallpaper();
         self.schedule_idle();
         self.apply_gestures();
+        // A figure's module turned on or off.
+        self.schedule_figures();
     }
 
     /// Recreates every bar (and Rıhtım's dock) from the current monitors and configuration.
@@ -3063,7 +3218,8 @@ impl Shared {
                 Some(0)
             }
             msg::WINDOWPOSCHANGED => {
-                if let Some(a) = &d.appbar {
+                // Not on every frame of a slide: Explorer is told once it ends.
+                if let (Some(a), false) = (&d.appbar, d.peek.is_some_and(|p| !p.done())) {
                     a.window_pos_changed();
                 }
                 None
@@ -3617,6 +3773,8 @@ impl Shared {
     /// Moves the auto-hiding bars and dock to where their slides have got, again until
     /// they are done.
     fn step_bar_slides(&mut self) {
+        // A bar sliding off is not seen: its figures stop; one coming in starts them.
+        self.schedule_figures();
         let mut moving = false;
         for bar in &mut self.bars {
             let Some(p) = bar.peek else { continue };
@@ -3635,6 +3793,21 @@ impl Shared {
         if !moving {
             self.slide_ticker = None;
             self.kill(timer::BAR_SLIDE);
+            // Where the slides ended, told once.
+            for bar in self.bars.iter().filter(|b| b.peek.is_some()) {
+                if let Some(a) = &bar.appbar {
+                    tracing::debug!("appbar told of a move");
+                    a.window_pos_changed();
+                }
+            }
+            if let Some(a) = self
+                .dock
+                .as_ref()
+                .filter(|d| d.peek.is_some())
+                .and_then(|d| d.appbar.as_ref())
+            {
+                a.window_pos_changed();
+            }
             return;
         }
         // At the screen's own pace; a timer only when no ticker can be had.
@@ -3731,7 +3904,11 @@ impl Shared {
                 Some(0)
             }
             msg::WINDOWPOSCHANGED => {
-                if let Some(a) = &self.bars[index].appbar {
+                // Not on every frame of a slide (each call waits on Explorer): Explorer
+                // is told once it ends.
+                let bar = &self.bars[index];
+                if let (Some(a), false) = (&bar.appbar, bar.peek.is_some_and(|p| !p.done())) {
+                    tracing::debug!(index, "appbar told of a move");
                     a.window_pos_changed();
                 }
                 None
@@ -4044,9 +4221,9 @@ impl Shared {
             media: self.live.media.title.clone(),
             media_playing: self.live.media.playing,
             cpu: self.live.stats.cpu,
-            ram_gb: self.live.stats.ram_gib,
+            ram_gb: self.live.stats.ram_gib.map(view::as_written),
             gpu_c: self.live.gpu_c,
-            net_mbs: self.live.stats.net_mbs,
+            net_mbs: self.live.stats.net_mbs.map(view::as_written),
             volume: self.live.volume.map(|v| Volume {
                 percent: v.percent,
                 muted: v.muted,

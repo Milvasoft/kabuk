@@ -69,7 +69,7 @@ impl Shared {
         p.wifi = wlan.and_then(kabuk_win::network::Wlan::radio_on);
         p.networks = networks;
         p.denied = denied;
-        p.ethernet = kabuk_win::network::ethernet();
+        p.ethernet = self.ethernet_watch.as_ref().and_then(|e| e.up()).unwrap_or(false);
         p.internet = kabuk_win::network::internet();
         // A join done: the network is connected now.
         if let Some(j) = &p.joining {

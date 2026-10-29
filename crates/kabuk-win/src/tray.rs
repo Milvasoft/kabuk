@@ -38,6 +38,9 @@ pub enum TrayEvent {
 thread_local! {
     /// Kabuk's tray window on this thread, while it exists.
     static OURS: Cell<Option<Hwnd>> = const { Cell::new(None) };
+    /// Explorer's tray window as last found: finding it enumerates every window and
+    /// opens a process, and AppBar calls come on every move of a bar.
+    static EXPLORER: Cell<Option<Hwnd>> = const { Cell::new(None) };
 }
 
 /// Runs `f` with Explorer's tray window in front of Kabuk's, so `SHAppBarMessage` calls
@@ -56,11 +59,21 @@ pub(crate) fn explorer_first<R>(f: impl FnOnce() -> R) -> R {
     }
 }
 
-/// Explorer's tray window: a `Shell_TrayWnd` that is not ours.
+/// Explorer's tray window: a `Shell_TrayWnd` that is not ours. The one found last while
+/// it is still a tray window (a restarted Explorer makes a new one).
 fn explorer_tray(ours: Option<Hwnd>) -> Option<Hwnd> {
-    crate::shell::primary_taskbar()
+    let known = EXPLORER
+        .with(Cell::get)
+        .filter(|h| Some(*h) != ours && h.exists() && h.class_name() == TRAY_CLASS);
+    if known.is_some() {
+        return known;
+    }
+    let found = crate::shell::primary_taskbar()
         .filter(|h| Some(*h) != ours)
-        .or_else(|| windows_of_class(TRAY_CLASS).into_iter().find(|h| Some(*h) != ours))
+        .or_else(|| windows_of_class(TRAY_CLASS).into_iter().find(|h| Some(*h) != ours));
+    tracing::debug!(found = ?found.map(|h| h.0), "Explorer's tray window looked for");
+    EXPLORER.with(|e| e.set(found));
+    found
 }
 
 /// Our tray window; dropping it gives the icons back to Explorer.
