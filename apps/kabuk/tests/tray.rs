@@ -968,7 +968,8 @@ fn the_keyboard_on_the_bar_opens_a_tray_icons_menu() {
     use kabuk_win::msgloop::vk;
     let before = Desktop::now();
     let sandbox = Sandbox::new();
-    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    // The test's icon comes after the user's own ones; keep it on the bar (D26).
+    std::fs::write(sandbox.config_file(), "schema = 1\n[bar]\ntray_shown = 12\n").unwrap();
     let _shell = sandbox.kabuk_with(&[TAKE_EXPLORER, "--no-wm"]);
     assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("tray window up") == 1).is_some());
     let log = sandbox.dir.path().join("tray-keys.txt");
