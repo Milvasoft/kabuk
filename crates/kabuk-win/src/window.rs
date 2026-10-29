@@ -429,17 +429,21 @@ impl Hwnd {
 
     /// The whole window rectangle (with the invisible resize borders), physical pixels.
     pub fn window_rect(self) -> Option<kabuk_core::state::Rect> {
+        crate::dpi::physical(|| self.window_rect_as_is())
+    }
+
+    /// [`Hwnd::window_rect`] in the thread's DPI awareness as it is: for a loop over many
+    /// windows that sets it once (PLAN M19 P13: two context switches per window).
+    fn window_rect_as_is(self) -> Option<kabuk_core::state::Rect> {
         use windows::Win32::Foundation::RECT;
-        crate::dpi::physical(|| {
-            let mut r = RECT::default();
-            // SAFETY: `r` is a valid out pointer.
-            unsafe { GetWindowRect(self.raw(), &mut r) }.ok()?;
-            Some(kabuk_core::state::Rect {
-                left: r.left,
-                top: r.top,
-                right: r.right,
-                bottom: r.bottom,
-            })
+        let mut r = RECT::default();
+        // SAFETY: `r` is a valid out pointer.
+        unsafe { GetWindowRect(self.raw(), &mut r) }.ok()?;
+        Some(kabuk_core::state::Rect {
+            left: r.left,
+            top: r.top,
+            right: r.right,
+            bottom: r.bottom,
         })
     }
 
@@ -729,15 +733,7 @@ impl Hwnd {
     /// A topmost window should never be, yet Kabuk's bars were found under ordinary
     /// windows on the user's machine, as was a topmost window of Explorer's (D78).
     pub fn under_ordinary_window(self) -> bool {
-        let mut ordinary_above = false;
-        for w in top_level_windows() {
-            if w == self {
-                return ordinary_above;
-            }
-            ordinary_above |= w.is_visible() && !w.is_topmost() && !w.is_cloaked();
-        }
-        // Not a window (any more).
-        false
+        !under_ordinary_windows(&[self]).is_empty()
     }
 
     /// Whether [`Hwnd::set_see_through`] made the window transparent.
@@ -872,10 +868,33 @@ pub(crate) const SHELL_CLASSES: [&str; 4] = ["Progman", "WorkerW", "Shell_TrayWn
 /// As [`front_window_rects`], with whether each window is maximised (a maximised window
 /// is never a full-screen program, `kabuk_core::fullscreen::is_fullscreen_front`).
 pub fn front_windows(skip_pid: u32) -> Vec<(Hwnd, kabuk_core::state::Rect, bool)> {
-    front_candidates(skip_pid)
-        .into_iter()
-        .filter_map(|w| Some((w, w.window_rect()?, w.is_maximized())))
-        .collect()
+    crate::dpi::physical(|| {
+        front_candidates(skip_pid)
+            .into_iter()
+            .filter_map(|w| Some((w, w.window_rect_as_is()?, w.is_maximized())))
+            .collect()
+    })
+}
+
+/// Which of `windows` have a visible ordinary (not topmost) window above them in the
+/// z-order, in one pass over the windows (PLAN M19 P13: one pass for each bar).
+pub fn under_ordinary_windows(windows: &[Hwnd]) -> Vec<Hwnd> {
+    let mut under = Vec::new();
+    let mut ordinary_above = false;
+    let mut left = windows.len();
+    for w in top_level_windows() {
+        if left == 0 {
+            break;
+        }
+        if windows.contains(&w) {
+            left -= 1;
+            if ordinary_above {
+                under.push(w);
+            }
+        }
+        ordinary_above |= w.is_visible() && !w.is_topmost() && !w.is_cloaked();
+    }
+    under
 }
 
 /// The outer rectangles of the visible top-level windows that hold a program's content,
@@ -884,10 +903,12 @@ pub fn front_windows(skip_pid: u32) -> Vec<(Hwnd, kabuk_core::state::Rect, bool)
 /// drivers, Game Bar and voice chats over a game; DECISIONS D72), the desktop, the
 /// taskbars and `skip_pid`'s windows (Kabuk's own) are left out.
 pub fn front_window_rects(skip_pid: u32) -> Vec<kabuk_core::state::Rect> {
-    front_candidates(skip_pid)
-        .into_iter()
-        .filter_map(Hwnd::window_rect)
-        .collect()
+    crate::dpi::physical(|| {
+        front_candidates(skip_pid)
+            .into_iter()
+            .filter_map(Hwnd::window_rect_as_is)
+            .collect()
+    })
 }
 
 /// The visible ordinary windows, front first, without `skip_pid`'s and the shell's.
@@ -1023,6 +1044,8 @@ mod tests {
         place(over.hwnd(), HWND_TOP);
         assert!(!under.hwnd().is_topmost() && !over.hwnd().is_topmost());
         assert!(under.hwnd().under_ordinary_window(), "under the other");
+        // PLAN M19 P13: both asked in one pass, only the one under is named.
+        assert_eq!(under_ordinary_windows(&[over.hwnd(), under.hwnd()]), vec![under.hwnd()]);
         place(under.hwnd(), HWND_TOPMOST);
         assert!(under.hwnd().is_topmost());
         assert!(!under.hwnd().under_ordinary_window(), "raised to the top");

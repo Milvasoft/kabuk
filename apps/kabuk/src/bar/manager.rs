@@ -2086,12 +2086,12 @@ impl Shared {
             .filter(|b| !b.aside)
             .map(|b| &b.window)
             .chain(self.dock.as_ref().map(|d| &d.window));
-        for w in windows {
-            let h = w.hwnd();
-            if h.is_visible() && h.under_ordinary_window() {
-                w.raise_topmost();
-                tracing::info!(hwnd = h.0, "bar raised back over the windows");
-            }
+        let windows: Vec<&Window> = windows.filter(|w| w.hwnd().is_visible()).collect();
+        let hwnds: Vec<Hwnd> = windows.iter().map(|w| w.hwnd()).collect();
+        let under = kabuk_win::window::under_ordinary_windows(&hwnds);
+        for w in windows.into_iter().filter(|w| under.contains(&w.hwnd())) {
+            w.raise_topmost();
+            tracing::info!(hwnd = w.hwnd().0, "bar raised back over the windows");
         }
     }
 
