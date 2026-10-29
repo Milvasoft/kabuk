@@ -173,6 +173,7 @@ pub fn main(options: Run) -> i32 {
     // file sits in the same folder when tests or the user put them together).
     let read_config = || std::fs::read_to_string(&paths.config_file).ok();
     let mut seen = config::FileSeen::new(read_config());
+    let started = Instant::now();
     let bars = if options.no_bar {
         None
     } else {
@@ -218,10 +219,12 @@ pub fn main(options: Run) -> i32 {
     if let Some(ms) = options.debug.attach_wm_after_ms {
         let _ = msgloop::run_until(&[], Some(Duration::from_millis(ms)));
     }
+    tracing::debug!(ms = started.elapsed().as_millis() as u64, "start: window manager up");
     if let (Some(b), Some(w)) = (&bars, &manager) {
         b.attach_wm(w.link());
         w.set_bar_window(b.control_window());
     }
+    tracing::debug!(ms = started.elapsed().as_millis() as u64, "start: window manager met");
     // Last, so every command finds what it drives.
     let commands = crate::ipc::start(crate::ipc::Targets {
         wm: manager.as_ref().map(WmHandle::link),
@@ -232,6 +235,7 @@ pub fn main(options: Run) -> i32 {
     })
     .map_err(|e| tracing::error!(error = %e, "command pipe unavailable"))
     .ok();
+    tracing::debug!(ms = started.elapsed().as_millis() as u64, "start: commands open");
 
     let code = loop {
         let mut waits: Vec<&dyn Waitable> = vec![&emergency];

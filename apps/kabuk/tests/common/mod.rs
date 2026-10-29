@@ -350,6 +350,15 @@ impl Sandbox {
         self.kabuk(&[TAKE_EXPLORER, "--manage-class", TEST_WINDOW_CLASS], level)
     }
 
+    /// Waits until the shell's start is over: the launcher, the app grid and the system
+    /// indicators come a moment after the first bars (M19 P3).
+    pub fn wait_started(&self) {
+        assert!(
+            wait_until(STARTUP_TIMEOUT, || self.log_lines("late start done") == 1).is_some(),
+            "the shell's start did not end"
+        );
+    }
+
     /// Runs `kabuk --restore` for this instance and returns its exit code and output.
     pub fn restore(&self) -> (i32, String) {
         let out = Command::new(kabuk_exe())

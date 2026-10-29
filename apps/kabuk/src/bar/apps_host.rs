@@ -213,6 +213,7 @@ impl Shared {
         let out = self.apps.pins_read.clone();
         let spawned = std::thread::Builder::new().name("pins".into()).spawn(move || {
             kabuk_win::system::com_init();
+            kabuk_win::system::background_thread();
             let started = std::time::Instant::now();
             let read = read_pin_sources(file.as_deref());
             tracing::debug!(ms = started.elapsed().as_millis() as u64, "pins loaded");
@@ -437,13 +438,16 @@ impl Shared {
     /// Asks for the apps' pictures not loaded yet; they are drawn as they come.
     fn load_app_images(&mut self) {
         self.apps.pictures.forget_dropped(&self.gpu.images);
-        let missing: Vec<String> = self
+        // The running apps' first: one at a time, a picture can take a second on a busy
+        // machine, and their windows are what the user works with.
+        let mut missing: Vec<&App> = self
             .apps
             .list
             .iter()
             .filter(|a| !self.gpu.images.contains(self.picture_key(&a.icon)))
-            .map(|a| a.icon.clone())
             .collect();
+        missing.sort_by_key(|a| a.windows.is_empty());
+        let missing: Vec<String> = missing.into_iter().map(|a| a.icon.clone()).collect();
         self.apps.pictures.ask(missing, self.apps.side);
     }
 

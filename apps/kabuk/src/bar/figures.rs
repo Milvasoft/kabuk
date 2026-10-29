@@ -26,6 +26,7 @@ impl Figures {
         let out = latest.clone();
         let (tx, rx) = mpsc::channel::<Option<Wants>>();
         let spawned = std::thread::Builder::new().name("figures".into()).spawn(move || {
+            kabuk_win::system::background_thread();
             let mut sampler = Sampler::default();
             let mut wants: Option<Wants> = None;
             loop {

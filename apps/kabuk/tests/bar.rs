@@ -642,11 +642,6 @@ fn language_change_switches_date_and_decimal_separator_live() {
     let tr_days = ["\"Paz ", "\"Pzt ", "\"Sal ", "\"Çar ", "\"Per ", "\"Cum ", "\"Cmt "];
     let en_days = ["\"Sun ", "\"Mon ", "\"Tue ", "\"Wed ", "\"Thu ", "\"Fri ", "\"Sat "];
     let drawn = || sandbox.last_log_line(&["bar drawn", &device]).unwrap_or_default();
-    assert!(
-        wait_until(STARTUP_TIMEOUT, || tr_days.iter().any(|d| drawn().contains(d))).is_some(),
-        "{}",
-        drawn()
-    );
     // The RAM figure is the drawn text ending in "G", e.g. "18,6G".
     let ram = |line: String| {
         line.split('"')
@@ -654,6 +649,14 @@ fn language_change_switches_date_and_decimal_separator_live() {
             .unwrap_or_default()
             .to_string()
     };
+    // The figures come a moment after the first bars (read off the bar thread, M19 P3).
+    assert!(
+        wait_until(STARTUP_TIMEOUT, || tr_days.iter().any(|d| drawn().contains(d))
+            && !ram(drawn()).is_empty())
+        .is_some(),
+        "{}",
+        drawn()
+    );
     let tr_ram = ram(drawn());
     assert!(
         tr_ram.contains(',') && !tr_ram.contains('.'),
@@ -1199,7 +1202,8 @@ fn kabuk_steps_back_for_a_full_screen_program() {
     notify(false);
     assert!(
         wait_until(SETTLE, || sandbox.log_lines("keyboard hook back") == 1).is_some(),
-        "the keyboard hook did not come back"
+        "the keyboard hook did not come back:\n{}",
+        game_lines()
     );
     assert!(
         wait_until(SETTLE, || sandbox.log_lines("below_normal=false") == 1).is_some(),
@@ -1318,22 +1322,28 @@ fn a_program_started_again_gets_its_icon_anew() {
     std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
     let _shell = sandbox.shell_with_bar_and_wm();
     assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
-    let loaded = || sandbox.log_lines("app icon loaded icon=");
-    let exe = testapp_exe().display().to_string();
+    // The bar's apps' pictures (loaded on a worker since M19 P3).
+    let loaded = || sandbox.log_lines("owner=\"apps\" icon=");
+    // By its file name: the build folder can be reached by another path (a junction),
+    // which the process's own path shows.
+    let exe = testapp_exe().file_name().unwrap().to_string_lossy().into_owned();
     let of_testapp = || {
         sandbox
-            .last_log_line(&["app icon loaded"])
+            .last_log_line(&["owner=\"apps\"", "picture loaded"])
             .is_some_and(|l| l.contains(&exe))
     };
+    // Pictures load one at a time off the bar thread, a second each on a busy machine:
+    // the pins' are asked for at the start, ahead of it.
+    const ICONS: Duration = Duration::from_secs(30);
     let first = TestWindow::open(&["--title", &title("icon-again-1")]);
-    assert!(wait_until(SETTLE, &of_testapp).is_some(), "its icon loaded");
+    assert!(wait_until(ICONS, &of_testapp).is_some(), "its icon loaded");
     let after_first = loaded();
     drop(first);
     let second = TestWindow::open(&["--title", &title("icon-again-2")]);
     let managed = format!("managing window hwnd={}", second.hwnd.0);
     assert!(wait_until(SETTLE, || sandbox.log_lines(&managed) == 1).is_some());
     assert!(
-        wait_until(SETTLE, || loaded() > after_first && of_testapp()).is_some(),
+        wait_until(ICONS, || loaded() > after_first && of_testapp()).is_some(),
         "the new process's icon was not loaded again"
     );
     drop(second);
@@ -1975,6 +1985,7 @@ fn the_network_indicator_follows_its_setting_and_opens_its_panel() {
     std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
     let _shell = sandbox.shell_with_bar(&[]);
     assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    sandbox.wait_started();
     let device = primary_device();
     let link_icons = ["\"wifi\"", "\"wifi-2\"", "\"wifi-1\"", "\"wifi-off\"", "\"eth\""];
     let drawn = || {
@@ -2920,6 +2931,7 @@ fn a_hot_corner_reached_does_what_was_chosen() {
     .unwrap();
     let _shell = sandbox.shell_with_bar(&[]);
     assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    sandbox.wait_started();
     let pid = sandbox.state().kabuk_pid.expect("pid");
     let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
         .into_iter()
@@ -3105,6 +3117,7 @@ fn a_touchpad_swipe_does_what_was_chosen() {
     std::fs::write(sandbox.config_file(), on).unwrap();
     let _shell = sandbox.shell_with_bar(&[]);
     assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    sandbox.wait_started();
     assert!(wait_until(SETTLE, || sandbox.log_lines("touchpad watched on=true") == 1).is_some());
     let pid = sandbox.state().kabuk_pid.expect("pid");
     let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
@@ -3821,12 +3834,12 @@ fn a_window_in_front_of_a_game_for_a_moment_keeps_game_mode() {
         "the bar stayed over the game"
     );
     // Nothing of Kabuk's busies the GPU or every program beside the game: the app grid's
-    // screen taking (a GPU device) goes, and programs are not asked to put their tray
-    // icons back until the game is over.
+    // screen taking (a GPU device) goes, or was never made (it is made a while after the
+    // start, M19 P3), and programs are not asked to put their tray icons back until the
+    // game is over.
     assert!(
-        wait_until(SETTLE, || sandbox
-            .log_lines("app grid screen taking let go for the game")
-            == 1)
+        wait_until(SETTLE, || sandbox.log_lines("app grid screen taking made")
+            == sandbox.log_lines("app grid screen taking let go for the game"))
         .is_some(),
         "the app grid kept its GPU device beside the game"
     );
@@ -4130,7 +4143,11 @@ fn a_click_on_an_app_with_several_windows_shows_their_previews() {
         "no previews for a click"
     );
     assert!(wait_until(SETTLE, || sandbox.log_lines("windows=2") >= 1).is_some());
-    assert_eq!(sandbox.log_lines("app shown from the bar"), 0, "a window was shown instead");
+    assert_eq!(
+        sandbox.log_lines("app shown from the bar"),
+        0,
+        "a window was shown instead"
+    );
     assert_eq!(sandbox.log_lines("app minimized from the bar"), 0);
     click();
     assert!(

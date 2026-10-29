@@ -309,7 +309,9 @@ impl Shared {
             return;
         }
         self.app_grid.capture = kabuk_win::screen_picture::ScreenCapture::new();
-        if self.app_grid.capture.is_none() {
+        if self.app_grid.capture.is_some() {
+            tracing::info!("app grid screen taking made");
+        } else {
             tracing::warn!("the screen cannot be taken; the app grid shows the wallpaper under it");
         }
     }

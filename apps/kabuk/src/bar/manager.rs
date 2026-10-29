@@ -222,6 +222,8 @@ mod timer {
     pub const FOREGROUND: usize = 39;
     /// The window manager told of a change a moment ago: the apps are looked at.
     pub const APPS: usize = 40;
+    /// Messages came while the state was busy: they are handled once it is free.
+    pub const DEFERRED: usize = 41;
 }
 
 /// An auto-hiding bar (SPEC §2.1): how much of it stays on screen for the mouse to reach
@@ -360,7 +362,20 @@ struct Pending {
     shell: bool,
     /// `TaskbarCreated`: Explorer restarted, or Kabuk's tray asked programs to register.
     taskbar_created: bool,
+    /// A program went full screen or left it (`ABN_FULLSCREENAPP`; found by a test: one
+    /// that came while the start's COM calls let messages through was lost, and game mode
+    /// never ended).
+    full_screen: bool,
 }
+
+/// Whether `id` is one of the application messages Kabuk posts to its own control window
+/// (not a registered one: those are other programs' broadcasts).
+fn is_own_message(id: u32) -> bool {
+    (msg::APP..REGISTERED_FIRST).contains(&id)
+}
+
+/// The first message id `RegisterWindowMessage` gives.
+const REGISTERED_FIRST: u32 = 0xC000;
 
 /// Notes `m` in `pending` when it is one of the notifications that must not be lost.
 fn note_pending(pending: &Cell<Pending>, m: &Msg, taskbar_created: u32) -> bool {
@@ -375,6 +390,8 @@ fn note_pending(pending: &Cell<Pending>, m: &Msg, taskbar_created: u32) -> bool 
         p.taskbar_created = true;
     } else if m.id == msg::DISPLAYCHANGE || m.id == msg::DPICHANGED {
         p.shell = true;
+    } else if m.id == MSG_APPBAR && m.wparam == appbar::notify::FULLSCREEN_APP {
+        p.full_screen = true;
     } else {
         return false;
     }
@@ -1023,12 +1040,32 @@ impl BarManager {
         });
 
         let weak = Rc::downgrade(&shared);
+        // Kabuk's own posted messages that came while the state was busy (a COM call of
+        // the start lets messages through), handled once it is free: a lost one left the
+        // pins unread, the late start undone or game mode on (found by M19's tests).
+        let deferred: Rc<RefCell<Vec<Msg>>> = Rc::default();
+        let control_hwnd: Rc<Cell<Option<Hwnd>>> = Rc::default();
+        let me = control_hwnd.clone();
         let control = Window::new(CONTROL_CLASS, "", move |m| {
             let rc = weak.upgrade()?;
-            let mut s = rc.try_borrow_mut().ok()?;
+            let Ok(mut s) = rc.try_borrow_mut() else {
+                if is_own_message(m.id) {
+                    deferred.borrow_mut().push(m);
+                    if let Some(c) = me.get() {
+                        msgloop::set_timer(c, timer::DEFERRED, PENDING_RETRY);
+                    }
+                }
+                return None;
+            };
+            let earlier = std::mem::take(&mut *deferred.borrow_mut());
+            for d in earlier {
+                tracing::debug!(id = d.id, "busy before; message handled now");
+                s.on_control(d);
+            }
             s.on_control(m)
         })
         .map_err(BarError::Window)?;
+        control_hwnd.set(Some(control.hwnd()));
         let notify_audio = Notify {
             window: control.hwnd(),
             message: MSG_AUDIO,
@@ -1546,6 +1583,8 @@ impl Shared {
                         self.kill(timer::FOREGROUND);
                         self.foreground_settled();
                     }
+                    // The deferred messages were handled on the way in.
+                    timer::DEFERRED => self.kill(timer::DEFERRED),
                     timer::APPS => {
                         self.kill(timer::APPS);
                         self.refresh_apps();
@@ -2072,11 +2111,11 @@ impl Shared {
                 link.send(wm::Command::GameMode(devices));
             }
             if was != now {
-                self.notices_game_mode(now);
-                self.apply_animated();
+                timed("notices_game_mode", || self.notices_game_mode(now));
+                timed("apply_animated", || self.apply_animated());
                 // No GPU device of Kabuk's lives beside the game (D87): the app grid's
                 // screen taking is made again once the game is over.
-                self.app_grid_capture(!now);
+                timed("app_grid_capture", || self.app_grid_capture(!now));
                 if !now && std::mem::take(&mut self.look_after_game) {
                     self.refresh_look();
                 }
@@ -2499,6 +2538,9 @@ impl Shared {
             // Monitors or scaling changed: rebuild after things settle.
             tracing::info!("display or shell change");
             self.schedule_rebuild();
+        }
+        if p.full_screen {
+            self.step_aside_for_fullscreen();
         }
     }
 
@@ -3924,6 +3966,7 @@ impl Shared {
                 // A program went full screen or left it (the shell says which monitor
                 // only loosely, so every monitor is looked at).
                 if m.wparam == appbar::notify::FULLSCREEN_APP {
+                    tracing::debug!(entering = m.lparam != 0, "full-screen notice");
                     self.step_aside_for_fullscreen();
                 }
                 Some(0)
@@ -4555,6 +4598,15 @@ mod tests {
     }
 
     #[test]
+    fn only_kabuks_own_messages_are_deferred() {
+        assert!(is_own_message(msg::APP));
+        assert!(is_own_message(MSG_LATE_START));
+        assert!(!is_own_message(msg::TIMER));
+        assert!(!is_own_message(msg::SETTINGCHANGE));
+        assert!(!is_own_message(TASKBAR_CREATED));
+    }
+
+    #[test]
     fn only_notifications_that_matter_are_kept() {
         let p = Cell::new(Pending::default());
         assert!(!note_pending(&p, &setting(Some("Environment")), TASKBAR_CREATED));
@@ -4579,27 +4631,34 @@ mod tests {
             p.get(),
             Pending {
                 app_mode: true,
-                shell: false,
-                taskbar_created: false,
+                ..Pending::default()
             }
         );
-        for id in [TASKBAR_CREATED, msg::DISPLAYCHANGE, msg::DPICHANGED] {
-            assert!(note_pending(
-                &p,
-                &Msg {
-                    id,
-                    wparam: 0,
-                    lparam: 0
-                },
-                TASKBAR_CREATED
-            ));
+        for (id, wparam) in [
+            (TASKBAR_CREATED, 0),
+            (msg::DISPLAYCHANGE, 0),
+            (msg::DPICHANGED, 0),
+            (MSG_APPBAR, appbar::notify::FULLSCREEN_APP),
+        ] {
+            assert!(note_pending(&p, &Msg { id, wparam, lparam: 0 }, TASKBAR_CREATED));
         }
+        // Another AppBar notice is not kept: only the full-screen one is.
+        assert!(!note_pending(
+            &p,
+            &Msg {
+                id: MSG_APPBAR,
+                wparam: appbar::notify::POS_CHANGED,
+                lparam: 0
+            },
+            TASKBAR_CREATED
+        ));
         assert_eq!(
             p.take(),
             Pending {
                 app_mode: true,
                 shell: true,
                 taskbar_created: true,
+                full_screen: true,
             }
         );
         assert_eq!(p.get(), Pending::default());

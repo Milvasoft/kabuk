@@ -41,6 +41,7 @@ impl Pictures {
             .name(format!("{owner}-pictures"))
             .spawn(move || {
                 kabuk_win::system::com_init();
+                kabuk_win::system::background_thread();
                 while let Ok((source, side)) = rx.recv() {
                     let px = kabuk_win::icon::shell_item_icon_pixels(&source, side)
                         .or_else(|| kabuk_win::icon::file_icon_pixels(std::path::Path::new(&source), side));
@@ -142,6 +143,7 @@ impl Pictures {
                 Some(px) => {
                     let key = self.key(&source, side);
                     store.set(key, side, px);
+                    tracing::debug!(owner = self.owner, icon = %source, "picture loaded");
                     self.loaded.insert(source, key);
                 }
                 // Not loadable: it keeps its kind's icon and is not asked again.

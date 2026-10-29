@@ -74,6 +74,17 @@ pub fn yield_to_full_screen(on: bool) -> std::io::Result<()> {
     unsafe { SetPriorityClass(GetCurrentProcess(), class) }.map_err(crate::sync::io_error)
 }
 
+/// Runs the calling thread below the others of the process: a worker reading icons or
+/// figures never keeps the threads the user waits on (the bars, the window manager) from
+/// the CPU, least of all in game mode, when the whole process runs below normal (found by
+/// M19's tests: the bar's messages waited seconds while icons loaded).
+pub fn background_thread() {
+    use windows::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_LOWEST};
+    // The lowest: one step below still kept game mode's end waiting on a busy machine.
+    // SAFETY: this thread's own pseudo-handle and a valid priority.
+    let _ = unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST) };
+}
+
 /// Windows' "Animation effects" (Settings → Accessibility → Visual effects). Read-only;
 /// on when it cannot be read, as Windows' default is.
 pub fn animations_on() -> bool {

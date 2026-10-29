@@ -331,6 +331,7 @@ impl EthernetWatch {
         let out = up.clone();
         let notify = Notify { window, message };
         std::thread::Builder::new().name("ethernet".into()).spawn(move || {
+            crate::system::background_thread();
             while asked.recv().is_ok() {
                 // Asked several times meanwhile: one read answers them all.
                 while asked.try_recv().is_ok() {}
