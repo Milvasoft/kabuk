@@ -1881,6 +1881,10 @@ impl Shared {
                 self.app_grid_backdrops_arrived();
                 Some(0)
             }
+            appgrid_host::MSG_APP_GRID_SCREEN => {
+                self.app_grid_screen_arrived();
+                Some(0)
+            }
             MSG_OPEN_APP_GRID => {
                 let activate = self.shortcuts;
                 self.toggle_app_grid(None, activate);

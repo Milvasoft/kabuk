@@ -46,6 +46,8 @@ pub const MSG_TEST_APP_GRID: u32 = msg::APP + 45;
 pub(super) const MSG_APP_GRID_PICTURES: u32 = msg::APP + 46;
 /// A wallpaper was blurred.
 pub(super) const MSG_APP_GRID_BACKDROP: u32 = msg::APP + 47;
+/// The screen behind the open grid has been blurred off the bar thread.
+pub(super) const MSG_APP_GRID_SCREEN: u32 = msg::APP + 94;
 /// The grid's global shortcuts take these hotkey ids (the screen saver's start at 300).
 const HOTKEY_FIRST: i32 = 400;
 /// How far a drag past the first or last page goes, as a share of the mouse's way.
@@ -55,6 +57,8 @@ const EDGE_GIVE: f32 = 0.3;
 type BackdropKey = (String, u64, u32, u32);
 /// Blurred wallpapers the worker finished: whose, its size in pixels and its pixels.
 type Blurred = Arc<Mutex<Vec<(BackdropKey, u32, u32, Vec<u8>)>>>;
+/// The screen behind the grid, blurred: its picture's key, size and pixels.
+type BlurredScreen = Arc<Mutex<Option<(u64, u32, u32, Vec<u8>)>>>;
 
 /// A blurred wallpaper kept: its key in the renderer's store, its size and pixels.
 struct Backdrop {
@@ -76,6 +80,8 @@ pub(super) struct AppGridState {
     blurred: Blurred,
     /// Takes the screen's picture as the grid opens (made at start, let go during a game; D87).
     capture: Option<kabuk_win::screen_picture::ScreenCapture>,
+    /// The screen behind the grid, blurred off the bar thread: its key and picture.
+    screen_blurred: BlurredScreen,
 }
 
 /// A press of the left button on the pages: where (pixels), how far it went across
@@ -337,17 +343,55 @@ impl Shared {
             "app grid screen taken"
         );
         let bgr = bgr?;
-        let px = backdrop::blurred(
-            &bgr,
-            w as usize,
-            h as usize,
-            style::BLUR_RADIUS,
-            style::BLUR_PASSES,
-            style::SCREEN_DIM,
-        );
+        // Blurred off the bar thread (PLAN M19 P14: it held the grid's opening): the grid
+        // opens over the blurred wallpaper and the screen fades in once it is ready.
         let key = crate::bar::apps::image_key(&format!("appgrid-screen|{}", m.device));
+        let control = self.control.as_ref().map(Window::hwnd)?;
+        let out = self.app_grid.screen_blurred.clone();
+        let spawned = std::thread::Builder::new().name("appgrid-screen".into()).spawn(move || {
+            kabuk_win::system::background_thread();
+            let started = Instant::now();
+            let px = backdrop::blurred(
+                &bgr,
+                w as usize,
+                h as usize,
+                style::BLUR_RADIUS,
+                style::BLUR_PASSES,
+                style::SCREEN_DIM,
+            );
+            tracing::debug!(ms = started.elapsed().as_millis() as u64, "app grid screen blurred");
+            if let Ok(mut o) = out.lock() {
+                *o = Some((key, w, h, px));
+            }
+            let _ = msgloop::post_message(
+                control,
+                Msg {
+                    id: MSG_APP_GRID_SCREEN,
+                    wparam: 0,
+                    lparam: 0,
+                },
+            );
+        });
+        if let Err(e) = spawned {
+            tracing::warn!(error = %e, "app grid screen not blurred");
+        }
+        None
+    }
+
+    /// The screen behind the open grid came blurred: it fades in over the wallpaper.
+    pub(super) fn app_grid_screen_arrived(&mut self) {
+        let Some((key, w, h, px)) = self.app_grid.screen_blurred.lock().ok().and_then(|mut s| s.take()) else {
+            return;
+        };
         self.gpu.images.set_sized(key, w, h, px);
-        Some(key)
+        let Some(o) = self.app_grid.open.as_mut() else { return };
+        o.backdrop = Some(key);
+        if let Some(s) = o.chrome.surface_mut() {
+            if let Err(e) = s.crossfade(&self.gpu, kabuk_ui::motion::BLEND) {
+                tracing::debug!(error = %e, "app grid screen not blended in");
+            }
+        }
+        self.render_app_grid(true, false);
     }
 
     /// Blurred wallpapers arrived: into the store, and an open grid fades its in.
