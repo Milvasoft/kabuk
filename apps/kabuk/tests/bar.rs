@@ -4916,3 +4916,103 @@ fn a_screen_reader_reads_and_sets_the_volume_as_a_slider() {
     assert_eq!(sandbox.restore().0, 0);
     assert!(wait_until(SETTLE, || restored(&before)).is_some());
 }
+
+/// PLAN M19 U17: the app grid was drawn only. A screen reader finds the apps of its page
+/// as list items named as the grid names them; while it is edited, each app's badge is a
+/// button that hides it, and invoked, it hides the app drawn there (twice: the apps slid
+/// into the first one's place are found where they are drawn now).
+#[test]
+fn a_screen_reader_finds_the_app_grids_apps_and_hides_one() {
+    use kabuk::bar::manager::{APP_GRID_CLASS, CONTROL_CLASS, MSG_TEST_APP_GRID};
+    use kabuk_win::msgloop::{post_message, Msg};
+    use kabuk_win::uia::{self, Role};
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
+    let grid = |what: usize| {
+        post_message(
+            control,
+            Msg {
+                id: MSG_TEST_APP_GRID,
+                wparam: what,
+                lparam: 0,
+            },
+        )
+        .unwrap()
+    };
+    // The apps of the page on screen, in order, as the grid says them.
+    let shown = || -> Vec<String> {
+        sandbox
+            .last_log_line(&["app grid page"])
+            .and_then(|l| {
+                l.split("apps=")
+                    .nth(1)
+                    .map(|a| a.split(" | ").map(|n| n.trim().to_string()).collect())
+            })
+            .unwrap_or_default()
+    };
+    grid(1);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("app grid shown") == 1).is_some());
+    let sheet = kabuk_win::window::windows_of_class(APP_GRID_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("the grid's pages");
+    let items = || -> Vec<String> {
+        uia::read(sheet)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|p| p.role == Some(Role::ListItem))
+            .map(|p| p.name)
+            .collect()
+    };
+    let apps = shown();
+    assert!(apps.len() >= 3, "{apps:?}");
+    assert!(
+        wait_until(SETTLE, || items() == shown()).is_some(),
+        "{:?} read for {:?}",
+        items(),
+        shown()
+    );
+    let r = sheet.window_rect().unwrap();
+    assert!(
+        uia::read(sheet)
+            .unwrap()
+            .iter()
+            .all(|p| p.rect.left >= r.left && p.rect.right <= r.right && p.rect.bottom > p.rect.top),
+        "drawn outside the grid"
+    );
+    // Edited: a badge for each app.
+    grid(2);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("app grid editing on=true") == 1).is_some());
+    let i18n = kabuk_win::system::i18n(None);
+    let hide = |name: &str| i18n.tr_args("acc-grid-hide", &[("value", name.to_string().into())]);
+    for (n, name) in apps.iter().take(2).enumerate() {
+        let badge = hide(name);
+        assert!(
+            wait_until(SETTLE, || uia::read(sheet).is_ok_and(|s| s
+                .iter()
+                .any(|p| p.name == badge && p.role == Some(Role::Button))))
+            .is_some(),
+            "no {badge:?} among {:?}",
+            uia::read(sheet)
+        );
+        uia::invoke(sheet, &badge).unwrap();
+        assert!(
+            wait_until(SETTLE, || sandbox.log_lines("app grid app hidden") == n + 1).is_some(),
+            "{badge:?} hid nothing"
+        );
+        let hidden = sandbox.last_log_line(&["app grid app hidden"]).unwrap();
+        assert!(hidden.ends_with(&format!("app={name}")), "{hidden} (wanted {name})");
+    }
+    grid(0);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("app grid closed") == 1).is_some());
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}

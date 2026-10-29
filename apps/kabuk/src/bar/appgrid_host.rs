@@ -616,6 +616,15 @@ impl Shared {
         // another app and a press on an app ended editing).
         o.page_layout = kabuk_ui::node::layout(&view::page(&o.grid, o.slots[1], &frame), Point::default(), &gpu.text);
         let _ = gpu.commit();
+        // Screen readers, too, find the apps where this frame draws them while they slide,
+        // and where they stay once in place (a reflow over is let go).
+        let sliding = o.reflow.is_some();
+        if sliding && reflow_now(&o.reflow).is_none() {
+            o.reflow = None;
+        }
+        if sliding {
+            self.tell_app_grid();
+        }
     }
 
     /// The held press's time is up: editing begins, the press now moving its app.
@@ -925,6 +934,45 @@ impl Shared {
             tracing::debug!(page = o.grid.page(), query = %o.grid.query(), apps = %names.join(" | "), "app grid page");
         }
         let _ = gpu.commit();
+        if strip {
+            self.tell_app_grid();
+        }
+    }
+
+    /// Tells screen readers the apps of the page on screen (PLAN M19 U17): list items by
+    /// their names, the one the keyboard selected holding it, and while editing each app's
+    /// badge, a button that hides it; where the page draws them now.
+    fn tell_app_grid(&self) {
+        let Some(o) = self.app_grid.open.as_ref() else { return };
+        let name = |v: u32| o.grid.shown_at(usize::try_from(v).ok()?).map(|e| e.name.clone());
+        let selected = o.grid.selected().and_then(|s| u32::try_from(s).ok());
+        let mut apps = crate::bar::access::popup_parts(
+            &o.page_layout,
+            o.scale,
+            (view::hit::APP, kabuk_win::uia::Role::ListItem),
+            selected,
+            |v, _| name(v),
+        );
+        let mut badges = crate::bar::access::popup_parts(
+            &o.page_layout,
+            o.scale,
+            (view::hit::HIDE, kabuk_win::uia::Role::Button),
+            None,
+            |v, _| name(v).map(|n| self.i18n.tr_args("acc-grid-hide", &[("value", n.into())])),
+        );
+        // Each app followed by its badge (both valued by the app's place).
+        let mut parts = Vec::with_capacity(apps.len() + badges.len());
+        for v in crate::bar::popup_keys::entries(&o.page_layout, view::hit::APP) {
+            for (list, module) in [(&mut apps, view::hit::APP), (&mut badges, view::hit::HIDE)] {
+                let id = kabuk_win::uia::part_id(module, v);
+                if let Some(i) = list.iter().position(|p| p.id == id) {
+                    parts.push(list.remove(i));
+                }
+            }
+        }
+        o.sheet
+            .window()
+            .set_accessible(kabuk_win::uia::Container::List, &self.i18n.tr("hc-app-grid"), parts);
     }
 
     /// Icons the worker loaded: an open grid shows them.
