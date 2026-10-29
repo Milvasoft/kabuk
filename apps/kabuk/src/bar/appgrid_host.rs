@@ -403,12 +403,7 @@ impl Shared {
     }
 
     fn app_grid_file(&self) -> Option<std::path::PathBuf> {
-        Some(
-            super::wm::lock(&self.state)
-                .path()
-                .parent()?
-                .join(kabuk_core::app_grid::FILE),
-        )
+        Some(self.state.path().parent()?.join(kabuk_core::app_grid::FILE))
     }
 
     fn save_app_grid_arrangement(&self, a: &Arrangement) {

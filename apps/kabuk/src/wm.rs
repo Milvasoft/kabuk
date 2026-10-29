@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 use kabuk_core::config::{self, Config, LiveConfig, Reload};
 use kabuk_core::grab::Order;
 use kabuk_core::rules;
-use kabuk_core::state::{self, HiddenWindow, StateFile};
+use kabuk_core::state::{self, HiddenWindow, SharedStateFile, StateFile};
 use kabuk_core::wm::{self as policy, Action, Direction, Verdict};
 use kabuk_layout::{
     Desk, Effect, Gaps, Kind, MonitorInfo, NewWindow, Rect, Settings, Toward, WorkspaceInfo, MASTER_RATIO,
@@ -31,11 +31,12 @@ use kabuk_win::wmevents::{WindowEvent, WindowEvents};
 use crate::grab::{InputThread, SharedSnapshot, Snapshot};
 
 /// The state file, shared by the bar (work areas) and the window manager (windows).
-pub type SharedState = Arc<Mutex<StateFile>>;
+pub type SharedState = Arc<SharedStateFile>;
 
-/// Locks the state file; a panic elsewhere must not stop the safety net.
+/// Locks the state file to read it; a panic elsewhere must not stop the safety net.
+/// Changes go through [`SharedStateFile::update`], which writes after letting it go.
 pub fn lock(state: &SharedState) -> MutexGuard<'_, StateFile> {
-    state.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    state.lock()
 }
 
 /// Class of the window manager's hidden window; its title is the instance id, so tests
@@ -833,7 +834,7 @@ impl Wm {
         self.hotkeys.clear();
         if let Some(id) = self.bordered.take() {
             Hwnd(id).set_border_color(None);
-            let result = lock(&self.state).remove_bordered(id);
+            let result = self.state.update(|s| s.remove_bordered(id));
             if let Err(e) = result {
                 tracing::error!(error = %e, "border record not cleared");
             }
@@ -1191,7 +1192,7 @@ impl Wm {
             h.restore_async();
         }
         h.show_async();
-        let result = lock(&self.state).remove_hidden(id);
+        let result = self.state.update(|s| s.remove_hidden(&[id]));
         if let Err(e) = result {
             tracing::error!(error = %e, "hidden record not cleared");
         }
@@ -1677,7 +1678,7 @@ impl Wm {
         if self.genie.remove(&hwnd.0) {
             // Still there (now left alone): Windows' own transitions back.
             hwnd.set_transitions(true);
-            let result = lock(&self.state).remove_genie(hwnd.0);
+            let result = self.state.update(|s| s.remove_genie(hwnd.0));
             if let Err(e) = result {
                 tracing::error!(error = %e, "genie record not cleared");
             }
@@ -1685,7 +1686,7 @@ impl Wm {
         if self.styled.remove(&hwnd.0) {
             // Still there (now left alone): Windows' own frame back.
             hwnd.set_frame_style(None);
-            let result = lock(&self.state).remove_styled(hwnd.0);
+            let result = self.state.update(|s| s.remove_styled(hwnd.0));
             if let Err(e) = result {
                 tracing::error!(error = %e, "frame record not cleared");
             }
@@ -1697,13 +1698,13 @@ impl Wm {
         let effects = self.desk.remove(hwnd.0);
         if self.bordered == Some(hwnd.0) {
             self.bordered = None;
-            let result = lock(&self.state).remove_bordered(hwnd.0);
+            let result = self.state.update(|s| s.remove_bordered(hwnd.0));
             if let Err(e) = result {
                 tracing::error!(error = %e, "border record not cleared");
             }
         }
         // It may have been hidden by Kabuk; it is gone or left on its own now.
-        let result = lock(&self.state).remove_hidden(hwnd.0);
+        let result = self.state.update(|s| s.remove_hidden(&[hwnd.0]));
         if let Err(e) = result {
             tracing::error!(error = %e, "hidden record not cleared");
         }
@@ -1774,7 +1775,7 @@ impl Wm {
             WindowEvent::Destroyed(h) => {
                 if self.dropdown == Some(h.0) {
                     self.dropdown = None;
-                    let result = lock(&self.state).remove_hidden(h.0);
+                    let result = self.state.update(|s| s.remove_hidden(&[h.0]));
                     if let Err(e) = result {
                         tracing::error!(error = %e, "hidden record not cleared");
                     }
@@ -1869,7 +1870,7 @@ impl Wm {
             }
         }
         if !shown.is_empty() {
-            let result = lock(&self.state).remove_hidden_all(&shown);
+            let result = self.state.update(|s| s.remove_hidden(&shown));
             if let Err(e) = result {
                 tracing::error!(error = %e, "hidden record not cleared");
             }
@@ -1904,7 +1905,7 @@ impl Wm {
                 class: h.class_name(),
                 title: h.title(),
             };
-            let result = lock(&self.state).add_genie(record);
+            let result = self.state.update(|s| s.add_genie(record));
             if let Err(e) = result {
                 tracing::error!(error = %e, "genie not recorded; Windows' transitions kept");
                 return;
@@ -1916,7 +1917,7 @@ impl Wm {
         } else if self.genie.remove(&id) {
             let back = h.set_transitions(true);
             tracing::debug!(hwnd = id, back, "Windows' transitions back");
-            let result = lock(&self.state).remove_genie(id);
+            let result = self.state.update(|s| s.remove_genie(id));
             if let Err(e) = result {
                 tracing::error!(error = %e, "genie record not cleared");
             }
@@ -2196,7 +2197,7 @@ impl Wm {
         if records.is_empty() {
             return;
         }
-        let result = lock(&self.state).add_hidden_all(records.clone());
+        let result = self.state.update(|s| s.add_hidden(records.iter().cloned()));
         match result {
             Ok(()) => {
                 for r in &records {
@@ -2267,7 +2268,7 @@ impl Wm {
                     class: h.class_name(),
                     title: h.title(),
                 };
-                let result = lock(&self.state).add_styled(record);
+                let result = self.state.update(|s| s.add_styled(record));
                 if let Err(e) = result {
                     tracing::error!(error = %e, "frame not recorded; left as it is");
                     return;
@@ -2280,7 +2281,7 @@ impl Wm {
             None if self.styled.remove(&id) => {
                 let reset = h.set_frame_style(None);
                 tracing::debug!(hwnd = id, reset, "frame back to Windows'");
-                let result = lock(&self.state).remove_styled(id);
+                let result = self.state.update(|s| s.remove_styled(id));
                 if let Err(e) = result {
                     tracing::error!(error = %e, "frame record not cleared");
                 }
@@ -2295,25 +2296,40 @@ impl Wm {
         if want == self.bordered {
             return;
         }
-        if let Some(old) = self.bordered.take() {
+        let old = self.bordered.take();
+        if let Some(old) = old {
             Hwnd(old).set_border_color(None);
-            let result = lock(&self.state).remove_bordered(old);
+        }
+        let (new, record) = want
+            .zip(self.accent)
+            .and_then(|(id, rgb)| {
+                let h = Hwnd(id);
+                let record = HiddenWindow {
+                    hwnd: id,
+                    pid: h.pid()?,
+                    class: h.class_name(),
+                    title: h.title(),
+                };
+                Some(((id, rgb), record))
+            })
+            .unzip();
+        // One write: the old window's record goes (its frame went back above) and the
+        // new one's comes, before its frame is coloured.
+        let result = self.state.update(|s| {
+            if let Some(old) = old {
+                s.remove_bordered(old);
+            }
+            if let Some(record) = record {
+                s.add_bordered(record);
+            }
+        });
+        let Some((id, rgb)) = new else {
             if let Err(e) = result {
                 tracing::error!(error = %e, "border record not cleared");
             }
-        }
-        let (Some(id), Some(rgb)) = (want, self.accent) else {
             return;
         };
         let h = Hwnd(id);
-        let Some(pid) = h.pid() else { return };
-        let record = HiddenWindow {
-            hwnd: id,
-            pid,
-            class: h.class_name(),
-            title: h.title(),
-        };
-        let result = lock(&self.state).add_bordered(record);
         match result {
             Ok(()) => {
                 if h.set_border_color(Some(rgb)) {
@@ -2322,7 +2338,7 @@ impl Wm {
                     // Refused (an elevated window): the record goes again. Under the lock
                     // taken above, this froze the window manager and the bar (found by
                     // the user, showing Hyper-V Manager from the bar).
-                    let result = lock(&self.state).remove_bordered(id);
+                    let result = self.state.update(|s| s.remove_bordered(id));
                     if let Err(e) = result {
                         tracing::error!(error = %e, "border record not cleared");
                     }

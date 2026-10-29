@@ -42,7 +42,7 @@ impl Shared {
             Some((light, accent)) => {
                 // A restore still running must not forget the record this one keeps.
                 self.colors_turn.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let recorded = wm::lock(&self.state).update(|s| {
+                let recorded = self.state.update(|s| {
                     if s.system_colors.is_none() {
                         s.system_colors = Some(kabuk_win::system_colors::current());
                     }
@@ -77,7 +77,7 @@ impl Shared {
                                 tracing::info!("Windows' own colours are back");
                                 // Turned on again meanwhile: that keeps the record.
                                 if turn.load(std::sync::atomic::Ordering::SeqCst) == mine {
-                                    let _ = wm::lock(&state).update(|s| s.system_colors = None);
+                                    let _ = state.update(|s| s.system_colors = None);
                                 }
                             }
                             Err(e) => tracing::error!(error = %e, "Windows' colours not restored"),

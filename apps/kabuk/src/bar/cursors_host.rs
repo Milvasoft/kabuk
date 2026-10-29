@@ -87,7 +87,7 @@ impl Shared {
 
     /// The folder of the set drawn in `style` (with every size in [`SIZES`]).
     fn cursor_dir(&self, style: &CursorStyle) -> Option<PathBuf> {
-        let state_dir = wm::lock(&self.state).path().parent()?.to_path_buf();
+        let state_dir = self.state.path().parent()?.to_path_buf();
         Some(state_dir.join(FOLDER).join(set_name(style)))
     }
 
@@ -121,7 +121,7 @@ impl Shared {
                 };
                 // The user's own cursors are on disk before they change (CONTRIBUTING.md rule 5).
                 let names: Vec<&str> = Role::ALL.iter().map(|r| r.registry_name()).collect();
-                let recorded = wm::lock(&self.state).update(|s| {
+                let recorded = self.state.update(|s| {
                     let backup = s.cursors.get_or_insert_with(|| {
                         let (values, scheme_source) = kabuk_win::cursors::current(&names);
                         CursorBackup {
@@ -152,7 +152,7 @@ impl Shared {
                     match kabuk_win::cursors::restore(&b.values, b.scheme_source, b.base_size_to_restore()) {
                         Ok(()) => {
                             tracing::info!("the user's cursors are back");
-                            let _ = wm::lock(&self.state).update(|s| s.cursors = None);
+                            let _ = self.state.update(|s| s.cursors = None);
                         }
                         Err(e) => tracing::error!(error = %e, "cursors not restored"),
                     }

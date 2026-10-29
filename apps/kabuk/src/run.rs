@@ -1,7 +1,7 @@
 //! Running the shell: single instance, state file, emergency hotkey and restore on
 //! exit (M0), the bars (M1) and the window manager (M3) on top of this loop.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 #[cfg(feature = "integration")]
 use std::time::Duration;
 use std::time::Instant;
@@ -10,7 +10,7 @@ use kabuk_core::cli::Run;
 use kabuk_core::config::{self, shortcut::EMERGENCY_CHORD, Config, LoadError};
 use kabuk_core::instance::{exit, Instance};
 use kabuk_core::paths::Paths;
-use kabuk_core::state::{HiddenWindow, StateError, StateFile};
+use kabuk_core::state::{HiddenWindow, SharedStateFile, StateError, StateFile};
 use kabuk_i18n::I18n;
 use kabuk_win::handle::Waitable;
 use kabuk_win::msgloop::{self, HotKey, MessageWindow, Wake, MSG_HOTKEY};
@@ -106,8 +106,8 @@ pub fn main(options: Run) -> i32 {
             tracing::warn!(?report, "restored leftovers of a previous run");
         }
     }
-    let state: SharedState = Arc::new(Mutex::new(StateFile::fresh(&paths.state_file())));
-    let result = wm::lock(&state).update(|s| s.kabuk_pid = Some(std::process::id()));
+    let state: SharedState = Arc::new(SharedStateFile::new(StateFile::fresh(&paths.state_file())));
+    let result = state.update(|s| s.kabuk_pid = Some(std::process::id()));
     if let Err(e) = result {
         startup_failed(&i18n, &e);
         return exit::STARTUP_FAILED;

@@ -280,7 +280,7 @@ impl Shared {
     }
 
     fn ran_file(&self) -> Option<std::path::PathBuf> {
-        Some(wm::lock(&self.state).path().parent()?.join(RAN_FILE))
+        Some(self.state.path().parent()?.join(RAN_FILE))
     }
 
     /// Remembers `target` as run now, in the state folder too.
@@ -602,11 +602,7 @@ impl Shared {
     /// and state, and lets it come to the front (it shows its open window if it runs).
     pub(super) fn open_settings(&self) -> std::io::Result<()> {
         let exe = std::env::current_exe()?.with_file_name(SETTINGS_EXE);
-        let state_dir = self
-            .state
-            .lock()
-            .ok()
-            .and_then(|s| s.path().parent().map(std::path::Path::to_path_buf));
+        let state_dir = self.state.path().parent().map(std::path::Path::to_path_buf);
         let mut cmd = std::process::Command::new(&exe);
         cmd.arg("--config").arg(&self.config_file);
         if let Some(dir) = state_dir {

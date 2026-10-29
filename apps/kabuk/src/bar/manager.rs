@@ -2387,7 +2387,7 @@ impl Shared {
             monitor: monitor.rect,
             work_area: monitor.work_area,
         };
-        let recorded = wm::lock(&self.state).update(|s| {
+        let recorded = self.state.update(|s| {
             if !s.work_areas.iter().any(|w| w.monitor == backup.monitor) {
                 s.work_areas.push(backup);
             }
@@ -2506,7 +2506,7 @@ impl Shared {
     /// Leaves (the emergency stop of this instance: its desktop comes back and its
     /// watchdog goes too) when the desk names another shell ([`kabuk_core::instance::lost_desk`]).
     fn leave_if_desk_taken(&self) {
-        let Some(own) = wm::lock(&self.state).path().parent().map(std::path::Path::to_path_buf) else {
+        let Some(own) = self.state.path().parent().map(std::path::Path::to_path_buf) else {
             return;
         };
         let owner = kabuk_win::desk_owner::current();
@@ -2577,7 +2577,7 @@ impl Shared {
     /// Hides the Windows taskbar, recording it first (CONTRIBUTING.md rules 3 and 5): auto-hide
     /// is turned on so the hidden taskbar gives its space back, and both go back on exit.
     fn hide_taskbar(&mut self) {
-        let recorded = wm::lock(&self.state).update(|s| {
+        let recorded = self.state.update(|s| {
             if s.taskbar.is_none() {
                 s.taskbar = Some(TaskbarBackup {
                     autohide: kabuk_win::shell::taskbar_autohide(),

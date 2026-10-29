@@ -88,7 +88,7 @@ impl Shared {
     /// Where Kabuk's wallpaper pictures are written ([`kabuk_core::wallpaper::pictures_folder`]),
     /// made when missing.
     fn pictures_folder(&self) -> Option<PathBuf> {
-        let state = wm::lock(&self.state).path().parent()?.to_path_buf();
+        let state = self.state.path().parent()?.to_path_buf();
         // In the Store's package its own temporary folder, as it is on disk: the one under
         // AppData would be the package's alone, out of Explorer's sight (D89).
         let temp = kabuk_win::package::temp_folder().unwrap_or_else(std::env::temp_dir);
@@ -296,7 +296,7 @@ impl Shared {
             }
         }
         // Pictures an older Kabuk wrote into the state folder are not used any more.
-        let state = wm::lock(&self.state).path().parent().map(std::path::Path::to_path_buf);
+        let state = self.state.path().parent().map(std::path::Path::to_path_buf);
         if let Some(state) = state.filter(|s| *s != folder) {
             for e in std::fs::read_dir(&state).into_iter().flatten().flatten() {
                 if kabuk_core::wallpaper::is_kabuks(&e.path().to_string_lossy()) {
@@ -349,7 +349,7 @@ impl Shared {
         else {
             return;
         };
-        let state_dir = wm::lock(&self.state).path().parent().map(std::path::Path::to_path_buf);
+        let state_dir = self.state.path().parent().map(std::path::Path::to_path_buf);
         let mut cmd = std::process::Command::new(&exe);
         cmd.arg("--wallpaper")
             .arg("--config")
@@ -406,7 +406,7 @@ impl Shared {
                     tracing::error!("wallpaper not readable; left as it is");
                     return;
                 };
-                let result = wm::lock(&self.state).update(|st| st.wallpaper = Some(b.clone()));
+                let result = self.state.update(|st| st.wallpaper = Some(b.clone()));
                 if let Err(e) = result {
                     tracing::error!(error = %e, "wallpaper not recorded; left as it is");
                     return;
@@ -429,7 +429,7 @@ impl Shared {
             }
         }
         if !ours {
-            let result = wm::lock(&self.state).update(|st| st.wallpaper = None);
+            let result = self.state.update(|st| st.wallpaper = None);
             if let Err(e) = result {
                 tracing::error!(error = %e, "wallpaper record not cleared");
             }

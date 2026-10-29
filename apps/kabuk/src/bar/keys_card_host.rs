@@ -73,11 +73,7 @@ impl Shared {
         if !self.shortcuts {
             return;
         }
-        let Some(file) = super::wm::lock(&self.state)
-            .path()
-            .parent()
-            .map(|d| d.join(GREETED_FILE))
-        else {
+        let Some(file) = self.state.path().parent().map(|d| d.join(GREETED_FILE)) else {
             return;
         };
         if file.exists() {

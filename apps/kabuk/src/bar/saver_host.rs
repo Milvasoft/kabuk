@@ -18,7 +18,6 @@ use kabuk_core::oled::{idle_step, IdleStep};
 use kabuk_core::state::SaverBackup;
 
 use super::{timer, Shared};
-use crate::wm;
 
 /// The saver's shortcuts' ids on the control window (the launcher's are 100…, the
 /// overview's 200…).
@@ -56,7 +55,7 @@ pub(super) struct SaverState {
 impl Shared {
     /// Where the saver is installed.
     pub(super) fn saver_path(&self) -> Option<PathBuf> {
-        Some(wm::lock(&self.state).path().parent()?.join(SAVER_FILE))
+        Some(self.state.path().parent()?.join(SAVER_FILE))
     }
 
     /// Copies the saver into the state folder when it is not there or is older.
@@ -89,7 +88,7 @@ impl Shared {
         if self.saver.applied == Some((s.kind, s.wait_minutes)) {
             return;
         }
-        let recorded = wm::lock(&self.state).update(|st| {
+        let recorded = self.state.update(|st| {
             if st.saver.is_none() {
                 let (values, theme) = kabuk_win::screensaver::current();
                 st.saver = Some(SaverBackup { values, theme });

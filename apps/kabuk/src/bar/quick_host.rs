@@ -432,7 +432,7 @@ impl Shared {
     }
 
     fn quick_file(&self) -> Option<std::path::PathBuf> {
-        Some(super::wm::lock(&self.state).path().parent()?.join(QUICK_FILE))
+        Some(self.state.path().parent()?.join(QUICK_FILE))
     }
 
     /// Whether the monitors' brightness is kept together, as last chosen (off at first).

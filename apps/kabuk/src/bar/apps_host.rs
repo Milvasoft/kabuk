@@ -200,7 +200,7 @@ pub(super) fn read_pins(folder: &Path) -> Vec<Pin> {
 impl Shared {
     /// Kabuk's own pins (D45), in the state folder.
     fn pins_file(&self) -> Option<PathBuf> {
-        Some(wm::lock(&self.state).path().parent()?.join(PINS_FILE))
+        Some(self.state.path().parent()?.join(PINS_FILE))
     }
 
     /// Reads the pins off the bar thread (each shortcut is opened through the shell: over

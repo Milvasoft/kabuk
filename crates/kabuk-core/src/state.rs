@@ -5,6 +5,8 @@
 //! only their changes wait for the disk.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use serde::{Deserialize, Serialize};
 
@@ -203,6 +205,48 @@ impl State {
         self.clear_changes_except(Unrestored::default());
     }
 
+    /// Records windows about to be hidden (a window recorded already moves to the end).
+    pub fn add_hidden(&mut self, windows: impl IntoIterator<Item = HiddenWindow>) {
+        for window in windows {
+            self.hidden_windows.retain(|w| w.hwnd != window.hwnd);
+            self.hidden_windows.push(window);
+        }
+    }
+
+    /// Forgets windows shown again.
+    pub fn remove_hidden(&mut self, hwnds: &[u64]) {
+        self.hidden_windows.retain(|w| !hwnds.contains(&w.hwnd));
+    }
+
+    /// Records a window about to get a coloured border; once per window.
+    pub fn add_bordered(&mut self, window: HiddenWindow) {
+        add_once(&mut self.bordered_windows, window);
+    }
+
+    /// Forgets a window whose border went back to the default.
+    pub fn remove_bordered(&mut self, hwnd: u64) {
+        self.bordered_windows.retain(|w| w.hwnd != hwnd);
+    }
+
+    /// Records a window before its frame is styled (DECISIONS D30); once per window.
+    pub fn add_styled(&mut self, window: HiddenWindow) {
+        add_once(&mut self.styled_windows, window);
+    }
+
+    pub fn remove_styled(&mut self, hwnd: u64) {
+        self.styled_windows.retain(|w| w.hwnd != hwnd);
+    }
+
+    /// Records a window before its own transitions are turned off (the genie); once per
+    /// window.
+    pub fn add_genie(&mut self, window: HiddenWindow) {
+        add_once(&mut self.genie_windows, window);
+    }
+
+    pub fn remove_genie(&mut self, hwnd: u64) {
+        self.genie_windows.retain(|w| w.hwnd != hwnd);
+    }
+
     /// Forgets the changes that were undone. The user's settings that could not be given
     /// back stay recorded, so the next restore gives them back (and Kabuk's next start
     /// keeps them as the user's instead of recording its own in their place).
@@ -228,6 +272,13 @@ impl State {
     }
 }
 
+/// Adds `window` to `windows` unless its HWND is there already.
+fn add_once(windows: &mut Vec<HiddenWindow>, window: HiddenWindow) {
+    if !windows.iter().any(|w| w.hwnd == window.hwnd) {
+        windows.push(window);
+    }
+}
+
 /// Which of the user's recorded settings an undo could not give back (Windows refuses
 /// some while the machine saves power or is locked).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -250,14 +301,49 @@ pub enum StateError {
     Corrupt { path: PathBuf, detail: String },
 }
 
-/// The state file on disk. Every mutation is saved before it returns.
+/// The state file on disk. Every mutation is saved before it returns; one that leaves the
+/// records as they were writes nothing.
 #[derive(Debug)]
 pub struct StateFile {
     path: PathBuf,
     state: State,
+    /// `state` serialised as last staged: a change that leaves it the same writes nothing.
+    json: Vec<u8>,
+    /// The number of the last change staged ([`StateFile::stage`]); the file holds it
+    /// once `disk` says so. It starts unwritten: what the file holds is not known.
+    seq: u64,
     /// The lasting records as their copy ([`LASTING_FILE_NAME`]) holds them, flushed:
-    /// read when the file is opened, then as last written.
+    /// read when the file is opened, then as last staged.
     lasting_saved: Option<State>,
+    /// The change that last changed the lasting records (0: their copy as it was read).
+    lasting_seq: u64,
+    disk: Arc<Disk>,
+}
+
+/// What a [`StateFile`]'s two files hold, shared with the writes it staged, which may
+/// end in another order than they were staged in (a [`SharedStateFile`]'s).
+#[derive(Debug, Default)]
+struct Disk {
+    /// Held while writing, so writes do not overlap.
+    writing: Mutex<()>,
+    /// The newest change the state file holds.
+    state: AtomicU64,
+    /// The newest change of the lasting records their copy holds.
+    lasting: AtomicU64,
+}
+
+/// A change made in memory and serialised, to be written ([`Pending::write`]).
+#[derive(Debug)]
+struct Pending {
+    seq: u64,
+    path: PathBuf,
+    json: Vec<u8>,
+    /// The lasting records' copy and their change, while the copy may not hold them.
+    lasting: Option<(u64, Vec<u8>)>,
+    /// The records before this change, to go back to when the write fails; `None` when
+    /// it changed nothing and only waits for an earlier change to be written.
+    before: Option<Vec<u8>>,
+    disk: Arc<Disk>,
 }
 
 impl StateFile {
@@ -278,20 +364,24 @@ impl StateFile {
     }
 
     pub fn open(path: &Path) -> Result<StateFile, StateError> {
-        Ok(StateFile {
-            path: path.to_path_buf(),
-            state: StateFile::read(path)?,
-            lasting_saved: StateFile::read_lasting(path).ok().flatten(),
-        })
+        Ok(StateFile::with(path, StateFile::read(path)?))
     }
 
     /// Starts from an empty state, ignoring what the file holds (used after a corrupt
     /// file was reported and the desktop restored as far as possible).
     pub fn fresh(path: &Path) -> StateFile {
+        StateFile::with(path, State::default())
+    }
+
+    fn with(path: &Path, state: State) -> StateFile {
         StateFile {
             path: path.to_path_buf(),
-            state: State::default(),
+            json: to_json(&state),
+            state,
+            seq: 1,
             lasting_saved: StateFile::read_lasting(path).ok().flatten(),
+            lasting_seq: 0,
+            disk: Arc::default(),
         }
     }
 
@@ -306,13 +396,14 @@ impl StateFile {
     /// Applies `change` and saves. If saving fails the in-memory state is rolled back,
     /// so the caller must not go on to make the Windows change.
     pub fn update(&mut self, change: impl FnOnce(&mut State)) -> Result<(), StateError> {
-        let before = self.state.clone();
-        change(&mut self.state);
-        if let Err(e) = self.save() {
-            self.state = before;
-            return Err(e);
+        let Some(pending) = self.stage(change) else {
+            return Ok(());
+        };
+        let written = pending.write();
+        if written.is_err() {
+            self.failed(pending);
         }
-        Ok(())
+        written
     }
 
     /// Records a window about to be hidden. Call before hiding it.
@@ -324,15 +415,7 @@ impl StateFile {
     /// one write each made it slow on a slow disk, found in the test VM). Call before
     /// hiding them.
     pub fn add_hidden_all(&mut self, windows: Vec<HiddenWindow>) -> Result<(), StateError> {
-        if windows.is_empty() {
-            return Ok(());
-        }
-        self.update(|s| {
-            for window in windows {
-                s.hidden_windows.retain(|w| w.hwnd != window.hwnd);
-                s.hidden_windows.push(window);
-            }
-        })
+        self.update(|s| s.add_hidden(windows))
     }
 
     /// Forgets a window after it was shown again.
@@ -343,85 +426,177 @@ impl StateFile {
     /// Forgets windows after they were shown again, with one write (none when none of
     /// them was recorded).
     pub fn remove_hidden_all(&mut self, hwnds: &[u64]) -> Result<(), StateError> {
-        if !self.state.hidden_windows.iter().any(|w| hwnds.contains(&w.hwnd)) {
-            return Ok(());
-        }
-        self.update(|s| s.hidden_windows.retain(|w| !hwnds.contains(&w.hwnd)))
+        self.update(|s| s.remove_hidden(hwnds))
     }
 
     /// Records a window about to get a coloured border. Call before colouring it.
     pub fn add_bordered(&mut self, window: HiddenWindow) -> Result<(), StateError> {
-        if self.state.bordered_windows.iter().any(|w| w.hwnd == window.hwnd) {
-            return Ok(());
-        }
-        self.update(|s| s.bordered_windows.push(window))
+        self.update(|s| s.add_bordered(window))
     }
 
     /// Forgets a window after its border went back to the default.
+    pub fn remove_bordered(&mut self, hwnd: u64) -> Result<(), StateError> {
+        self.update(|s| s.remove_bordered(hwnd))
+    }
+
     /// Records a window before its frame is styled (DECISIONS D30); once per window.
     pub fn add_styled(&mut self, window: HiddenWindow) -> Result<(), StateError> {
-        if self.state.styled_windows.iter().any(|w| w.hwnd == window.hwnd) {
-            return Ok(());
-        }
-        self.update(|s| s.styled_windows.push(window))
+        self.update(|s| s.add_styled(window))
     }
 
     pub fn remove_styled(&mut self, hwnd: u64) -> Result<(), StateError> {
-        if !self.state.styled_windows.iter().any(|w| w.hwnd == hwnd) {
-            return Ok(());
-        }
-        self.update(|s| s.styled_windows.retain(|w| w.hwnd != hwnd))
+        self.update(|s| s.remove_styled(hwnd))
     }
 
     /// Records a window before its own transitions are turned off (the genie); once per
     /// window.
     pub fn add_genie(&mut self, window: HiddenWindow) -> Result<(), StateError> {
-        if self.state.genie_windows.iter().any(|w| w.hwnd == window.hwnd) {
-            return Ok(());
-        }
-        self.update(|s| s.genie_windows.push(window))
+        self.update(|s| s.add_genie(window))
     }
 
     pub fn remove_genie(&mut self, hwnd: u64) -> Result<(), StateError> {
-        if !self.state.genie_windows.iter().any(|w| w.hwnd == hwnd) {
-            return Ok(());
-        }
-        self.update(|s| s.genie_windows.retain(|w| w.hwnd != hwnd))
+        self.update(|s| s.remove_genie(hwnd))
     }
 
-    pub fn remove_bordered(&mut self, hwnd: u64) -> Result<(), StateError> {
-        if !self.state.bordered_windows.iter().any(|w| w.hwnd == hwnd) {
-            return Ok(());
+    /// Applies `change` in memory and serialises the records for [`Pending::write`];
+    /// `None` when there is nothing to write: the records stayed the same and the files
+    /// hold them already. A change that left them the same still waits for an earlier
+    /// one not written yet, so whatever the caller saw recorded is on disk once it is.
+    fn stage(&mut self, change: impl FnOnce(&mut State)) -> Option<Pending> {
+        change(&mut self.state);
+        let json = to_json(&self.state);
+        let before = if json == self.json {
+            None
+        } else {
+            self.seq += 1;
+            let lasting = self.state.lasting();
+            if self.lasting_saved.as_ref() != Some(&lasting) {
+                self.lasting_saved = Some(lasting);
+                self.lasting_seq = self.seq;
+            }
+            Some(std::mem::replace(&mut self.json, json))
+        };
+        let state_written = self.disk.state.load(Ordering::Acquire) >= self.seq;
+        let lasting_written = self.disk.lasting.load(Ordering::Acquire) >= self.lasting_seq;
+        if before.is_none() && state_written && lasting_written {
+            return None;
         }
-        self.update(|s| s.bordered_windows.retain(|w| w.hwnd != hwnd))
+        let lasting = (!lasting_written)
+            .then(|| self.lasting_saved.as_ref().map(|l| (self.lasting_seq, to_json(l))))
+            .flatten();
+        Some(Pending {
+            seq: self.seq,
+            path: self.path.clone(),
+            json: self.json.clone(),
+            lasting,
+            before,
+            disk: Arc::clone(&self.disk),
+        })
     }
 
-    /// Writes the file. Only a change of the lasting records waits for the disk, and
-    /// writes their copy too; the window records are written without (found in the test
-    /// VM, where each flush took 20 to 90 ms: a workspace switch, recording the windows
-    /// it hid and the frame it moved, took over 100 ms). Every program reads them at
-    /// once and they stay after Kabuk ends in any way; only Windows stopping can lose
-    /// them, and with them the windows they are about.
-    fn save(&mut self) -> Result<(), StateError> {
+    /// Writing `pending` failed: its change is undone in memory, unless a later change
+    /// was staged since (which holds it, and is written with it). Going back is a change
+    /// of its own, written by the next one, whatever part of the files the failed write
+    /// replaced.
+    fn failed(&mut self, pending: Pending) {
+        let Some(before) = pending.before else { return };
+        if pending.seq != self.seq {
+            return;
+        }
+        // Serialised from a `State` above, so it reads back.
+        if let Ok(state) = serde_json::from_slice(&before) {
+            self.state = state;
+            self.json = before;
+            self.seq += 1;
+            self.lasting_saved = Some(self.state.lasting());
+            self.lasting_seq = self.seq;
+        }
+    }
+}
+
+impl Pending {
+    /// Writes the file, unless a later change was written already. Only a change of the
+    /// lasting records waits for the disk, and writes their copy too; the window records
+    /// are written without (found in the test VM, where each flush took 20 to 90 ms: a
+    /// workspace switch, recording the windows it hid and the frame it moved, took over
+    /// 100 ms). Every program reads them at once and they stay after Kabuk ends in any
+    /// way; only Windows stopping can lose them, and with them the windows they are about.
+    fn write(&self) -> Result<(), StateError> {
         let io = |path: &Path| {
             let path = path.to_path_buf();
             move |source| StateError::Io { path, source }
         };
-        // Serializing this plain data cannot fail.
-        let json = serde_json::to_vec_pretty(&self.state).unwrap_or_default();
-        let lasting = self.state.lasting();
-        if self.lasting_saved.as_ref() == Some(&lasting) {
-            return crate::fsutil::write_atomic_cached(&self.path, &json).map_err(io(&self.path));
+        let _writing = self.disk.writing.lock().unwrap_or_else(PoisonError::into_inner);
+        let lasting = self
+            .lasting
+            .as_ref()
+            .filter(|(seq, _)| *seq > self.disk.lasting.load(Ordering::Acquire));
+        if self.seq > self.disk.state.load(Ordering::Acquire) {
+            // The state file first: those reading it (the shell's pid) wait no longer
+            // than before the copy was kept.
+            if lasting.is_some() {
+                crate::fsutil::write_atomic(&self.path, &self.json).map_err(io(&self.path))?;
+            } else {
+                crate::fsutil::write_atomic_cached(&self.path, &self.json).map_err(io(&self.path))?;
+            }
+            self.disk.state.store(self.seq, Ordering::Release);
         }
-        // The state file first: those reading it (the shell's pid) wait no longer than
-        // before the copy was kept.
-        crate::fsutil::write_atomic(&self.path, &json).map_err(io(&self.path))?;
-        let copy = lasting_path(&self.path);
-        let lasting_json = serde_json::to_vec_pretty(&lasting).unwrap_or_default();
-        crate::fsutil::write_atomic(&copy, &lasting_json).map_err(io(&copy))?;
-        self.lasting_saved = Some(lasting);
+        if let Some((seq, json)) = lasting {
+            let copy = lasting_path(&self.path);
+            crate::fsutil::write_atomic(&copy, json).map_err(io(&copy))?;
+            self.disk.lasting.store(*seq, Ordering::Release);
+        }
         Ok(())
     }
+}
+
+/// A [`StateFile`] shared by threads (the bar's and the window manager's). A change is
+/// made and serialised under its lock but written after it, so a thread that only reads
+/// the records, or records something else, does not wait for another's disk write; the
+/// change is still on disk when [`SharedStateFile::update`] returns (CONTRIBUTING.md
+/// safety rule 3).
+#[derive(Debug)]
+pub struct SharedStateFile {
+    path: PathBuf,
+    file: Mutex<StateFile>,
+}
+
+impl SharedStateFile {
+    pub fn new(file: StateFile) -> SharedStateFile {
+        SharedStateFile {
+            path: file.path.clone(),
+            file: Mutex::new(file),
+        }
+    }
+
+    /// The state file's path, without waiting for the lock.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Locks the file; a panic elsewhere must not stop the safety net. A change made
+    /// through the guard is written under the lock: [`SharedStateFile::update`] is not.
+    pub fn lock(&self) -> MutexGuard<'_, StateFile> {
+        self.file.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// [`StateFile::update`], written after the lock is let go.
+    pub fn update(&self, change: impl FnOnce(&mut State)) -> Result<(), StateError> {
+        let pending = self.lock().stage(change);
+        let Some(pending) = pending else {
+            return Ok(());
+        };
+        let written = pending.write();
+        if written.is_err() {
+            self.lock().failed(pending);
+        }
+        written
+    }
+}
+
+/// The records as the state file holds them. Serialising this plain data cannot fail.
+fn to_json(state: &State) -> Vec<u8> {
+    serde_json::to_vec_pretty(state).unwrap_or_default()
 }
 
 /// The copy of the lasting records next to the state file at `path`.
@@ -453,7 +628,8 @@ mod tests {
     //! save-before-change ordering, duplicate HWND, removing an unknown HWND,
     //! rollback when the save fails, clearing changes, has_changes for each kind, window
     //! records leaving the lasting copy alone, a zero-filled file read from the copy, a
-    //! corrupt or missing copy.
+    //! corrupt or missing copy, nothing written when nothing changed, threads recording at
+    //! once, the lock free during a write, writes ending out of order.
     use super::*;
 
     fn window(hwnd: u64) -> HiddenWindow {
@@ -737,6 +913,133 @@ mod tests {
         let mut f = StateFile::fresh(&p);
         assert!(f.add_hidden(window(1)).is_err());
         assert!(f.state().hidden_windows.is_empty());
+        let shared = SharedStateFile::new(f);
+        assert!(shared.update(|s| s.add_hidden([window(2)])).is_err());
+        assert!(shared.lock().state().hidden_windows.is_empty());
+        // Once the disk takes it, the records as they went back are written, though the
+        // next call changes nothing.
+        std::fs::remove_dir(&p).unwrap();
+        shared.update(|_| {}).unwrap();
+        assert_eq!(StateFile::read(&p).unwrap(), State::default());
+    }
+
+    fn hidden_on_disk(p: &Path) -> Vec<u64> {
+        StateFile::read(p)
+            .unwrap()
+            .hidden_windows
+            .iter()
+            .map(|w| w.hwnd)
+            .collect()
+    }
+
+    /// M19: a call that leaves the records as they were writes nothing (the window
+    /// manager wrote at each focus change, the bar each time it found its work area
+    /// backup already there).
+    #[test]
+    fn an_unchanged_state_is_not_written_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("state.json");
+        let mut f = StateFile::open(&p).unwrap();
+        f.update(|s| s.kabuk_pid = Some(1)).unwrap();
+        f.add_bordered(window(4)).unwrap();
+        std::fs::remove_file(&p).unwrap();
+        f.update(|s| s.kabuk_pid = Some(1)).unwrap();
+        f.add_bordered(window(4)).unwrap();
+        f.remove_styled(9).unwrap();
+        f.update(|_| {}).unwrap();
+        assert!(!p.exists(), "written although nothing changed");
+        f.update(|s| s.kabuk_pid = Some(2)).unwrap();
+        assert_eq!(StateFile::read(&p).unwrap().kabuk_pid, Some(2));
+        let shared = SharedStateFile::new(f);
+        std::fs::remove_file(&p).unwrap();
+        shared.update(|s| s.kabuk_pid = Some(2)).unwrap();
+        assert!(!p.exists(), "written although nothing changed");
+        shared.update(|s| s.add_hidden([window(5)])).unwrap();
+        assert_eq!(hidden_on_disk(&p), vec![5]);
+    }
+
+    /// Threads recording at once each find their record on disk when their call
+    /// returns, whichever write ends last (CONTRIBUTING.md safety rule 3).
+    #[test]
+    fn a_shared_change_is_on_disk_when_its_call_returns() {
+        const THREADS: u64 = 8;
+        const EACH: u64 = 10;
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("state.json");
+        let shared = Arc::new(SharedStateFile::new(StateFile::open(&p).unwrap()));
+        let threads: Vec<_> = (1..=THREADS)
+            .map(|t| {
+                let shared = Arc::clone(&shared);
+                let p = p.clone();
+                std::thread::spawn(move || {
+                    for i in 0..EACH {
+                        let hwnd = t * 100 + i;
+                        shared.update(|s| s.add_hidden([window(hwnd)])).unwrap();
+                        assert!(hidden_on_disk(&p).contains(&hwnd), "{hwnd} not on disk");
+                    }
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        assert_eq!(hidden_on_disk(&p).len() as u64, THREADS * EACH);
+    }
+
+    /// M19: the file's lock is free while a change waits for the disk, so the bar
+    /// reading the records does not wait for the window manager's write; the change is
+    /// on disk only when its call returns.
+    #[test]
+    fn the_lock_is_free_while_a_change_is_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("state.json");
+        let shared = Arc::new(SharedStateFile::new(StateFile::open(&p).unwrap()));
+        let disk = Arc::clone(&shared.lock().disk);
+        let writing = disk.writing.lock().unwrap();
+        let recorder = {
+            let shared = Arc::clone(&shared);
+            std::thread::spawn(move || shared.update(|s| s.add_hidden([window(1)])))
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        // `try_lock`: with the lock held through the write, waiting for it would hang.
+        while !shared
+            .file
+            .try_lock()
+            .is_ok_and(|f| f.state().hidden_windows == vec![window(1)])
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the lock was held while waiting for the disk"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(!p.exists(), "written while the disk was busy");
+        assert!(!recorder.is_finished(), "returned before its change was written");
+        drop(writing);
+        recorder.join().unwrap().unwrap();
+        assert_eq!(hidden_on_disk(&p), vec![1]);
+    }
+
+    /// Writes that end in another order than their changes were made leave the newest
+    /// on disk; a call that changes nothing still writes an earlier change not written
+    /// yet, so what it saw recorded is on disk when it returns.
+    #[test]
+    fn the_newest_change_stays_on_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("state.json");
+        let mut f = StateFile::open(&p).unwrap();
+        let first = f.stage(|s| s.add_hidden([window(1)])).unwrap();
+        let second = f.stage(|s| s.add_hidden([window(2)])).unwrap();
+        second.write().unwrap();
+        first.write().unwrap();
+        assert_eq!(hidden_on_disk(&p), vec![1, 2]);
+        let third = f.stage(|s| s.remove_hidden(&[1])).unwrap();
+        let waiting = f.stage(|_| {}).expect("the earlier change is not on disk yet");
+        waiting.write().unwrap();
+        assert_eq!(hidden_on_disk(&p), vec![2]);
+        third.write().unwrap();
+        assert_eq!(hidden_on_disk(&p), vec![2]);
+        assert!(f.stage(|_| {}).is_none(), "everything is on disk");
     }
 
     fn r(left: i32, top: i32, right: i32, bottom: i32) -> Rect {
