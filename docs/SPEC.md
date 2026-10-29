@@ -101,6 +101,7 @@ Target platform: Windows 11 22H2 and later. Windows 10 22H2 is supported on a be
 - Sources: open windows on all workspaces (selecting one switches to that workspace and focuses it; stands in for Alt+Tab), installed applications (Start menu shortcuts and Store apps), recent files, files and folders in indexed folders, browser bookmarks, system commands (lock, sleep, start screen saver, restart, shut down), calculator (`12*8` → result, Enter copies to the clipboard).
 - Fuzzy search; matched letters are highlighted. Turkish case handling works correctly: searching "EKRANI" finds "Ekranı kilitle" (Lock screen), and the "ı/I" and "i/İ" distinction is preserved.
 - Keyboard: up/down selects, Enter opens, Esc closes. Clicking outside closes it.
+- The query is a text box (PLAN M19 U8): Left/Right, Home/End and Ctrl+Left/Right (by words, Turkish letters too) move the caret; typing, pasting, Backspace, Delete and Ctrl+Backspace work at the caret; Ctrl+A selects the query (drawn on the selected row's paint) and typing replaces it. In the list: Page Up/Down a page, Tab/Shift+Tab the next/previous result (round the list), Ctrl+Home/End the first/last result, and Home/End too while the query is empty.
 - If there are no results, help text is shown.
 
 ### 2.5b App grid (requested by the user on 2026-10-15; DECISIONS D56)

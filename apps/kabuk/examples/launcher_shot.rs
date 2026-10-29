@@ -2,6 +2,7 @@
 //! side-by-side comparison with `tools/design-shot.js --launcher <query>`.
 //!
 //!   cargo run -p kabuk --example launcher_shot -- <out.png> [--look a] [--mode dark] [--query mil] [--scale 1] [--edge bottom]
+//!     [--left 2] [--select-all]
 
 use kabuk::bar::style::Style;
 use kabuk::bar::theme;
@@ -102,6 +103,13 @@ fn main() {
         },
     );
     model.key(Key::Text(query));
+    // The caret moved back this many characters, or the whole query selected.
+    for _ in 0..arg("--left").and_then(|n| n.parse::<usize>().ok()).unwrap_or(0) {
+        model.key(Key::Left);
+    }
+    if std::env::args().any(|a| a == "--select-all") {
+        model.key(Key::SelectAll);
+    }
     let horizontal = matches!(edge, Edge::Top | Edge::Bottom);
     // The design's 1920-px screen for Çizgi across a horizontal bar.
     let width = if look == Look::Cizgi && horizontal {

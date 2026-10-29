@@ -475,6 +475,10 @@ pub mod vk {
     pub const RETURN: usize = k::VK_RETURN.0 as usize;
     pub const ESCAPE: usize = k::VK_ESCAPE.0 as usize;
     pub const BACK: usize = k::VK_BACK.0 as usize;
+    pub const DELETE: usize = k::VK_DELETE.0 as usize;
+    pub const TAB: usize = k::VK_TAB.0 as usize;
+    pub const SPACE: usize = k::VK_SPACE.0 as usize;
+    pub const A: usize = b'A' as usize;
     pub const V: usize = b'V' as usize;
 }
 

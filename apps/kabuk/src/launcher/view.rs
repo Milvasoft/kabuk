@@ -197,15 +197,7 @@ fn input(cx: &Ctx, model: &Model, width: f32) -> Node {
             ),
         ])
     } else {
-        Node::row(vec![
-            cx.text(
-                vec![typed(cx, query, Role::Fg, s.input_weight, s.input_typo, s.input_size)],
-                s.input_font,
-                s.input_size,
-                Some(room),
-            ),
-            caret,
-        ])
+        query_line(cx, model, caret, room)
     };
     children.push(typed);
     let mut node = Node::row(children)
@@ -220,6 +212,72 @@ fn input(cx: &Ctx, model: &Model, width: f32) -> Node {
 
 /// Line height of the input text (CSS `normal` for the design's faces).
 const LINE_HEIGHT: f32 = 1.25;
+
+/// The query with the caret where it is and the selected text on the selected rows'
+/// paint. A query wider than `room` shows its part next to the caret: what comes before
+/// the caret loses its first characters until the caret fits.
+fn query_line(cx: &Ctx, model: &Model, caret: Node, room: f32) -> Node {
+    let s = cx.f.style;
+    let chars: Vec<char> = model.query().chars().collect();
+    let at = model.caret().min(chars.len());
+    let sel = model.selection().unwrap_or(at..at);
+    let piece = |from: usize, to: usize| -> String { chars[from..to].iter().collect() };
+    let spec = |text: &str, color: Role, max_width: Option<f32>| TextSpec {
+        spans: vec![typed(cx, text, color, s.input_weight, s.input_typo, s.input_size)],
+        font: s.input_font,
+        size: cx.size(s.input_size),
+        max_width,
+    };
+    let width = |text: &str| cx.m.measure(&spec(text, Role::Fg, None)).width;
+    // The characters before the caret that do not fit beside it (the fewest).
+    let fit = (room - s.caret).max(0.0);
+    let (mut skip, mut upto) = (0, at);
+    while skip < upto {
+        let mid = (skip + upto) / 2;
+        if width(&piece(mid, at)) <= fit {
+            upto = mid;
+        } else {
+            skip = mid + 1;
+        }
+    }
+    // In order: before the selection, the selection, after it; the caret at one end of
+    // the selection (between the two plain parts when nothing is selected).
+    let parts = [
+        (piece(skip.min(sel.start), sel.start), false),
+        (piece(skip.clamp(sel.start, sel.end), sel.end), true),
+        (piece(sel.end, chars.len()), false),
+    ];
+    let caret_before = if at == sel.start { 1 } else { 2 };
+    let mut caret = Some(caret);
+    let mut left = room;
+    let mut nodes = Vec::new();
+    for (i, (text, selected)) in parts.into_iter().enumerate() {
+        if i == caret_before {
+            nodes.extend(caret.take());
+            left -= s.caret;
+        }
+        if text.is_empty() {
+            continue;
+        }
+        let color = if selected {
+            s.sel_text.unwrap_or(Role::Fg)
+        } else {
+            Role::Fg
+        };
+        let max = left.max(0.0);
+        let mut node = Node::text(spec(&text, color, Some(max)));
+        if selected {
+            node = node.paint(Paint {
+                fill: s.sel_fill,
+                border: None,
+                radius: 0.0,
+            });
+        }
+        nodes.push(node);
+        left -= width(&text).min(max);
+    }
+    Node::row(nodes)
+}
 
 fn list(cx: &Ctx, model: &Model, width: f32) -> Node {
     let s = cx.f.style;
@@ -662,6 +720,97 @@ mod tests {
             })
             .unwrap();
         assert!(query_y > first.y);
+    }
+
+    /// The caret's bar: a panel in the text colour as wide as the look's caret.
+    fn caret_rect(l: &kabuk_ui::node::Layout, style: &LauncherStyle) -> kabuk_ui::geom::Rect {
+        l.draws
+            .iter()
+            .find_map(|d| match d {
+                Draw::Panel { rect, paint } if paint.fill == Role::Fg && (rect.w - style.caret).abs() < 0.01 => {
+                    Some(*rect)
+                }
+                _ => None,
+            })
+            .expect("a caret")
+    }
+
+    fn text_rect(l: &kabuk_ui::node::Layout, text: &str) -> kabuk_ui::geom::Rect {
+        l.draws
+            .iter()
+            .find_map(|d| match d {
+                Draw::Text { rect, spec } if spec.plain() == text => Some(*rect),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{text} drawn"))
+    }
+
+    #[test]
+    fn the_caret_is_drawn_where_it_is_and_a_selection_on_the_selected_paint() {
+        let tr = I18n::new(Lang::Tr);
+        for look in Look::ALL {
+            let style = LauncherStyle::of(look);
+            let mut m = model("mil");
+            m.key(Key::Left);
+            let l = layout(&view(&m, frame(&style, &tr), &Fake), Point::default(), &Fake);
+            let (before, after) = (text_rect(&l, "mi"), text_rect(&l, "l"));
+            let caret = caret_rect(&l, &style);
+            assert!(before.x + before.w <= caret.x + 0.01, "{look:?}");
+            assert!(caret.x + caret.w <= after.x + 0.01, "{look:?}");
+
+            m.key(Key::SelectAll);
+            let l = layout(&view(&m, frame(&style, &tr), &Fake), Point::default(), &Fake);
+            let text = text_rect(&l, "mil");
+            assert!(
+                l.draws
+                    .iter()
+                    .any(|d| matches!(d, Draw::Panel { rect, paint } if *rect == text && paint.fill == style.sel_fill)),
+                "{look:?}: the selected query on the selected rows' paint"
+            );
+            let selected = l.draws.iter().find_map(|d| match d {
+                Draw::Text { spec, .. } if spec.plain() == "mil" => Some(spec.spans[0].color),
+                _ => None,
+            });
+            assert_eq!(selected, Some(style.sel_text.unwrap_or(Role::Fg)), "{look:?}");
+            assert!(
+                caret_rect(&l, &style).x >= text.x + text.w - 0.01,
+                "{look:?}: the caret at its end"
+            );
+        }
+    }
+
+    #[test]
+    fn a_query_too_long_for_the_input_keeps_the_caret_in_sight() {
+        let tr = I18n::new(Lang::Tr);
+        let style = LauncherStyle::of(Look::Ada);
+        let long = "a".repeat(400) + "son";
+        let mut m = model(&long);
+        let l = layout(&view(&m, frame(&style, &tr), &Fake), Point::default(), &Fake);
+        let caret = caret_rect(&l, &style);
+        assert!(caret.x + caret.w <= style.width, "the caret inside the launcher");
+        let shown = l
+            .draws
+            .iter()
+            .find_map(|d| match d {
+                Draw::Text { spec, .. } if spec.plain().starts_with('a') => Some(spec.plain()),
+                _ => None,
+            })
+            .unwrap();
+        assert!(shown.ends_with("son") && shown.len() < long.len(), "its end is shown");
+        // At the start, the start is shown and the rest runs to the input's edge.
+        m.key(Key::Home);
+        let l = layout(&view(&m, frame(&style, &tr), &Fake), Point::default(), &Fake);
+        let caret = caret_rect(&l, &style);
+        let after = l
+            .draws
+            .iter()
+            .find_map(|d| match d {
+                Draw::Text { rect, spec } if spec.plain().starts_with('a') => Some(*rect),
+                _ => None,
+            })
+            .unwrap();
+        assert!(after.x >= caret.x + caret.w - 0.01);
+        assert!(after.x + after.w <= style.width);
     }
 
     /// Regression: Konsol's one-line row text was centred in its column.

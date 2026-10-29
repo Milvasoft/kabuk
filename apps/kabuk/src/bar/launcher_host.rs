@@ -476,16 +476,33 @@ impl Shared {
     /// The launcher window's messages.
     pub(super) fn on_launcher(&mut self, m: Msg) -> Option<isize> {
         let key = match m.id {
-            msg::KEYDOWN => match m.wparam {
-                vk::UP => Some(Key::Up),
-                vk::DOWN => Some(Key::Down),
-                vk::RETURN => Some(Key::Enter),
-                vk::ESCAPE => Some(Key::Escape),
-                vk::BACK if msgloop::ctrl_held() => Some(Key::DeleteWord),
-                vk::BACK => Some(Key::Backspace),
-                vk::V if msgloop::ctrl_held() => kabuk_win::clipboard::text().map(Key::Text),
-                _ => None,
-            },
+            msg::KEYDOWN => {
+                let ctrl = msgloop::ctrl_held();
+                match m.wparam {
+                    vk::UP => Some(Key::Up),
+                    vk::DOWN => Some(Key::Down),
+                    vk::PRIOR => Some(Key::PageUp),
+                    vk::NEXT => Some(Key::PageDown),
+                    vk::TAB if msgloop::shift_held() => Some(Key::Previous),
+                    vk::TAB => Some(Key::Next),
+                    vk::HOME if ctrl => Some(Key::First),
+                    vk::END if ctrl => Some(Key::Last),
+                    vk::HOME => Some(Key::Home),
+                    vk::END => Some(Key::End),
+                    vk::LEFT if ctrl => Some(Key::WordLeft),
+                    vk::RIGHT if ctrl => Some(Key::WordRight),
+                    vk::LEFT => Some(Key::Left),
+                    vk::RIGHT => Some(Key::Right),
+                    vk::RETURN => Some(Key::Enter),
+                    vk::ESCAPE => Some(Key::Escape),
+                    vk::BACK if ctrl => Some(Key::DeleteWord),
+                    vk::BACK => Some(Key::Backspace),
+                    vk::DELETE => Some(Key::Delete),
+                    vk::A if ctrl => Some(Key::SelectAll),
+                    vk::V if ctrl => kabuk_win::clipboard::text().map(Key::Text),
+                    _ => None,
+                }
+            }
             msg::CHAR => self.launcher_char(m.wparam as u16).map(Key::Text),
             msg::LBUTTONUP => {
                 let l = self.launcher.as_ref()?;
