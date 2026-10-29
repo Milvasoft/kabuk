@@ -484,6 +484,8 @@ struct Wm {
     /// The latest notices and the number of the last one.
     notices: VecDeque<(u64, crate::notify::Notice)>,
     notice_seq: u64,
+    /// The elevated programs already said to float (once each).
+    elevated_told: std::collections::HashSet<u32>,
     queue: Arc<Mutex<VecDeque<Command>>>,
     view: Arc<Mutex<WmView>>,
     listener: Listener,
@@ -537,6 +539,7 @@ fn run(
         renderer_kept: false,
         notices: VecDeque::new(),
         notice_seq: 0,
+        elevated_told: std::collections::HashSet::new(),
         game: std::collections::HashSet::new(),
         covered: Vec::new(),
         yielded: false,
@@ -1575,6 +1578,12 @@ impl Wm {
             return;
         }
         facts.elevated = hwnd.pid().is_some_and(kabuk_win::process::runs_elevated);
+        if facts.elevated {
+            if let Some(pid) = hwnd.pid().filter(|p| self.elevated_told.insert(*p)) {
+                tracing::info!(pid, hwnd = hwnd.0, "an elevated program's windows float");
+                self.notice(crate::notify::Notice::Elevated);
+            }
+        }
         // A window minimised now (open before Kabuk started, or started minimised) is taken
         // on as minimised: on the bar at once, in the layout once restored. Found by a
         // friend of the user: such apps were missing from the bar until restored.

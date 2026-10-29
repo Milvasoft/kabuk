@@ -692,6 +692,8 @@ struct Shared {
     notices: notify_host::NotifyState,
     /// The monitors in game mode (SPEC §2.4).
     game_devices: Vec<String>,
+    /// Started again by the watchdog after a stop: said at the end of the start.
+    restarted: bool,
     /// Tells when Windows turns the displays off and on.
     displays: Option<kabuk_win::power::DisplayWatch>,
     /// Whether the figures' timers run (stats, GPU): only while a bar showing them is seen.
@@ -991,6 +993,7 @@ impl BarManager {
                 colors_turn: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
                 notices: notify_host::NotifyState::default(),
                 game_devices: Vec::new(),
+                restarted: false,
                 displays: None,
                 figures: (false, false),
                 held_games: Vec::new(),
@@ -1230,6 +1233,14 @@ impl BarManager {
             }
             s.wm = Some(link);
             s.render_all(false);
+        }
+    }
+
+    /// The shell was started again by its watchdog after it stopped: said once the start
+    /// is over (PLAN M19 U12).
+    pub fn restarted(&self) {
+        if let Ok(mut s) = self.shared.try_borrow_mut() {
+            s.restarted = true;
         }
     }
 
@@ -1986,6 +1997,9 @@ impl Shared {
         // The app menus' names and ids, read ahead (it takes a few hundred ms).
         timed("refresh_installed_apps", kabuk_win::shellitems::refresh_installed_apps);
         timed("create_app_grid", || self.create_app_grid());
+        if std::mem::take(&mut self.restarted) {
+            self.notify(crate::notify::Notice::Restarted);
+        }
         // What the start read in kabuk.toml, said once the bars are there to say it.
         match kabuk_core::config::load_file(&self.config_file) {
             Ok(loaded) => self.config_read(&[], &loaded.warnings, false),

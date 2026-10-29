@@ -55,6 +55,8 @@ watchdog-gave-up-body =
 
     Ayrıntılar: { $log }
 
+    Kabuk'u Başlat menüsünden (Kabuk) yeniden başlatabilirsin.
+
 ## Dates, times and numbers
 ## Day and month names come from locales/design (the design page).
 
@@ -593,3 +595,9 @@ notify-layout-dwindle = Bölünen düzen
 notify-layout-dwindle-s = Her yeni pencere sondakini ikiye böler.
 notify-layout-master = Ana pencere düzeni
 notify-layout-master-s = Bir büyük pencere, öbürleri yanında bir sütunda.
+
+# Kabuk durduktan sonra döndü; yönetici olarak çalışan program yüzer (PLAN M19 U12, U13).
+notify-restarted = Kabuk yeniden başladı
+notify-restarted-s = Beklenmedik biçimde durdu; nedeni günlüğünde.
+notify-elevated = Bir program yönetici olarak çalışıyor
+notify-elevated-s = Kabuk onun pencerelerini taşıyamaz, bu yüzden yüzerler. Onları da düzenlemesi için Kabuk'u yönetici olarak başlat.

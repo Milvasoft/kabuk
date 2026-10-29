@@ -186,7 +186,12 @@ pub fn main(options: Run) -> i32 {
             options.manage_class.is_none() || options.debug.shortcuts,
             instance.id().to_string(),
         ) {
-            Ok(m) => Some(m),
+            Ok(m) => {
+                if options.restart_count > 0 {
+                    m.restarted();
+                }
+                Some(m)
+            }
             Err(e) => {
                 tracing::error!(error = %e, "bar unavailable");
                 None

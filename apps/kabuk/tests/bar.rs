@@ -491,6 +491,14 @@ fn a_killed_shell_gets_its_space_back_through_the_watchdog() {
     // The watchdog put every recorded work area back before restarting the shell.
     let report = sandbox.log_lines(&format!("work_areas_restored: {}", before.len()));
     assert!(report >= 1, "watchdog restore did not re-apply the work areas");
+    // PLAN M19 U12: the shell started again says so.
+    assert!(
+        wait_until(STARTUP_TIMEOUT, || sandbox
+            .last_log_line(&["notice shown"])
+            .is_some_and(|l| l.contains("started again") || l.contains("yeniden başladı")))
+        .is_some(),
+        "the restarted shell did not say so"
+    );
 
     assert_eq!(sandbox.restore().0, 0);
     assert_eq!(

@@ -41,6 +41,12 @@ pub enum Notice {
     Layout {
         master: bool,
     },
+    /// The shell stopped unexpectedly and its watchdog started it again (PLAN M19 U12:
+    /// it came back without a word).
+    Restarted,
+    /// A program runs as administrator: Kabuk cannot move its windows, so they float
+    /// (SPEC §8.9; PLAN M19 U13: they floated without a word). Once per program.
+    Elevated,
 }
 
 /// What did not happen, for [`Notice::Failed`].
@@ -112,6 +118,8 @@ impl Notice {
             Notice::Failed(f) => (f.key(), Some("notify-failed-s")),
             Notice::Layout { master: true } => ("notify-layout-master", Some("notify-layout-master-s")),
             Notice::Layout { master: false } => ("notify-layout-dwindle", Some("notify-layout-dwindle-s")),
+            Notice::Restarted => ("notify-restarted", Some("notify-restarted-s")),
+            Notice::Elevated => ("notify-elevated", Some("notify-elevated-s")),
         }
     }
 
@@ -125,7 +133,11 @@ impl Notice {
             | Notice::Layout { .. } => "tile",
             Notice::GameOn | Notice::GameOff { .. } => "pad",
             Notice::Copied => "check",
-            Notice::ConfigRejected { .. } | Notice::ConfigUnknown { .. } | Notice::Failed(_) => "app",
+            Notice::ConfigRejected { .. }
+            | Notice::ConfigUnknown { .. }
+            | Notice::Failed(_)
+            | Notice::Restarted
+            | Notice::Elevated => "app",
         }
     }
 
@@ -223,6 +235,8 @@ mod tests {
                 Notice::ConfigUnknown { line: 2 },
                 Notice::Layout { master: true },
                 Notice::Layout { master: false },
+                Notice::Restarted,
+                Notice::Elevated,
             ]
             .into_iter()
             .chain(Failure::ALL.map(Notice::Failed))

@@ -56,6 +56,8 @@ watchdog-gave-up-body =
 
     Details: { $log }
 
+    Kabuk starts again from the Start menu (Kabuk).
+
 ## Dates, times and numbers
 ## Day and month names come from locales/design (the design page).
 
@@ -594,3 +596,9 @@ notify-layout-dwindle = Dwindle layout
 notify-layout-dwindle-s = Each new window splits the last one.
 notify-layout-master = Master layout
 notify-layout-master-s = One large window, the others in a column beside it.
+
+# The shell came back after a stop; an elevated program floats (PLAN M19 U12, U13).
+notify-restarted = Kabuk started again
+notify-restarted-s = It stopped unexpectedly; its log says why.
+notify-elevated = A program runs as administrator
+notify-elevated-s = Kabuk cannot move its windows, so they float. Start Kabuk as administrator to arrange them too.
