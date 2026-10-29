@@ -21,8 +21,58 @@ pub const CSS_LINE_HEIGHT: f32 = 1.55;
 pub const TEXT_GAMMA: f32 = 2.2;
 pub const TEXT_GRAYSCALE_CONTRAST: f32 = 1.0;
 
-/// Cached text layouts kept before the cache starts over (the bar shows a few dozen).
+/// Cached text layouts kept at most (the bar shows a few dozen; a launcher search can
+/// bring hundreds of rows).
 const LAYOUT_CACHE_LIMIT: usize = 512;
+/// A full cache drops this share of its entries at once (1/4), the least recently used,
+/// so a flood of new texts does not rescan the cache on every miss.
+const EVICT_DIVISOR: usize = 4;
+
+/// Values by key, at most `limit` of them; when full, the least recently used quarter is
+/// dropped, so the texts drawn again and again (the bar's) outlive a flood of new ones.
+struct Recent<K, V> {
+    entries: HashMap<K, (V, u64)>,
+    /// Advances on every use; an entry keeps the time it was last used.
+    clock: u64,
+    limit: usize,
+}
+
+impl<K: std::hash::Hash + Eq, V> Recent<K, V> {
+    fn new(limit: usize) -> Recent<K, V> {
+        Recent {
+            entries: HashMap::new(),
+            clock: 0,
+            limit: limit.max(1),
+        }
+    }
+
+    /// The value of `key`, now the most recently used.
+    fn get(&mut self, key: &K) -> Option<&V> {
+        self.clock += 1;
+        let now = self.clock;
+        self.entries.get_mut(key).map(|e| {
+            e.1 = now;
+            &e.0
+        })
+    }
+
+    fn insert(&mut self, key: K, value: V) {
+        if self.entries.len() >= self.limit && !self.entries.contains_key(&key) {
+            let count = (self.limit / EVICT_DIVISOR).max(1);
+            let mut used: Vec<u64> = self.entries.values().map(|e| e.1).collect();
+            // Uses are unique, so exactly `count` entries are at or before the cut.
+            let (_, cut, _) = used.select_nth_unstable(count - 1);
+            let cut = *cut;
+            self.entries.retain(|_, e| e.1 > cut);
+        }
+        self.clock += 1;
+        self.entries.insert(key, (value, self.clock));
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+    }
+}
 
 /// Font families per role, from the look's `ui` and `num` tokens.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -44,7 +94,7 @@ pub struct TextEngine {
     collection: RefCell<(IDWriteFontCollection1, IDWriteInMemoryFontFileLoader)>,
     families: RefCell<Families>,
     formats: RefCell<HashMap<(String, u32, u16), IDWriteTextFormat>>,
-    layouts: RefCell<HashMap<TextSpec, (IDWriteTextLayout, TextMetrics)>>,
+    layouts: RefCell<Recent<TextSpec, (IDWriteTextLayout, TextMetrics)>>,
     metrics: RefCell<HashMap<(String, u16), FaceMetrics>>,
 }
 
@@ -64,7 +114,7 @@ impl TextEngine {
             families: RefCell::new(families),
             formats: RefCell::new(HashMap::new()),
             metrics: RefCell::new(HashMap::new()),
-            layouts: RefCell::new(HashMap::new()),
+            layouts: RefCell::new(Recent::new(LAYOUT_CACHE_LIMIT)),
         })
     }
 
@@ -208,16 +258,12 @@ impl TextEngine {
         spec: &TextSpec,
         brushes: Option<&dyn Fn(usize) -> Option<windows::core::IUnknown>>,
     ) -> Result<(IDWriteTextLayout, TextMetrics)> {
-        let cached = self.layouts.borrow().get(spec).cloned();
+        let cached = self.layouts.borrow_mut().get(spec).cloned();
         let (layout, metrics) = match cached {
             Some(hit) => hit,
             None => {
                 let built = self.build(spec)?;
-                let mut cache = self.layouts.borrow_mut();
-                if cache.len() >= LAYOUT_CACHE_LIMIT {
-                    cache.clear();
-                }
-                cache.insert(spec.clone(), built.clone());
+                self.layouts.borrow_mut().insert(spec.clone(), built.clone());
                 built
             }
         };
@@ -336,5 +382,88 @@ impl TextMeasure for TextEngine {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Edge cases: a full cache never grows past its limit; recently used entries
+    //! survive a flood while the oldest go first; re-inserting a present key evicts
+    //! nothing; a limit of zero still keeps one entry.
+    use super::*;
+    use crate::node::{Role, Span};
+
+    #[test]
+    fn a_full_cache_drops_the_least_recently_used_first() {
+        let mut cache = Recent::new(8);
+        for k in 0..8 {
+            cache.insert(k, k * 10);
+        }
+        // 0 and 1 are used again, so 2 and 3 are now the oldest.
+        assert_eq!(cache.get(&0), Some(&0));
+        assert_eq!(cache.get(&1), Some(&10));
+        cache.insert(8, 80);
+        assert!(cache.entries.len() <= 8);
+        assert_eq!(cache.get(&0), Some(&0));
+        assert_eq!(cache.get(&1), Some(&10));
+        assert_eq!(cache.get(&2), None);
+        assert_eq!(cache.get(&3), None);
+        assert_eq!(cache.get(&8), Some(&80));
+        // A key already present is replaced without evicting anything.
+        let before = cache.entries.len();
+        cache.insert(8, 81);
+        assert_eq!((cache.entries.len(), cache.get(&8)), (before, Some(&81)));
+    }
+
+    #[test]
+    fn a_hot_entry_outlives_a_flood_many_times_the_limit() {
+        let mut cache = Recent::new(16);
+        cache.insert(u32::MAX, ());
+        for k in 0..1000 {
+            cache.insert(k, ());
+            assert!(cache.entries.len() <= 16);
+            if k % 4 == 0 {
+                assert!(cache.get(&u32::MAX).is_some(), "the hot entry went at {k}");
+            }
+        }
+        let mut tiny = Recent::new(0);
+        tiny.insert(1, ());
+        tiny.insert(2, ());
+        assert!(tiny.get(&1).is_none() && tiny.get(&2).is_some());
+    }
+
+    fn spec(text: &str) -> TextSpec {
+        TextSpec {
+            spans: vec![Span {
+                text: text.into(),
+                color: Role::Fg,
+                weight: 400,
+                after: 0.0,
+                underline: false,
+                italic: false,
+                spacing: 0.0,
+            }],
+            font: FontRole::Ui,
+            size: 13.0,
+            max_width: None,
+        }
+    }
+
+    /// Found in a code review (PLAN M19 P10): the cache used to empty completely at its
+    /// limit, so a launcher search of hundreds of rows threw away every bar text.
+    #[test]
+    fn bar_texts_keep_their_layouts_through_a_launcher_sized_search() {
+        let engine = TextEngine::new().expect("DirectWrite");
+        let clock = spec("20:31");
+        let (first, _) = engine.layout(&clock, None).unwrap();
+        for row in 0..LAYOUT_CACHE_LIMIT * 2 {
+            engine.layout(&spec(&format!("result {row}")), None).unwrap();
+            // The bar redraws now and then while the rows come in.
+            if row % 64 == 0 {
+                engine.layout(&clock, None).unwrap();
+            }
+        }
+        let (again, _) = engine.layout(&clock, None).unwrap();
+        assert!(first == again, "the clock's layout was built again");
     }
 }
