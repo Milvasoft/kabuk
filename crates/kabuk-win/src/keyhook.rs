@@ -22,7 +22,7 @@
 //! changes the volume and shows its own OSD, so Windows' flyout does not show beside it.
 
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use kabuk_core::config::shortcut::{Chord, Mods};
@@ -64,6 +64,13 @@ static THREAD: OnceLock<Result<(), String>> = OnceLock::new();
 static THREAD_ID: AtomicU32 = AtomicU32::new(0);
 /// Whether the hook is on now (off while a full-screen program is in front: D85).
 static HOOKED: AtomicBool = AtomicBool::new(false);
+/// The hook's state last asked of its thread (`NOT_ASKED`, `ASKED_OFF` or `ASKED_ON`): the
+/// next change is decided against it, not against `HOOKED`, which the thread sets only
+/// once it read the request.
+static ASKED: AtomicU8 = AtomicU8::new(NOT_ASKED);
+const NOT_ASKED: u8 = 0;
+const ASKED_OFF: u8 = 1;
+const ASKED_ON: u8 = 2;
 /// Thread messages of the hook thread: take the hook off, put it back.
 const MSG_UNHOOK: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 1;
 const MSG_REHOOK: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 2;
@@ -360,17 +367,29 @@ fn paused_now() -> bool {
 /// The emergency exit stays: it is a hotkey Windows holds, not this hook's.
 fn update_hook() {
     let want = !paused_now();
-    if want == HOOKED.load(Ordering::Relaxed) {
-        return;
-    }
     let id = THREAD_ID.load(Ordering::Relaxed);
     if id == 0 {
+        return;
+    }
+    let asked = if want { ASKED_ON } else { ASKED_OFF };
+    let before = ASKED.swap(asked, Ordering::Relaxed);
+    if !must_ask(before, asked, HOOKED.load(Ordering::Relaxed)) {
         return;
     }
     use windows::Win32::UI::WindowsAndMessaging::PostThreadMessageW;
     let msg = if want { MSG_REHOOK } else { MSG_UNHOOK };
     // SAFETY: a message to the hook thread of this process, which reads it in its loop.
     let _ = unsafe { PostThreadMessageW(id, msg, WPARAM(0), LPARAM(0)) };
+}
+
+/// Whether the hook's thread must be asked for `asked` (found by a test: off then on in
+/// quick turn, the "on" was never sent, as the thread had not yet read the "off" and the
+/// hook still counted as on; it stayed off until the next change of focus).
+fn must_ask(before: u8, asked: u8, hooked: bool) -> bool {
+    match before {
+        NOT_ASKED => (asked == ASKED_ON) != hooked,
+        _ => before != asked,
+    }
 }
 
 /// The window in front changed: the hook comes off over a full-screen program and back
@@ -736,6 +755,22 @@ mod tests {
     //! bit set; every key and modifier set checked against the language keys.
     use super::*;
     use kabuk_core::config::shortcut::Key;
+
+    /// Found by a test (M19): game mode on and off in quick turn left the hook off, as
+    /// "on" was weighed against the state the hook's thread had not updated yet.
+    #[test]
+    fn off_then_on_in_quick_turn_still_asks_for_on() {
+        // The thread has not read the "off" yet: the hook still counts as on.
+        assert!(must_ask(ASKED_OFF, ASKED_ON, true));
+        assert!(must_ask(ASKED_ON, ASKED_OFF, true));
+        // Asked the same again: nothing to send.
+        assert!(!must_ask(ASKED_ON, ASKED_ON, false));
+        assert!(!must_ask(ASKED_OFF, ASKED_OFF, true));
+        // Never asked: only a change from what the hook is.
+        assert!(!must_ask(NOT_ASKED, ASKED_ON, true));
+        assert!(must_ask(NOT_ASKED, ASKED_OFF, true));
+        assert!(must_ask(NOT_ASKED, ASKED_ON, false));
+    }
 
     /// D88: the end of Win+Space, Alt+Shift or Ctrl+Shift tells of a language switch,
     /// whichever key goes last; typing a capital, a key's press, or Space alone does not.
