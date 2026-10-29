@@ -240,7 +240,12 @@ const AUTOHIDE_PEEK: f32 = 2.0;
 fn timed<R>(step: &str, f: impl FnOnce() -> R) -> R {
     let started = std::time::Instant::now();
     let r = f();
-    tracing::debug!(step, ms = started.elapsed().as_millis() as u64, "start step");
+    // What each step costs in memory too (M19's perf run: the shell was over its 40 MB).
+    let mb = kabuk_win::process::Process::open(std::process::id())
+        .ok()
+        .and_then(|p| p.private_bytes())
+        .map(|b| b / (1024 * 1024));
+    tracing::debug!(step, ms = started.elapsed().as_millis() as u64, ?mb, "start step");
     r
 }
 
