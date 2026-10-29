@@ -18,11 +18,12 @@ const NO_COMPOSITOR_WAIT: Duration = Duration::from_millis(16);
 
 /// Posts its message to its window after each frame the compositor shows, one at a time:
 /// the next goes only once the window said it took the last ([`FrameTicker::taken`]), so
-/// a busy window is never flooded. Stops when dropped.
+/// a busy window is never flooded. Stops when dropped: its thread ends after the frame it
+/// waits for, without the dropping thread waiting on it (PLAN M19 P16: the bar's thread
+/// waited up to a frame at the end of every slide and every dock hover).
 pub struct FrameTicker {
     stop: Arc<AtomicBool>,
     pending: Arc<AtomicBool>,
-    thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl FrameTicker {
@@ -31,7 +32,7 @@ impl FrameTicker {
         let stop = Arc::new(AtomicBool::new(false));
         let pending = Arc::new(AtomicBool::new(false));
         let (theirs_stop, theirs_pending) = (stop.clone(), pending.clone());
-        let thread = std::thread::Builder::new().name("frame-ticker".into()).spawn(move || {
+        std::thread::Builder::new().name("frame-ticker".into()).spawn(move || {
             while !theirs_stop.load(Ordering::Acquire) {
                 // SAFETY: plain call; waits for the compositor's next frame.
                 if unsafe { DwmFlush() }.is_err() {
@@ -57,11 +58,7 @@ impl FrameTicker {
                 }
             }
         })?;
-        Ok(FrameTicker {
-            stop,
-            pending,
-            thread: Some(thread),
-        })
+        Ok(FrameTicker { stop, pending })
     }
 
     /// The window took the last message: the next frame posts another.
@@ -73,9 +70,6 @@ impl FrameTicker {
 impl Drop for FrameTicker {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
-        }
     }
 }
 
@@ -122,8 +116,11 @@ mod tests {
         }
         ml::run_until(&[], Some(Duration::from_millis(500)));
         assert!(count.get() >= 10, "{} ticks in 0.5 s", count.get());
-        // Stopped: none after (one may have been on its way).
+        // Stopped at once, without waiting for a frame; none after (one may have been on
+        // its way).
+        let dropped = std::time::Instant::now();
         drop(ticker.borrow_mut().take());
+        assert!(dropped.elapsed() < Duration::from_millis(5), "dropping waited {:?}", dropped.elapsed());
         ml::run_until(&[], Some(Duration::from_millis(30)));
         count.set(0);
         ml::run_until(&[], Some(Duration::from_millis(200)));
