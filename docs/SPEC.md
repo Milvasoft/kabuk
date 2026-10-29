@@ -84,7 +84,7 @@ Target platform: Windows 11 22H2 and later. Windows 10 22H2 is supported on a be
 
 - Rule: match (exe name, window class, title; plain text or regular expression) → action (floating, ignore, workspace N, monitor N, minimum width, placement preference).
 - Default rules (the user can disable them): dialogs are always floating and centred; splash screens are ignored; `Taskmgr.exe` is floating.
-- User rules are added from the settings screen; "Pick an open window" fills the form with the details of the clicked window.
+- User rules are added from the settings screen; "Pick an open window" lists every window Windows' taskbar would show (also while Kabuk is not running), by program, and fills the form with the details of the clicked window.
 - Rules are shown in the table as "Source: Default / Yours".
 
 ### 2.4 Game mode

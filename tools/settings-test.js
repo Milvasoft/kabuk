@@ -542,11 +542,13 @@ async function main() {
   await page.click("[data-rule-cancel]"); await settled();
   check((await page.locator("[data-rule-editor]").count()) === 0 && toml().includes('title = "^Discord"'), "rule: Cancel leaves it as it was");
 
-  // "Pick an open window": with no shell here none, and said so; the shell's windows
-  // (as `query windows` gives them, through the bridge) listed by program; one picked
-  // fills the program, class and title.
+  // "Pick an open window": with no shell here, the desktop's windows as Windows' taskbar
+  // shows them (PLAN M19 U11; a desktop without any says so); windows given as `query
+  // windows` gives them listed by program; one picked fills the program, class and title.
   await page.click(`[data-rule-new="pick"]`); await settled();
-  check((await page.locator(".rule-win").count()) === 0 && (await page.locator(".rule-edit [role=status]").first().innerText()).length > 0, "pick: no windows without the shell, and said so");
+  const desktop = await page.locator(".rule-win").count();
+  const desktopSaid = desktop ? "" : await page.locator(".rule-edit [role=status]").first().innerText();
+  check(desktop > 0 || desktopSaid.length > 0, `pick: the desktop's windows without the shell (${desktop})`);
   const shellWindows = [
     { hwnd: 7, exe: "Slack.exe", class: "Chrome_WidgetWin_1", title: "Slack | general", pid: 70 },
     { hwnd: 8, exe: "Code.exe", class: "Chrome_WidgetWin_1", title: "main.rs - kabuk", pid: 80 },

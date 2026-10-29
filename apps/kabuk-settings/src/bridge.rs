@@ -12,8 +12,8 @@
 //! - `{"op":"info"}` → `{"op":"info", …}`: monitors, managed windows, memory, from the
 //!   running shell over its command pipe (asked only while it runs).
 //! - `{"op":"windows"}` → `{"op":"windows","windows":[{"exe":…,"class":…,"title":…}, …]}`:
-//!   the windows Kabuk manages now, for "Pick an open window" (SPEC §2.3; a test passes
-//!   `"windows"` as `query windows` gives them).
+//!   every window Windows' taskbar would show now, read from Windows, for "Pick an open
+//!   window" (SPEC §2.3; a test passes `"windows"` as `query windows` gives them).
 //! - `{"op":"pick","what":"image"|"folder"}` → `{"op":"picked","what":…,"path":…}`:
 //!   Windows' own dialog; `path` is `null` when the user cancels.
 //! - `{"op":"preview-saver"}` → `{"op":"previewed","started":…}`: the screen saver the
@@ -201,8 +201,8 @@ impl Bridge {
             }
             "info" => self.info(),
             "windows" => {
-                let windows = m.get("windows").cloned().or_else(|| self.ask(&["query", "windows"]));
-                json!({ "op": "windows", "windows": open_windows(windows.as_ref()) })
+                let windows = m.get("windows").cloned().unwrap_or_else(desktop_windows);
+                json!({ "op": "windows", "windows": open_windows(&windows) })
             }
             "preview-saver" => self.preview_saver(),
             "quit" => self.quit(),
@@ -666,13 +666,33 @@ fn refusal(e: &config::edit::EditError, path: &str, i18n: &kabuk_i18n::I18n) -> 
     }
 }
 
-/// The windows a rule can be made from (`query windows`' answer): each one's program,
-/// class and title, those with neither program nor class left out, each once, by program
-/// and title.
-fn open_windows(windows: Option<&Value>) -> Vec<Value> {
+/// Every window Windows' taskbar would show now ([`kabuk_win::window::Hwnd::on_taskbar`],
+/// the filter of the bar's apps), as `query windows` gives them, but Settings' own: "Pick
+/// an open window" listed only the windows Kabuk manages, and none without a running
+/// shell (PLAN M19 U11).
+fn desktop_windows() -> Value {
+    let me = std::process::id();
+    kabuk_win::window::top_level_windows()
+        .into_iter()
+        .filter(|h| h.on_taskbar())
+        .filter_map(|h| {
+            let pid = h.pid().filter(|p| *p != me)?;
+            let exe = kabuk_win::process::Process::query(pid)
+                .ok()
+                .and_then(|p| p.image_name())
+                .unwrap_or_default();
+            Some(json!({ "exe": exe, "class": h.class_name(), "title": h.title() }))
+        })
+        .collect()
+}
+
+/// The windows a rule can be made from (`query windows`' answer or
+/// [`desktop_windows`]): each one's program, class and title, those with neither program
+/// nor class left out, each once, by program and title.
+fn open_windows(windows: &Value) -> Vec<Value> {
     let text = |w: &Value, key: &str| w[key].as_str().unwrap_or_default().to_string();
     let mut list: Vec<(String, String, String)> = windows
-        .and_then(Value::as_array)
+        .as_array()
         .into_iter()
         .flatten()
         .map(|w| (text(w, "exe"), text(w, "class"), text(w, "title")))
@@ -1003,6 +1023,38 @@ mod tests {
         );
     }
 
+    /// PLAN M19 U11: without a shell (none runs for this test's folder), "Pick an open
+    /// window" offers the windows Windows' taskbar shows, not none; Settings' own are not
+    /// among them. Windows come and go meanwhile, so classes seen both before and after the
+    /// question must be listed, and every class listed seen before or after it.
+    #[test]
+    fn the_desktops_windows_are_offered_without_a_shell() {
+        use std::collections::BTreeSet;
+        let dir = tempfile::tempdir().unwrap();
+        let b = bridge(&dir, None);
+        let me = std::process::id();
+        let classes = || -> BTreeSet<String> {
+            kabuk_win::window::top_level_windows()
+                .into_iter()
+                .filter(|h| h.on_taskbar() && h.pid().is_some_and(|p| p != me))
+                .map(|h| h.class_name())
+                .filter(|c| !c.is_empty())
+                .collect()
+        };
+        let before = classes();
+        let listed: BTreeSet<String> = reply(&b, json!({"op": "windows"}))["windows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|w| w["class"].as_str().unwrap_or_default().to_string())
+            .collect();
+        let after = classes();
+        let seen: BTreeSet<String> = before.union(&after).cloned().collect();
+        assert!(listed.is_subset(&seen), "listed {listed:?}, seen {seen:?}");
+        let stayed: BTreeSet<String> = before.intersection(&after).cloned().collect();
+        assert!(stayed.is_subset(&listed), "stayed {stayed:?}, listed {listed:?}");
+    }
+
     /// PLAN M19 U1: with a mistake in the file the page is told what is wrong and where,
     /// instead of showing the defaults as the user's.
     #[test]
@@ -1026,7 +1078,6 @@ mod tests {
         assert_eq!(b.handle("not json"), None);
         assert_eq!(b.handle("{\"op\":\"set\"}"), None);
         assert_eq!(reply(&b, json!({"op": "info"}))["info"]["running"], false);
-        assert_eq!(reply(&b, json!({"op": "windows"}))["windows"], json!([]));
         // Nothing installed in a fresh state folder: nothing starts.
         assert_eq!(reply(&b, json!({"op": "preview-saver"}))["started"], false);
         assert_eq!(b.handle("{\"op\":\"pick\",\"what\":\"song\"}"), None);
