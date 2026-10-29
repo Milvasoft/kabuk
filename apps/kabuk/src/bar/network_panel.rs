@@ -2,14 +2,18 @@
 //! Kabuk's own in the look's surface rather than Windows' flyout. Wi-Fi on and off, the
 //! networks around (the connected one first), joining one (a key asked under its row
 //! for a new protected network), leaving it, the Ethernet line and Windows' network
-//! settings. Drawn as the design page's `netPanelHtml`. Pure: state and keys in, what
-//! to do and the tree out.
+//! settings. Drawn as the design page's `netPanelHtml`. The keyboard moves over its parts
+//! as in every popup ([`crate::bar::popup_keys`], PLAN M19 U10); while a key is asked,
+//! what is typed goes into its field (Space too), Enter joins unless a button is
+//! selected, and Esc leaves the field before the panel. Pure: state and keys in, what to
+//! do and the tree out.
 
 use kabuk_core::network::{key_fits, wifi_icon, Network};
 use kabuk_i18n::I18n;
 use kabuk_ui::geom::Insets;
 use kabuk_ui::node::{Align, FontRole, Node, Paint, Role, Span, TextSpec};
 
+use super::popup_keys::{self, Step};
 use super::tooltip::TipStyle;
 
 /// Hit-test id of the panel's parts; the value is one of the constants below.
@@ -72,8 +76,8 @@ pub struct Panel {
     /// Being joined, and the last one that could not be.
     pub joining: Option<String>,
     pub failed: Option<String>,
-    /// The row the keyboard is on.
-    pub selected: Option<usize>,
+    /// The part the keyboard is on (its click value).
+    pub selected: Option<u32>,
 }
 
 /// What the host has to do after a click or a key.
@@ -93,9 +97,8 @@ pub enum Action {
 /// A key the panel takes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Key {
-    Up,
-    Down,
-    Enter,
+    /// A key every popup takes: the selection's moves, Enter and Space.
+    Popup(popup_keys::Key),
     Escape,
     Backspace,
     Text(String),
@@ -119,9 +122,8 @@ impl Panel {
             DISCONNECT => Action::Disconnect,
             KEY_FIELD => Action::None,
             v if v >= FIRST_NETWORK => {
-                let i = (v - FIRST_NETWORK) as usize;
-                self.selected = Some(i);
-                self.choose(i)
+                self.selected = Some(v);
+                self.choose((v - FIRST_NETWORK) as usize)
             }
             _ => Action::None,
         }
@@ -170,16 +172,22 @@ impl Panel {
         self.short_key = false;
     }
 
-    /// A key: typing goes to the key field while one is asked; otherwise the arrows
-    /// move over the networks and Enter chooses one. Esc leaves the field, then the panel.
-    pub fn key(&mut self, key: Key) -> Action {
+    /// A key, with `entries` the panel's parts as drawn (their click values, in order):
+    /// the selection moves over them and Enter or Space clicks the one selected, as in
+    /// every popup. While a key is asked, typing goes to its field and Enter joins (or
+    /// clicks the button selected: Cancel, Connect). Esc leaves the field, then the panel.
+    pub fn key(&mut self, key: Key, entries: &[u32]) -> Action {
         if self.asking.is_some() {
             return match key {
                 Key::Escape => {
                     self.stop_asking();
                     Action::Redraw
                 }
-                Key::Enter => self.join_asked(),
+                Key::Popup(popup_keys::Key::Activate) => match self.selected {
+                    Some(v) if v != KEY_FIELD && v < FIRST_NETWORK && entries.contains(&v) => self.click(v),
+                    _ => self.join_asked(),
+                },
+                Key::Popup(k) => self.select(entries, k),
                 Key::Backspace => {
                     self.short_key = false;
                     if self.key.pop().is_some() {
@@ -197,25 +205,38 @@ impl Panel {
                     self.key.push_str(&clean);
                     Action::Redraw
                 }
-                Key::Up | Key::Down => Action::None,
             };
         }
-        let last = self.shown().saturating_sub(1);
         match key {
             Key::Escape => Action::Close,
-            Key::Down => {
-                self.selected = Some(self.selected.map_or(0, |i| (i + 1).min(last)));
-                Action::Redraw
-            }
-            Key::Up => {
-                self.selected = Some(self.selected.map_or(0, |i| i.saturating_sub(1)));
-                Action::Redraw
-            }
-            Key::Enter => match self.selected {
-                Some(i) => self.choose(i),
-                None => Action::None,
+            Key::Popup(k) => match popup_keys::step(entries, self.selected, k) {
+                Step::Activate(v) => self.click(v),
+                _ => self.select(entries, k),
             },
             Key::Backspace | Key::Text(_) => Action::None,
+        }
+    }
+
+    /// Moves the selection with `key` over `entries`.
+    fn select(&mut self, entries: &[u32], key: popup_keys::Key) -> Action {
+        match popup_keys::step(entries, self.selected, key) {
+            Step::Select(v) => {
+                self.selected = Some(v);
+                Action::Redraw
+            }
+            Step::Same | Step::Activate(_) | Step::Adjust(..) => Action::None,
+        }
+    }
+
+    /// A selection kept only while its part is still listed (a network gone from the
+    /// list, or past the ones shown, lets it go).
+    pub fn keep_selection(&mut self) {
+        let shown = u32::try_from(self.shown()).unwrap_or(u32::MAX);
+        if self
+            .selected
+            .is_some_and(|v| v >= FIRST_NETWORK && v - FIRST_NETWORK >= shown)
+        {
+            self.selected = None;
         }
     }
 
@@ -419,7 +440,8 @@ pub fn view(p: &Panel, i18n: &I18n, text_scale: f32, s: &TipStyle) -> Node {
             .gap(ICON_GAP)
             .align(Align::Center);
             let mut row = ends(left, trail, TRAIL).size(None, Some(ROW)).hit(HIT, value);
-            if p.selected == Some(i) || p.asking.as_deref() == Some(n.ssid.as_str()) {
+            // The keyboard's selection is drawn over it by the host (`popup_keys::marked`).
+            if p.asking.as_deref() == Some(n.ssid.as_str()) {
                 row = row.paint(Paint {
                     fill: Role::SurfaceSel,
                     border: None,
@@ -470,9 +492,12 @@ pub fn view(p: &Panel, i18n: &I18n, text_scale: f32, s: &TipStyle) -> Node {
 #[cfg(test)]
 mod tests {
     //! Edge cases: a known, an open and a new protected network chosen; a key too short,
-    //! then long enough; Esc leaving the field, then the panel; the arrows at the list's
-    //! ends; Wi-Fi off, no Wi-Fi hardware, names refused, nothing found; every string in
-    //! both languages; every part clickable.
+    //! then long enough; Esc leaving the field, then the panel; the popups' keys over every
+    //! part (from nothing, at the ends, round with Tab), Enter or Space on a network, the
+    //! switch and a link; while a key is asked, a space typed into it, Enter joining, or
+    //! clicking the button selected, the arrows still moving; a selected network gone;
+    //! Wi-Fi off, no Wi-Fi hardware, names refused, nothing found; every string in both
+    //! languages; every part clickable.
     use super::*;
     use crate::bar::tooltip::TIP;
     use kabuk_i18n::Lang;
@@ -551,10 +576,11 @@ mod tests {
         assert_eq!(p.click(FIRST_NETWORK + 3), Action::Redraw);
         assert_eq!(p.asking.as_deref(), Some("new"));
         // Too short: said, nothing joined.
-        assert_eq!(p.key(Key::Text("1234".into())), Action::Redraw);
-        assert_eq!(p.key(Key::Enter), Action::Redraw);
+        let e = entries(&p);
+        assert_eq!(p.key(Key::Text("1234".into()), &e), Action::Redraw);
+        assert_eq!(p.key(Key::Popup(popup_keys::Key::Activate), &e), Action::Redraw);
         assert!(p.short_key);
-        assert_eq!(p.key(Key::Text("5678".into())), Action::Redraw);
+        assert_eq!(p.key(Key::Text("5678".into()), &e), Action::Redraw);
         assert!(!p.short_key);
         assert_eq!(
             p.click(CONNECT),
@@ -563,29 +589,120 @@ mod tests {
         assert_eq!((p.asking.as_deref(), p.key.as_str()), (None, ""), "the key is not kept");
     }
 
-    #[test]
-    fn escape_leaves_the_field_then_the_panel() {
-        let mut p = panel();
-        p.click(FIRST_NETWORK + 3);
-        p.key(Key::Text("abc".into()));
-        assert_eq!(p.key(Key::Backspace), Action::Redraw);
-        assert_eq!(p.key, "ab");
-        assert_eq!(p.key(Key::Escape), Action::Redraw);
-        assert_eq!(p.asking, None);
-        assert_eq!(p.key(Key::Escape), Action::Close);
+    /// The panel's parts as drawn, in order.
+    fn entries(p: &Panel) -> Vec<u32> {
+        let l = layout(&view(p, &I18n::new(Lang::En), 1.0, &TIP), Point::default(), &Fake);
+        popup_keys::entries(&l, HIT)
+    }
+
+    fn press(p: &mut Panel, k: popup_keys::Key) -> Action {
+        let e = entries(p);
+        p.key(Key::Popup(k), &e)
     }
 
     #[test]
-    fn the_arrows_move_over_the_networks_and_enter_chooses() {
+    fn escape_leaves_the_field_then_the_panel() {
         let mut p = panel();
-        assert_eq!(p.key(Key::Up), Action::Redraw);
-        assert_eq!(p.selected, Some(0));
-        for _ in 0..9 {
-            p.key(Key::Down);
-        }
-        assert_eq!(p.selected, Some(3), "it stops at the last");
-        assert_eq!(p.key(Key::Enter), Action::Redraw);
+        let e = entries(&p);
+        p.click(FIRST_NETWORK + 3);
+        p.key(Key::Text("abc".into()), &e);
+        assert_eq!(p.key(Key::Backspace, &e), Action::Redraw);
+        assert_eq!(p.key, "ab");
+        assert_eq!(p.key(Key::Escape, &e), Action::Redraw);
+        assert_eq!(p.asking, None);
+        assert_eq!(p.key(Key::Escape, &e), Action::Close);
+    }
+
+    /// PLAN M19 U10: the panel kept its own keys (Up and Down over the networks only).
+    /// It takes every popup's: the selection goes over each part, Tab round them, and
+    /// Enter or Space clicks the one selected.
+    #[test]
+    fn the_popups_keys_go_over_every_part() {
+        use popup_keys::Key as K;
+        let mut p = panel();
+        let e = entries(&p);
+        assert_eq!(e.first(), Some(&WIFI_SWITCH));
+        assert_eq!(e.last(), Some(&SETTINGS));
+        assert_eq!(press(&mut p, K::Down), Action::Redraw);
+        assert_eq!(p.selected, Some(WIFI_SWITCH), "from nothing, the first");
+        assert_eq!(
+            press(&mut p, K::Activate),
+            Action::Wifi(false),
+            "Enter or Space clicks it"
+        );
+        assert_eq!(press(&mut p, K::Down), Action::Redraw);
+        assert_eq!(p.selected, Some(FIRST_NETWORK), "the connected network");
+        assert_eq!(press(&mut p, K::Down), Action::Redraw);
+        assert_eq!(p.selected, Some(DISCONNECT), "its button");
+        assert_eq!(press(&mut p, K::Activate), Action::Disconnect);
+        assert_eq!(press(&mut p, K::End), Action::Redraw);
+        assert_eq!(p.selected, Some(SETTINGS));
+        assert_eq!(press(&mut p, K::Down), Action::None, "it stops at the last");
+        assert_eq!(press(&mut p, K::Activate), Action::Open(SETTINGS_PAGE));
+        assert_eq!(press(&mut p, K::Next), Action::Redraw);
+        assert_eq!(p.selected, Some(WIFI_SWITCH), "Tab goes round");
+        assert_eq!(press(&mut p, K::Previous), Action::Redraw);
+        assert_eq!(p.selected, Some(SETTINGS));
+        // A network chosen: a new protected one asks its key.
+        p.selected = Some(FIRST_NETWORK + 3);
+        assert_eq!(press(&mut p, K::Activate), Action::Redraw);
         assert_eq!(p.asking.as_deref(), Some("new"));
+        assert_eq!(press(&mut p, K::Home), Action::Redraw);
+        assert_eq!(p.selected, Some(WIFI_SWITCH));
+        // Nothing selected: Enter does nothing; the slider keys never do.
+        p = panel();
+        assert_eq!(press(&mut p, K::Activate), Action::None);
+        assert_eq!(press(&mut p, K::More), Action::None);
+    }
+
+    /// What the network panel did that the other popups do not stays: typing a key
+    /// (spaces too, as WPA keys may hold them), Enter joining, Esc leaving the field.
+    #[test]
+    fn while_a_key_is_asked_typing_goes_to_it() {
+        use popup_keys::Key as K;
+        let mut p = panel();
+        p.click(FIRST_NETWORK + 3);
+        let e = entries(&p);
+        assert!(e.contains(&KEY_FIELD) && e.contains(&CONNECT) && e.contains(&CANCEL));
+        p.key(Key::Text("my ".into()), &e);
+        p.key(Key::Text("key 1".into()), &e);
+        assert_eq!(p.key, "my key 1");
+        // Enter on the network's row, the field or nothing joins.
+        assert_eq!(
+            p.key(Key::Popup(K::Activate), &e),
+            Action::Join(net("new", true, false, false), Some("my key 1".into()))
+        );
+        // The arrows still move; Enter on Cancel cancels.
+        p.click(FIRST_NETWORK + 3);
+        let e = entries(&p);
+        p.key(Key::Text("abc".into()), &e);
+        p.selected = Some(CONNECT);
+        assert_eq!(p.key(Key::Popup(K::Up), &e), Action::Redraw);
+        assert_eq!(p.selected, Some(CANCEL));
+        assert_eq!(p.key(Key::Popup(K::Activate), &e), Action::Redraw);
+        assert_eq!((p.asking.as_deref(), p.key.as_str()), (None, ""));
+        // Enter on Connect with a short key says so.
+        p.click(FIRST_NETWORK + 3);
+        let e = entries(&p);
+        p.key(Key::Text("abc".into()), &e);
+        p.selected = Some(CONNECT);
+        assert_eq!(p.key(Key::Popup(K::Activate), &e), Action::Redraw);
+        assert!(p.short_key);
+    }
+
+    #[test]
+    fn a_selected_network_gone_is_let_go() {
+        let mut p = panel();
+        p.selected = Some(FIRST_NETWORK + 3);
+        p.keep_selection();
+        assert_eq!(p.selected, Some(FIRST_NETWORK + 3));
+        p.networks.truncate(2);
+        p.keep_selection();
+        assert_eq!(p.selected, None);
+        p.selected = Some(SETTINGS);
+        p.wifi = Some(false);
+        p.keep_selection();
+        assert_eq!(p.selected, Some(SETTINGS), "a part that is no network stays");
     }
 
     #[test]
@@ -626,11 +743,11 @@ mod tests {
             }
             // Asked: the field (bullets, never the key), the buttons.
             p.click(FIRST_NETWORK + 3);
-            p.key(Key::Text("secret".into()));
+            p.key(Key::Text("secret".into()), &[]);
             let t = texts(&view(&p, &i18n, 1.0, &TIP));
             assert!(t.contains(&"••••••".to_string()) && !t.iter().any(|x| x.contains("secret")));
             assert!(t.contains(&i18n.tr("net-connect")) && t.contains(&i18n.tr("net-cancel")));
-            p.key(Key::Enter);
+            p.key(Key::Popup(popup_keys::Key::Activate), &[]);
             assert!(texts(&view(&p, &i18n, 1.0, &TIP)).contains(&i18n.tr("net-key-short")));
         }
     }

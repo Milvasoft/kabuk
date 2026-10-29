@@ -1,7 +1,8 @@
 //! The network panel on the bar thread ([`crate::bar::network_panel`], DECISIONS D88):
 //! placed like the volume panel under the network indicator. Opening it asks Windows
 //! for a scan; the list, a join's progress and its failure come from the WLAN service's
-//! notifications (no polling). It takes the keyboard for a key to be typed; a click
+//! notifications (no polling). It takes the keyboard as every popup does
+//! ([`crate::bar::popup_keys`], PLAN M19 U10), and for a key to be typed; a click
 //! elsewhere or Esc closes it. A key typed is never kept or logged.
 
 use kabuk_ui::geom::{Point, Scale};
@@ -15,6 +16,7 @@ use super::tooltip::{self, TIP};
 use super::view::hit;
 use super::{Shared, MSG_NETWORK};
 use crate::bar::network_panel::{self, Action, Key, Panel};
+use crate::bar::popup_keys;
 
 const PANEL_CLASS: &str = "Kabuk.NetworkPanel";
 /// Integration tests open (`wparam` 1) or close (0) the panel without taking the
@@ -82,9 +84,7 @@ impl Shared {
                 p.failed = None;
             }
         }
-        if p.selected.is_some_and(|i| i >= p.shown()) {
-            p.selected = None;
-        }
+        p.keep_selection();
         p
     }
 
@@ -198,7 +198,8 @@ impl Shared {
         let Some(p) = self.network_panel.as_ref() else { return };
         let name_of = |v: u32, words: &str| (v != network_panel::KEY_FIELD).then(|| words.to_string());
         let name = self.i18n.tr("mod-network");
-        super::access_host::tell_panel(&p.shown, &name, (&p.layout, p.scale), network_panel::HIT, None, name_of);
+        let drawn = (&p.layout, p.scale);
+        super::access_host::tell_panel(&p.shown, &name, drawn, network_panel::HIT, p.panel.selected, name_of);
     }
 
     /// The panel laid out for `panel` and its place under the indicator on bar `bar`.
@@ -206,6 +207,7 @@ impl Shared {
         let b = self.bars.get(bar)?;
         let scale = b.scale;
         let node = network_panel::view(panel, &self.i18n, self.look.style.text_scale, &TIP);
+        let node = popup_keys::marked(node, network_panel::HIT, panel.selected, &TIP);
         let layout = kabuk_ui::node::layout(&node, Point::default(), &self.gpu.text);
         let size = (
             (layout.size.w * scale.0).ceil() as i32,
@@ -353,15 +355,15 @@ impl Shared {
     }
 
     pub(super) fn on_network_panel(&mut self, m: Msg) -> Option<isize> {
+        let asking = self.network_panel.as_ref().is_some_and(|p| p.panel.asking.is_some());
         let key = match m.id {
             msg::KEYDOWN => match m.wparam {
-                vk::UP => Some(Key::Up),
-                vk::DOWN => Some(Key::Down),
-                vk::RETURN => Some(Key::Enter),
                 vk::ESCAPE => Some(Key::Escape),
                 vk::BACK => Some(Key::Backspace),
                 vk::V if msgloop::ctrl_held() => kabuk_win::clipboard::text().map(Key::Text),
-                _ => None,
+                // A space is typed into an asked key (its character comes as `WM_CHAR`).
+                vk::SPACE if asking => None,
+                k => popup_keys::Key::of(k, msgloop::shift_held(), false).map(Key::Popup),
             },
             msg::CHAR => self.network_char(m.wparam as u16).map(Key::Text),
             msg::LBUTTONUP => {
@@ -385,7 +387,9 @@ impl Shared {
             _ => return None,
         };
         let k = key?;
-        let action = self.network_panel.as_mut()?.panel.key(k);
+        let p = self.network_panel.as_mut()?;
+        let entries = popup_keys::entries(&p.layout, network_panel::HIT);
+        let action = p.panel.key(k, &entries);
         self.network_action(action);
         Some(0)
     }
