@@ -23,7 +23,7 @@
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use kabuk_core::config::shortcut::{Chord, Mods};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
@@ -52,7 +52,9 @@ struct Binding {
     vk: u16,
 }
 
-static BINDINGS: Mutex<Vec<Binding>> = Mutex::new(Vec::new());
+/// The chords bound, as a snapshot the hook reads on every key without copying it
+/// (`None`: none); binding or dropping a shortcut puts a new one in its place.
+static BINDINGS: RwLock<Option<Arc<[Binding]>>> = RwLock::new(None);
 static NEXT: AtomicU64 = AtomicU64::new(1);
 static PAUSED: AtomicBool = AtomicBool::new(false);
 /// The monitors (`HMONITOR` values) a full-screen program covers while [`PAUSED`].
@@ -112,22 +114,62 @@ impl VolumeKey {
     }
 }
 
+/// Where the hook tells something (a window and a message), read on every key without
+/// a lock: both in one word, the window's handle in the high half. A window handle fits
+/// in 32 bits (Windows keeps them so for 32- and 64-bit programs to share, sign-extending
+/// the low half); 0 is none.
+struct Sink(AtomicU64);
+
+impl Sink {
+    const fn new() -> Sink {
+        Sink(AtomicU64::new(0))
+    }
+
+    fn set(&self, to: Option<(isize, u32)>) {
+        self.0.store(pack_sink(to), Ordering::Release);
+    }
+
+    fn get(&self) -> Option<(isize, u32)> {
+        unpack_sink(self.0.load(Ordering::Acquire))
+    }
+}
+
+/// A [`Sink`]'s word for a window and a message. Pure.
+fn pack_sink(to: Option<(isize, u32)>) -> u64 {
+    // The low half of the handle: all of it that is significant.
+    to.map_or(0, |(hwnd, message)| (u64::from(hwnd as u32) << 32) | u64::from(message))
+}
+
+/// The window and message in a [`Sink`]'s word. Pure.
+fn unpack_sink(word: u64) -> Option<(isize, u32)> {
+    // The handle's half sign-extended back, as Windows does.
+    let hwnd = (word >> 32) as u32 as i32 as isize;
+    (hwnd != 0).then_some((hwnd, word as u32))
+}
+
 /// Where the volume keys go while taken: (window, message).
-static VOLUME_SINK: Mutex<Option<(isize, u32)>> = Mutex::new(None);
+static VOLUME_SINK: Sink = Sink::new();
 /// Where a chord that switches the input language is told (window, message; D88).
-static LANGUAGE_SINK: Mutex<Option<(isize, u32)>> = Mutex::new(None);
+static LANGUAGE_SINK: Sink = Sink::new();
 
 /// `VK_SPACE`.
 const SPACE: u16 = 0x20;
+const SHIFT_KEYS: [VIRTUAL_KEY; 3] = [VK_SHIFT, VK_LSHIFT, VK_RSHIFT];
+const ALT_AND_CTRL_KEYS: [VIRTUAL_KEY; 6] = [VK_MENU, VK_LMENU, VK_RMENU, VK_CONTROL, VK_LCONTROL, VK_RCONTROL];
+
+/// Whether `event` may end one of Windows' input-language chords (the release of Space,
+/// Shift, Alt or Ctrl): only those are checked, and only they need the keys held.
+fn may_switch_language(event: Event) -> bool {
+    let Event::Up(vk) = event else { return false };
+    vk == SPACE || SHIFT_KEYS.iter().chain(&ALT_AND_CTRL_KEYS).any(|k| k.0 == vk)
+}
 
 /// Whether `event` ends one of Windows' input-language chords: Win+Space, Alt+Shift or
 /// Ctrl+Shift (whichever key is let go last), with `mods` the keys held then.
 fn language_switch(event: Event, mods: Mods) -> bool {
     let Event::Up(vk) = event else { return false };
-    let is = |keys: &[windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY]| keys.iter().any(|k| k.0 == vk);
-    (vk == SPACE && mods.win)
-        || (is(&[VK_SHIFT, VK_LSHIFT, VK_RSHIFT]) && (mods.alt || mods.ctrl))
-        || (is(&[VK_MENU, VK_LMENU, VK_RMENU, VK_CONTROL, VK_LCONTROL, VK_RCONTROL]) && mods.shift)
+    let is = |keys: &[VIRTUAL_KEY]| keys.iter().any(|k| k.0 == vk);
+    (vk == SPACE && mods.win) || (is(&SHIFT_KEYS) && (mods.alt || mods.ctrl)) || (is(&ALT_AND_CTRL_KEYS) && mods.shift)
 }
 
 /// What the hook remembers between events.
@@ -246,6 +288,22 @@ fn mods_now() -> Mods {
     }
 }
 
+/// The chords bound now: the snapshot itself, not a copy.
+fn bindings() -> Option<Arc<[Binding]>> {
+    BINDINGS.read().ok().and_then(|b| b.clone())
+}
+
+/// Puts a new snapshot of the chords in place, `change` made to the current one.
+fn change_bindings(change: impl FnOnce(&mut Vec<Binding>)) -> std::io::Result<()> {
+    let mut bound = BINDINGS
+        .write()
+        .map_err(|_| std::io::Error::other("shortcut table poisoned"))?;
+    let mut list = bound.as_deref().map(<[Binding]>::to_vec).unwrap_or_default();
+    change(&mut list);
+    *bound = (!list.is_empty()).then(|| list.into());
+    Ok(())
+}
+
 /// Presses and releases the mask key, then releases `vk` (all injected, so the hook
 /// passes them).
 fn send_masked(vk: u16) {
@@ -345,15 +403,17 @@ unsafe extern "system" fn on_key(code: i32, wparam: WPARAM, lparam: LPARAM) -> L
         WM_KEYUP | WM_SYSKEYUP => Event::Up(vk),
         _ => return pass(),
     };
+    // Windows waits for this answer: the keys held are read once, and only when needed.
+    let mut held = None;
+    let mut mods = || *held.get_or_insert_with(mods_now);
     // Only watched, never taken: the chord goes on to Windows, which switches.
-    if let Some((hwnd, message)) = LANGUAGE_SINK.lock().ok().and_then(|s| *s) {
-        if crate::msgloop::contain(false, || language_switch(event, mods_now())) {
+    if let Some((hwnd, message)) = LANGUAGE_SINK.get().filter(|_| may_switch_language(event)) {
+        if crate::msgloop::contain(false, || language_switch(event, mods())) {
             // SAFETY: a message to a window of Kabuk's; a gone window makes it fail.
             let _ = unsafe { PostMessageW(Some(HWND(hwnd as *mut _)), message, WPARAM(0), LPARAM(0)) };
         }
     }
-    let sink = VOLUME_SINK.lock().ok().and_then(|s| *s);
-    if let Some((hwnd, message)) = sink {
+    if let Some((hwnd, message)) = VOLUME_SINK.get() {
         let volume = crate::msgloop::contain(None, || STATE.with(|s| decide_volume(event, &mut s.borrow_mut())));
         if let Some(told) = volume {
             if let Some(key) = told {
@@ -364,8 +424,9 @@ unsafe extern "system" fn on_key(code: i32, wparam: WPARAM, lparam: LPARAM) -> L
         }
     }
     let outcome = crate::msgloop::contain(Outcome::Pass, || {
-        let bindings = BINDINGS.lock().map(|b| b.clone()).unwrap_or_default();
-        STATE.with(|s| decide(event, mods_now(), &bindings, &mut s.borrow_mut()))
+        let bindings = bindings();
+        let bound = bindings.as_deref().unwrap_or_default();
+        STATE.with(|s| decide(event, mods(), bound, &mut s.borrow_mut()))
     });
     match outcome {
         Outcome::Pass => pass(),
@@ -583,19 +644,14 @@ impl Shortcut {
             mods: chord.mods,
             vk: virtual_key(chord.key).0,
         };
-        BINDINGS
-            .lock()
-            .map_err(|_| std::io::Error::other("shortcut table poisoned"))?
-            .push(binding);
+        change_bindings(|b| b.push(binding))?;
         Ok(Shortcut { token })
     }
 }
 
 impl Drop for Shortcut {
     fn drop(&mut self) {
-        if let Ok(mut b) = BINDINGS.lock() {
-            b.retain(|b| b.token != self.token);
-        }
+        let _ = change_bindings(|b| b.retain(|b| b.token != self.token));
     }
 }
 
@@ -607,19 +663,14 @@ pub struct VolumeKeys(());
 impl VolumeKeys {
     pub fn take(window: &MessageWindow, message: u32) -> std::io::Result<VolumeKeys> {
         ensure_hook().map_err(std::io::Error::other)?;
-        let mut sink = VOLUME_SINK
-            .lock()
-            .map_err(|_| std::io::Error::other("volume key sink poisoned"))?;
-        *sink = Some((window.hwnd().0 as isize, message));
+        VOLUME_SINK.set(Some((window.hwnd().0 as isize, message)));
         Ok(VolumeKeys(()))
     }
 }
 
 impl Drop for VolumeKeys {
     fn drop(&mut self) {
-        if let Ok(mut s) = VOLUME_SINK.lock() {
-            *s = None;
-        }
+        VOLUME_SINK.set(None);
     }
 }
 
@@ -633,19 +684,14 @@ pub struct LanguageKeys(());
 impl LanguageKeys {
     pub fn watch(window: crate::window::Hwnd, message: u32) -> std::io::Result<LanguageKeys> {
         ensure_hook().map_err(std::io::Error::other)?;
-        let mut sink = LANGUAGE_SINK
-            .lock()
-            .map_err(|_| std::io::Error::other("language key sink poisoned"))?;
-        *sink = Some((window.0 as isize, message));
+        LANGUAGE_SINK.set(Some((window.0 as isize, message)));
         Ok(LanguageKeys(()))
     }
 }
 
 impl Drop for LanguageKeys {
     fn drop(&mut self) {
-        if let Ok(mut s) = LANGUAGE_SINK.lock() {
-            *s = None;
-        }
+        LANGUAGE_SINK.set(None);
     }
 }
 
@@ -686,7 +732,8 @@ mod tests {
     //! Edge cases (no key is sent: tests never inject input): a chord fires once, its
     //! repeats and release are swallowed; other modifiers or keys pass; the Win key's and
     //! Alt's release after a chord is masked, without one it passes; modifiers alone
-    //! pass; bindings come and go with their `Shortcut`.
+    //! pass; bindings come and go with their `Shortcut`; a sink's window with its high
+    //! bit set; every key and modifier set checked against the language keys.
     use super::*;
     use kabuk_core::config::shortcut::Key;
 
@@ -846,9 +893,68 @@ mod tests {
     fn volume_keys_are_taken_only_while_asked() {
         let w = crate::msgloop::MessageWindow::new("Kabuk.Test.VolumeKeys", "", |_| None).unwrap();
         let taken = VolumeKeys::take(&w, 0x8001).expect("the hook installs");
-        assert!(VOLUME_SINK.lock().unwrap().is_some());
+        assert_eq!(VOLUME_SINK.get(), Some((w.hwnd().0 as isize, 0x8001)));
         drop(taken);
-        assert!(VOLUME_SINK.lock().unwrap().is_none());
+        assert_eq!(VOLUME_SINK.get(), None);
+    }
+
+    /// M19: a sink is read on every key without a lock, the window and the message in
+    /// one word: what was set reads back, a handle with its high bit set too (Windows
+    /// sign-extends handles); none is none.
+    #[test]
+    fn a_sink_reads_back_what_was_set() {
+        for to in [
+            Some((0x0001_2345, 0x8001)),
+            Some((-0x7FFF_0000, u32::MAX)),
+            Some((isize::from(i16::MAX), 0)),
+            None,
+        ] {
+            assert_eq!(unpack_sink(pack_sink(to)), to, "{to:?}");
+        }
+        assert_eq!(pack_sink(None), 0);
+        let sink = Sink::new();
+        assert_eq!(sink.get(), None);
+        sink.set(Some((77, 0x8002)));
+        assert_eq!(sink.get(), Some((77, 0x8002)));
+        sink.set(None);
+        assert_eq!(sink.get(), None);
+    }
+
+    /// M19: only the release of Space, Shift, Alt or Ctrl is checked for a language
+    /// switch (and reads the keys held); no other event of any key with any keys held
+    /// would have been one.
+    #[test]
+    fn only_the_keys_of_a_language_chord_are_checked() {
+        for vk in [
+            SPACE,
+            VK_SHIFT.0,
+            VK_RSHIFT.0,
+            VK_MENU.0,
+            VK_LMENU.0,
+            VK_CONTROL.0,
+            VK_RCONTROL.0,
+        ] {
+            assert!(may_switch_language(Event::Up(vk)), "{vk:#x}");
+            assert!(!may_switch_language(Event::Down(vk)), "{vk:#x} pressed");
+        }
+        assert!(!may_switch_language(Event::Up(VK_LWIN.0)));
+        assert!(!may_switch_language(Event::Up(u16::from(b'A'))));
+        let all_mods = (0..16u8).map(|m| Mods {
+            ctrl: m & 1 != 0,
+            alt: m & 2 != 0,
+            shift: m & 4 != 0,
+            win: m & 8 != 0,
+        });
+        for mods in all_mods {
+            for vk in 0..=u16::from(u8::MAX) {
+                for event in [Event::Down(vk), Event::Up(vk)] {
+                    assert!(
+                        !language_switch(event, mods) || may_switch_language(event),
+                        "{event:?} with {mods:?} is a switch not checked"
+                    );
+                }
+            }
+        }
     }
 
     /// The game mode's state is the process's: tests that change it take turns.
@@ -862,11 +968,14 @@ mod tests {
             mods: WIN,
             key: Key::Function(24),
         };
-        let before = BINDINGS.lock().unwrap().len();
+        let count = || bindings().map_or(0, |b| b.len());
+        let before = count();
         let s = Shortcut::bind(&w, 3, chord).expect("the hook installs");
-        assert_eq!(BINDINGS.lock().unwrap().len(), before + 1);
+        assert_eq!(count(), before + 1);
+        // M19: the hook reads the snapshot itself, not a copy of it.
+        assert!(Arc::ptr_eq(&bindings().unwrap(), &bindings().unwrap()));
         drop(s);
-        assert_eq!(BINDINGS.lock().unwrap().len(), before);
+        assert_eq!(count(), before);
         set_paused_on(vec![7]);
         assert!(PAUSED.load(Ordering::Relaxed));
         set_paused_on(Vec::new());
