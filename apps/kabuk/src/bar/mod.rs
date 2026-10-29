@@ -1,5 +1,6 @@
 //! The bar: one per monitor (ARCHITECTURE §5).
 
+pub mod access;
 pub mod app_menu;
 pub mod app_preview;
 pub mod apps;

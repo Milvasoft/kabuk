@@ -3126,4 +3126,69 @@ mod tests {
         assert_eq!(&l.draws[1..], &draws[..]);
         assert_eq!(l.hits, hits);
     }
+
+    /// DECISIONS D97: every clickable part of every look's bar has something for a screen
+    /// reader to say, given what the bar knows of it (as the bar thread gives it); Ada's
+    /// bar is read as listed.
+    #[test]
+    fn a_screen_reader_can_name_every_part_of_every_bar() {
+        use crate::bar::access::{bar_name, bar_parts, Said};
+        for lang in [Lang::En, Lang::Tr] {
+            let i18n = I18n::new(lang);
+            let mut d = data(&i18n);
+            d.notif_count = Some(2);
+            d.keyboard = Some("ENG".into());
+            let said = |module: &str, value: u32| Said {
+                tip: (module == hit::WORKSPACE)
+                    .then(|| i18n.tr_args("tip-workspace", &[("value", value.to_string().into())])),
+                own: match (module, value) {
+                    (hit::TRAY, _) => Some(format!("Program {value}")),
+                    (hit::VOLUME, _) => Some(i18n.tr_args("bar-percent", &[("value", "40".into())])),
+                    (hit::LAYOUT, _) => Some(i18n.tr("t-tiled")),
+                    (hit::STATS, hit::STAT_CPU) => Some(i18n.tr_args("bar-percent", &[("value", "12".into())])),
+                    (hit::STATS, hit::STAT_RAM) => Some(i18n.tr_args("bar-ram", &[("value", "9.8".into())])),
+                    (hit::STATS, hit::STAT_GPU) => Some(i18n.tr_args("bar-temp", &[("value", "46".into())])),
+                    (hit::STATS, _) => Some(i18n.tr_args("bar-net-rate", &[("value", "2.1".into())])),
+                    _ => None,
+                },
+            };
+            for look in Look::ALL {
+                let l = render_look(look, &d, &i18n);
+                let named = bar_parts(&l, Point::default(), kabuk_ui::geom::Scale(1.0), |p| {
+                    let s = said(p.hit.module, p.hit.value);
+                    bar_name(&i18n, (p.hit.module, p.hit.value), &p.text, s)
+                });
+                assert_eq!(named.len(), l.hits.len(), "{look:?} {lang:?}: {named:?}");
+                if look == Look::Ada && lang == Lang::En {
+                    let names: Vec<&str> = named.iter().map(|p| p.name.as_str()).collect();
+                    assert_eq!(
+                        names,
+                        vec![
+                            "All apps",
+                            "Workspace 1",
+                            "Workspace 2",
+                            "Workspace 3",
+                            "Tiling layout",
+                            "Window title: MilvaScene.cs OledSaver",
+                            "Clock: 20:31 Mon 12 Oct",
+                            "Media: Lo-fi çalışma listesi",
+                            "CPU: 12%",
+                            "RAM: 9.8G",
+                            "GPU temperature: 46°",
+                            "Network speed: 2.1 MB/s",
+                            "Volume: 40%",
+                            "Program 0",
+                            "Program 1",
+                            "Keyboard language: ENG",
+                            "Network status",
+                            "Quick settings",
+                            "Notifications: 2",
+                            "Power menu",
+                            "Show desktop",
+                        ],
+                    );
+                }
+            }
+        }
+    }
 }

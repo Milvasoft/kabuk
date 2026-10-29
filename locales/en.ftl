@@ -608,5 +608,12 @@ notify-elevated-s = Kabuk cannot move its windows, so they float. Start Kabuk as
 # A bar module's tooltip (PLAN M19 U15).
 tip-workspace = Workspace { $value }
 
+# What a screen reader says of a bar module: its name, then its value (DECISIONS D97).
+acc-part = { $label }: { $value }
+# The media card's buttons, drawn as pictures only.
+acc-media-previous = Previous track
+acc-media-toggle = Play or pause
+acc-media-next = Next track
+
 # The launcher while its entries are still gathered (PLAN M19 U20).
 l-searching = Searching…

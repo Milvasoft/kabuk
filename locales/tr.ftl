@@ -607,5 +607,12 @@ notify-elevated-s = Kabuk onun pencerelerini taşıyamaz, bu yüzden yüzerler. 
 # Bar modülünün ipucu (PLAN M19 U15).
 tip-workspace = Çalışma alanı { $value }
 
+# Ekran okuyucunun bir bar modülü için söylediği: adı, ardından değeri (DECISIONS D97).
+acc-part = { $label }: { $value }
+# Medya kartının yalnızca resimle çizilen düğmeleri.
+acc-media-previous = Önceki parça
+acc-media-toggle = Oynat veya duraklat
+acc-media-next = Sonraki parça
+
 # Başlatıcı, girdileri toplanırken (PLAN M19 U20).
 l-searching = Aranıyor…

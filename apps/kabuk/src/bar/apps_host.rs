@@ -511,7 +511,7 @@ impl Shared {
     }
 
     /// The name app `a` goes by, looked up once.
-    fn app_name(&self, a: &App) -> String {
+    pub(super) fn app_name(&self, a: &App) -> String {
         let key = a.link.clone().unwrap_or_else(|| a.source.clone());
         self.apps
             .names

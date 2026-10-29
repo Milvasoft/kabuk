@@ -50,6 +50,8 @@ use super::view::{self, BarData, Title, Volume, Workspace};
 use super::volume_panel;
 use crate::wm::{self, SharedState, WmLink};
 
+#[path = "access_host.rs"]
+mod access_host;
 #[path = "launcher_host.rs"]
 mod launcher_host;
 pub use launcher_host::{LAUNCHER_CLASS, MSG_TEST_LAUNCHER};
@@ -4674,7 +4676,12 @@ impl Shared {
                 view::backdrop(&mut layout, Rect::new(-origin.x, -origin.y, window.w, window.h));
             }
             let layout_us = started.elapsed().as_micros() as u64;
+            // What screen readers find on it, read only when one asks (D97).
+            let parts = self.bar_parts(&layout, origin, scale, &data);
+            let bar_name = self.i18n.tr("nav-bar");
             let bar = &mut self.bars[i];
+            bar.window
+                .set_accessible(kabuk_win::uia::Container::Bar, &bar_name, parts);
             // Another workspace came forward: the old picture blends into the new one.
             let switched = blends
                 && bar

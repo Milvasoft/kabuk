@@ -469,7 +469,24 @@ impl Shared {
         }
         l.rect = rect;
         l.scale = scale;
-        tracing::debug!(query = %l.model.query(), rows = %l.row_titles().join(" | "), "launcher rows");
+        let titles = l.row_titles();
+        tracing::debug!(query = %l.model.query(), rows = %titles.join(" | "), "launcher rows");
+        // What screen readers find in it: its rows by their titles, the selected one
+        // holding the keyboard (D97).
+        let parts = crate::bar::access::popup_parts(
+            &layout,
+            scale,
+            (HIT_ROW, kabuk_win::uia::Role::ListItem),
+            u32::try_from(l.model.selected()).ok(),
+            |v, drawn| {
+                usize::try_from(v)
+                    .ok()
+                    .and_then(|v| titles.get(v).cloned())
+                    .or_else(|| Some(drawn.to_string()))
+            },
+        );
+        l.window
+            .set_accessible(kabuk_win::uia::Container::List, &self.i18n.tr("l-name"), parts);
         l.layout = layout;
     }
 
