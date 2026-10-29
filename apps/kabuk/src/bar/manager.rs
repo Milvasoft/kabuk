@@ -3701,6 +3701,12 @@ impl Shared {
     fn render_dock(&mut self, force: bool, shift: (i32, i32)) -> Result<bool, RenderError> {
         let apps = self.dock_apps();
         let full = self.motion_level() == kabuk_ui::motion::Level::Full;
+        if self.dock.is_none() {
+            return Ok(false);
+        }
+        // What screen readers find on it: its apps by name and the launcher's tile (D97).
+        let names: Vec<String> = self.apps.list.iter().map(|a| self.app_name(a)).collect();
+        let (dock_name, launcher) = (self.i18n.tr("nav-bar"), self.i18n.tr("l-name"));
         let Some(d) = self.dock.as_mut() else { return Ok(false) };
         // Aside for a full-screen program: not drawn (D85).
         if d.aside {
@@ -3773,6 +3779,13 @@ impl Shared {
             d.window.set_rect(r);
         }
         tracing::debug!(apps = apps.len(), rect = ?d.rect, grown = ?grown, "dock drawn");
+        let parts = super::access::bar_parts(&layout, origin, d.scale, |p| match p.hit.module {
+            dock::hit::APP => usize::try_from(p.hit.value).ok().and_then(|i| names.get(i).cloned()),
+            dock::hit::LAUNCHER => Some(launcher.clone()),
+            _ => None,
+        });
+        d.window
+            .set_accessible(kabuk_win::uia::Container::Bar, &dock_name, parts);
         d.drawn = Some(shift);
         d.drawn_grow = grown;
         d.apps = apps;
