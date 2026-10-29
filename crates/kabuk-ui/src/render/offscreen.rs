@@ -10,7 +10,7 @@ use windows::Win32::Graphics::Dxgi::Common::*;
 use windows::Win32::Graphics::Imaging::*;
 use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED};
 
-use super::draw::{draw_layout, Frame, IconCache, Palette};
+use super::draw::{draw_layout, Frame, Palette};
 use super::{Context, Gpu, Result};
 use crate::geom::Scale;
 use crate::node::Layout;
@@ -88,7 +88,6 @@ impl Gpu {
         background: kabuk_theme::Color,
     ) -> Result<Pixels> {
         self.offscreen(width, height, scale.0 * Scale::BASE_DPI, background, |ctx| {
-            let mut icons = IconCache::default();
             // SAFETY: text settings on the context drawing this canvas.
             unsafe {
                 ctx.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
@@ -97,7 +96,6 @@ impl Gpu {
             draw_layout(
                 self,
                 ctx,
-                &mut icons,
                 &Frame {
                     layout,
                     palette,

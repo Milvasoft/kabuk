@@ -1,5 +1,7 @@
 //! Process-wide GPU objects shared by every surface.
 
+use std::cell::RefCell;
+
 use windows::core::Interface;
 use windows::Win32::Foundation::HMODULE;
 use windows::Win32::Graphics::Direct2D::{
@@ -13,6 +15,7 @@ use windows::Win32::Graphics::Direct3D11::{
 use windows::Win32::Graphics::DirectComposition::{DCompositionCreateDevice2, IDCompositionDesktopDevice};
 use windows::Win32::Graphics::Dxgi::IDXGIDevice;
 
+use super::draw::IconCache;
 use super::text::TextEngine;
 use super::{Context, Result};
 
@@ -26,6 +29,8 @@ pub struct Gpu {
     pub text: TextEngine,
     /// Pictures drawn by [`crate::node::Node::image`].
     pub images: Images,
+    /// Icon geometries, built once and shared by every surface.
+    pub(crate) icons: RefCell<IconCache>,
 }
 
 /// A stored picture: its width and height in pixels, and its pixels.
@@ -109,6 +114,7 @@ impl Gpu {
             dcomp,
             text,
             images: Images::default(),
+            icons: RefCell::default(),
         })
     }
 

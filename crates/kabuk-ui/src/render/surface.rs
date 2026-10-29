@@ -13,7 +13,7 @@ use windows::Win32::Graphics::DirectComposition::{
 use windows::Win32::Graphics::Dxgi::Common::*;
 use windows_numerics::Matrix3x2;
 
-use super::draw::{draw_layout, Frame, IconCache, Palette};
+use super::draw::{draw_layout, Frame, Palette};
 use super::{Context, Gpu, Result};
 use crate::geom::Scale;
 use crate::motion::{Cubic, Pose, Transition};
@@ -38,7 +38,6 @@ pub struct WindowSurface {
     /// The content before a change, above the new one while it fades out, and when it
     /// has faded.
     fading: Option<(IDCompositionVisual2, IDCompositionSurface, std::time::Instant)>,
-    icons: IconCache,
     width: u32,
     height: u32,
 }
@@ -83,7 +82,6 @@ impl WindowSurface {
                 effect,
                 zoom,
                 fading: None,
-                icons: IconCache::default(),
                 width,
                 height,
             })
@@ -380,7 +378,7 @@ impl WindowSurface {
                 origin,
                 clip: Some(area),
             };
-            let drawn = draw_layout(gpu, &ctx, &mut self.icons, &frame);
+            let drawn = draw_layout(gpu, &ctx, &frame);
             ctx.PopAxisAlignedClip();
             let ended = self.surface.EndDraw().ctx("end draw");
             drawn?;

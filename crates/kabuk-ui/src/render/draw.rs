@@ -82,7 +82,8 @@ fn snap(r: Rect, scale: Scale) -> Rect {
     Rect::new(x0, y0, x1 - x0, y1 - y0)
 }
 
-/// Cached icon geometry, built once per icon.
+/// Cached icon geometry, built once per icon. Geometries and stroke styles are factory
+/// resources, so one cache on the [`Gpu`] serves every surface.
 #[derive(Default)]
 pub(crate) struct IconCache {
     geometries: HashMap<&'static str, Vec<ID2D1Geometry>>,
@@ -90,6 +91,12 @@ pub(crate) struct IconCache {
 }
 
 impl IconCache {
+    /// How many icons have been parsed and built.
+    #[cfg(test)]
+    pub(crate) fn built(&self) -> usize {
+        self.geometries.len()
+    }
+
     fn stroke(&mut self, gpu: &Gpu) -> Result<ID2D1StrokeStyle> {
         if let Some(s) = &self.stroke {
             return Ok(s.clone());
@@ -113,7 +120,7 @@ impl IconCache {
         Ok(s)
     }
 
-    fn geometry(&mut self, gpu: &Gpu, name: &'static str) -> Result<&[ID2D1Geometry]> {
+    fn geometry(&mut self, gpu: &Gpu, name: &'static str) -> Result<Vec<ID2D1Geometry>> {
         if !self.geometries.contains_key(name) {
             let shapes = match crate::icons::source(name).map(svg::parse) {
                 Some(Ok(s)) => s,
@@ -132,7 +139,7 @@ impl IconCache {
             }
             self.geometries.insert(name, out);
         }
-        Ok(self.geometries.get(name).map(Vec::as_slice).unwrap_or_default())
+        Ok(self.geometries.get(name).cloned().unwrap_or_default())
     }
 }
 
@@ -243,7 +250,7 @@ pub(crate) struct Frame<'a> {
     pub clip: Option<Rect>,
 }
 
-pub(crate) fn draw_layout(gpu: &Gpu, ctx: &ID2D1DeviceContext, icons: &mut IconCache, frame: &Frame) -> Result<()> {
+pub(crate) fn draw_layout(gpu: &Gpu, ctx: &ID2D1DeviceContext, frame: &Frame) -> Result<()> {
     let Frame {
         layout,
         palette,
@@ -302,7 +309,7 @@ pub(crate) fn draw_layout(gpu: &Gpu, ctx: &ID2D1DeviceContext, icons: &mut IconC
                 // SAFETY: drawing between BeginDraw/EndDraw on the caller's context.
                 unsafe { ctx.DrawTextLayout(at, &text_layout, &default, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT) };
             }
-            Draw::Icon { rect, spec } => icon(gpu, ctx, icons, &mut brush, rect.offset(ox, oy), spec)?,
+            Draw::Icon { rect, spec } => icon(gpu, ctx, &mut brush, rect.offset(ox, oy), spec)?,
             Draw::Image { rect, spec } => image(gpu, ctx, rect.offset(ox, oy), spec.key, spec.turn)?,
         }
     }
@@ -474,12 +481,14 @@ pub(crate) fn snapped(rect: Rect, offset: (f32, f32), scale: f32) -> Rect {
 fn icon(
     gpu: &Gpu,
     ctx: &ID2D1DeviceContext,
-    icons: &mut IconCache,
     brush: &mut dyn FnMut(Role) -> Result<ID2D1SolidColorBrush>,
     rect: Rect,
     spec: &IconSpec,
 ) -> Result<()> {
-    let stroke = icons.stroke(gpu)?;
+    let (stroke, geometries) = {
+        let mut icons = gpu.icons.borrow_mut();
+        (icons.stroke(gpu)?, icons.geometry(gpu, spec.name)?)
+    };
     let b = brush(spec.color)?;
     let k = spec.size / ICON_VIEWBOX;
     let transform = Matrix3x2 {
@@ -490,7 +499,6 @@ fn icon(
         M31: rect.x,
         M32: rect.y,
     };
-    let geometries = icons.geometry(gpu, spec.name)?.to_vec();
     // SAFETY: drawing between BeginDraw/EndDraw; the transform is restored afterwards.
     unsafe {
         let mut previous = Matrix3x2::default();
@@ -545,6 +553,32 @@ mod tests {
         // Already on pixels: unchanged.
         let r = Rect::new(4.0, 8.0, 16.0, 16.0);
         assert_eq!(snapped(r, (0.0, 0.0), 1.0), r);
+    }
+
+    /// Found in a code review (PLAN M19 P11): every surface kept its own icon cache, so
+    /// each popup parsed the same SVGs again.
+    #[test]
+    fn icons_are_built_once_for_every_canvas_of_a_gpu() {
+        use crate::geom::Point;
+        use crate::node::{layout, Node};
+        let gpu = Gpu::new().expect("GPU or WARP device");
+        let palette = Palette::new([(Role::Fg, Color::WHITE)]);
+        let row = Node::row(vec![
+            Node::icon("bell", 16.0, Role::Fg),
+            Node::icon("cpu", 16.0, Role::Fg),
+            Node::icon("bell", 16.0, Role::Fg),
+        ]);
+        let l = layout(&row, Point::default(), &gpu.text);
+        for _ in 0..3 {
+            let px = gpu
+                .render_pixels(&l, &palette, Scale(1.0), 48, 16, Color::BLACK)
+                .unwrap();
+            assert!(
+                (0..16).any(|x| (0..16).any(|y| px.at(x, y)[0] > 128)),
+                "the bell is drawn"
+            );
+        }
+        assert_eq!(gpu.icons.borrow().built(), 2);
     }
 
     #[test]
