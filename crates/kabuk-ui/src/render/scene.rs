@@ -12,6 +12,7 @@ use windows::Win32::Graphics::Direct2D::*;
 use windows::Win32::Graphics::DirectWrite::*;
 use windows_numerics::{Matrix3x2, Vector2};
 
+use super::text::Recent;
 use super::{Context, Gpu, Result};
 
 /// The scenes' text face, and the wordmark's (the first one installed).
@@ -43,13 +44,41 @@ struct Wordmark {
     size: (f32, f32),
 }
 
+/// Text layouts a scene canvas keeps: a scene shows a few texts (the clock's time and
+/// date), each changing once a minute at most.
+const SCENE_LAYOUT_LIMIT: usize = 16;
+
 /// What a scene canvas keeps from frame to frame.
-#[derive(Default)]
 pub struct SceneCache {
     stroke: Option<ID2D1StrokeStyle>,
     formats: HashMap<(u32, u16), IDWriteTextFormat>,
+    /// Each text laid out once, by its text, size and weight (PLAN M19 P18: the screen
+    /// saver laid its clock out four times a frame).
+    layouts: Recent<(String, u32, u16), IDWriteTextLayout>,
     wordmarks: HashMap<u32, Wordmark>,
     face: Option<Option<IDWriteFontFace>>,
+    made: usize,
+}
+
+impl Default for SceneCache {
+    fn default() -> SceneCache {
+        SceneCache {
+            stroke: None,
+            formats: HashMap::new(),
+            layouts: Recent::new(SCENE_LAYOUT_LIMIT),
+            wordmarks: HashMap::new(),
+            face: None,
+            made: 0,
+        }
+    }
+}
+
+impl SceneCache {
+    /// How many text layouts were made.
+    #[cfg(test)]
+    pub(crate) fn layouts_made(&self) -> usize {
+        self.made
+    }
 }
 
 /// A [`Canvas`] drawing on `ctx` (between BeginDraw and EndDraw).
@@ -126,16 +155,23 @@ impl<'a> SceneCanvas<'a> {
     }
 
     fn layout(&mut self, text: &str, style: TextStyle) -> Option<IDWriteTextLayout> {
+        let key = (text.to_string(), style.size.to_bits(), style.weight);
+        if let Some(l) = self.cache.layouts.get(&key) {
+            return Some(l.clone());
+        }
         let format = self.format(style)?;
         let wide: Vec<u16> = text.encode_utf16().collect();
         // SAFETY: the text and format outlive the call.
-        unsafe {
+        let layout = unsafe {
             self.gpu
                 .text
                 .factory
                 .CreateTextLayout(&wide, &format, f32::MAX / 4.0, f32::MAX / 4.0)
         }
-        .ok()
+        .ok()?;
+        self.cache.made += 1;
+        self.cache.layouts.insert(key, layout.clone());
+        Some(layout)
     }
 
     fn face(&mut self) -> Option<IDWriteFontFace> {
@@ -437,5 +473,89 @@ impl Canvas for SceneCanvas<'_> {
             self.ctx.FillGeometry(&d, self.paint(dot), None);
             self.ctx.SetTransform(&base);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Edge cases: a clock drawn frame after frame lays its texts out once; a new minute
+    //! lays out only the text that changed; measuring and drawing the same text share
+    //! its layout; a new size is another layout; a flood of texts stays within the limit.
+    use super::*;
+    use kabuk_scenes::Clock;
+
+    const SIZE: (u32, u32) = (320, 180);
+    const INK: Rgba = Rgba {
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
+        a: 1.0,
+    };
+
+    /// A frame as the constellation draws its clock: each text measured, then drawn.
+    fn clock_frame(c: &mut dyn Canvas, clock: &Clock, size: f32) {
+        let time = TextStyle { size, weight: 300 };
+        let date = TextStyle {
+            size: size / 3.0,
+            weight: 400,
+        };
+        let t = c.measure(&clock.time, time);
+        let d = c.measure(&clock.date, date);
+        c.text(&clock.time, Point { x: 0.0, y: 0.0 }, time, INK);
+        c.text(
+            &clock.date,
+            Point {
+                x: 0.0,
+                y: t.1.max(d.1),
+            },
+            date,
+            INK,
+        );
+    }
+
+    /// PLAN M19 P18: the screen saver laid out its clock's texts four times a frame, thirty
+    /// frames a second, though they change once a minute.
+    #[test]
+    fn the_clocks_texts_are_laid_out_once_a_minute_not_every_frame() {
+        let gpu = Gpu::new().expect("GPU or WARP device");
+        let mut cache = SceneCache::default();
+        let mut clock = Clock {
+            time: "20:31".into(),
+            date: "12 Ekim Pazartesi".into(),
+        };
+        for _ in 0..30 {
+            gpu.render_scene(SIZE.0, SIZE.1, &mut cache, |c| clock_frame(c, &clock, 48.0))
+                .expect("drawn");
+        }
+        assert_eq!(cache.layouts_made(), 2, "a second of frames: the time and the date");
+        clock.time = "20:32".into();
+        for _ in 0..30 {
+            gpu.render_scene(SIZE.0, SIZE.1, &mut cache, |c| clock_frame(c, &clock, 48.0))
+                .expect("drawn");
+        }
+        assert_eq!(cache.layouts_made(), 3, "the new minute only");
+        // Another monitor's size is another layout of the same texts.
+        gpu.render_scene(SIZE.0, SIZE.1, &mut cache, |c| clock_frame(c, &clock, 96.0))
+            .expect("drawn");
+        assert_eq!(cache.layouts_made(), 5);
+    }
+
+    #[test]
+    fn the_layouts_kept_stay_within_their_limit() {
+        let gpu = Gpu::new().expect("GPU or WARP device");
+        let mut cache = SceneCache::default();
+        let style = TextStyle {
+            size: 20.0,
+            weight: 400,
+        };
+        let texts = SCENE_LAYOUT_LIMIT * 3;
+        gpu.render_scene(SIZE.0, SIZE.1, &mut cache, |c| {
+            for minute in 0..texts {
+                c.text(&format!("20:{minute}"), Point { x: 0.0, y: 0.0 }, style, INK);
+            }
+        })
+        .expect("drawn");
+        assert!(cache.layouts.len() <= SCENE_LAYOUT_LIMIT, "{}", cache.layouts.len());
+        assert_eq!(cache.layouts_made(), texts);
     }
 }

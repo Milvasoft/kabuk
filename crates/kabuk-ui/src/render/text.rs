@@ -30,7 +30,8 @@ const EVICT_DIVISOR: usize = 4;
 
 /// Values by key, at most `limit` of them; when full, the least recently used quarter is
 /// dropped, so the texts drawn again and again (the bar's) outlive a flood of new ones.
-struct Recent<K, V> {
+/// The scenes' canvas keeps its layouts in one too (PLAN M19 P18).
+pub(super) struct Recent<K, V> {
     entries: HashMap<K, (V, u64)>,
     /// Advances on every use; an entry keeps the time it was last used.
     clock: u64,
@@ -38,7 +39,7 @@ struct Recent<K, V> {
 }
 
 impl<K: std::hash::Hash + Eq, V> Recent<K, V> {
-    fn new(limit: usize) -> Recent<K, V> {
+    pub(super) fn new(limit: usize) -> Recent<K, V> {
         Recent {
             entries: HashMap::new(),
             clock: 0,
@@ -46,8 +47,13 @@ impl<K: std::hash::Hash + Eq, V> Recent<K, V> {
         }
     }
 
+    #[cfg(test)]
+    pub(super) fn len(&self) -> usize {
+        self.entries.len()
+    }
+
     /// The value of `key`, now the most recently used.
-    fn get(&mut self, key: &K) -> Option<&V> {
+    pub(super) fn get(&mut self, key: &K) -> Option<&V> {
         self.clock += 1;
         let now = self.clock;
         self.entries.get_mut(key).map(|e| {
@@ -56,7 +62,7 @@ impl<K: std::hash::Hash + Eq, V> Recent<K, V> {
         })
     }
 
-    fn insert(&mut self, key: K, value: V) {
+    pub(super) fn insert(&mut self, key: K, value: V) {
         if self.entries.len() >= self.limit && !self.entries.contains_key(&key) {
             let count = (self.limit / EVICT_DIVISOR).max(1);
             let mut used: Vec<u64> = self.entries.values().map(|e| e.1).collect();
