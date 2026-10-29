@@ -4,12 +4,13 @@
 //!   language's messages, the look's resolved colour tokens, the cursor previews and
 //!   the live information.
 //! - `{"op":"set","path":"windows.gap","value":12}` → the setting written to
-//!   `kabuk.toml` (only that key changes, atomically; Kabuk applies it live) and a fresh
-//!   `state`; or `{"op":"refused","path":…,"reason":…,"at":…}` when the value is not
-//!   valid: why, in the user's language, and the key the mistake is at
+//!   `kabuk.toml` (only that key changes, atomically; Kabuk applies it live) and a
+//!   `state` with `"partial":true`: only what the change can have changed (PLAN M19 P18,
+//!   [`Bridge::changed_state`]); or `{"op":"refused","path":…,"reason":…,"at":…}` when
+//!   the value is not valid: why, in the user's language, and the key the mistake is at
 //!   (`rules.rule[2].title`; `null` when not known).
 //! - `{"op":"info"}` → `{"op":"info", …}`: monitors, managed windows, memory, from the
-//!   running shell over its command pipe.
+//!   running shell over its command pipe (asked only while it runs).
 //! - `{"op":"windows"}` → `{"op":"windows","windows":[{"exe":…,"class":…,"title":…}, …]}`:
 //!   the windows Kabuk manages now, for "Pick an open window" (SPEC §2.3; a test passes
 //!   `"windows"` as `query windows` gives them).
@@ -103,6 +104,63 @@ fn mode_choice(m: Mode) -> ModeChoice {
     }
 }
 
+/// A language as the page names it.
+fn lang_code(lang: Lang) -> &'static str {
+    if lang == Lang::Tr {
+        "tr"
+    } else {
+        "en"
+    }
+}
+
+/// The language's messages, `$value` written as [`VALUE_MARK`].
+fn strings(i18n: &kabuk_i18n::I18n) -> Map<String, Value> {
+    i18n.table(VALUE_MARK)
+        .into_iter()
+        .map(|(k, v)| (k, Value::String(v)))
+        .collect()
+}
+
+/// What the page draws the look with: the look, the mode now, its resolved colour tokens,
+/// the cursor previews and the accent as adapted to the look.
+fn look_state(cfg: &Config) -> Vec<(&'static str, Value)> {
+    let hour = kabuk_win::system::local_time().hour;
+    let mode = mode_now(
+        mode_choice(cfg.appearance.mode),
+        kabuk_win::system::apps_use_light_theme(),
+        hour,
+    );
+    let accent = (cfg.appearance.accent != config::THEME_ACCENT).then_some(cfg.appearance.accent.as_str());
+    let resolved = kabuk_theme::resolve::resolve(cfg.appearance.look.code(), mode, accent);
+    let tokens: Map<String, Value> = resolved
+        .as_ref()
+        .map(|r| {
+            r.tokens
+                .entries()
+                .into_iter()
+                .map(|(k, v)| (k, Value::String(v)))
+                .collect()
+        })
+        .unwrap_or_default();
+    vec![
+        ("look", json!(cfg.appearance.look.code())),
+        (
+            "mode",
+            json!(if mode == kabuk_theme::Mode::Light {
+                "light"
+            } else {
+                "dark"
+            }),
+        ),
+        ("tokens", Value::Object(tokens)),
+        (
+            "cursor_previews",
+            json!(resolved.as_ref().map(|r| cursor_previews(&cfg.appearance, &r.tokens))),
+        ),
+        ("accent_adapted", json!(resolved.and_then(|r| r.accent_adapted))),
+    ]
+}
+
 impl Bridge {
     fn read(&self) -> String {
         std::fs::read_to_string(&self.config_file).unwrap_or_default()
@@ -128,8 +186,10 @@ impl Bridge {
     }
 
     pub fn handle(&self, message: &str) -> Option<String> {
+        let started = std::time::Instant::now();
         let m: Value = serde_json::from_str(message).ok()?;
-        let reply = match m.get("op").and_then(Value::as_str)? {
+        let op = m.get("op").and_then(Value::as_str)?;
+        let reply = match op {
             "load" => {
                 tracing::info!("settings page loaded");
                 self.state()
@@ -198,7 +258,15 @@ impl Bridge {
                 return None;
             }
         };
-        Some(reply.to_string())
+        let text = reply.to_string();
+        // How long each answer took and how big it was (PLAN M19 P18).
+        tracing::debug!(
+            op,
+            ms = started.elapsed().as_secs_f64() * 1000.0,
+            bytes = text.len(),
+            "settings page answered"
+        );
+        Some(text)
     }
 
     fn set(&self, path: &str, value: &Value) -> Value {
@@ -220,8 +288,42 @@ impl Bridge {
             return refused((i18n.tr("set-refused"), None));
         }
         tracing::info!(path, value = %value, "setting saved");
-        let mut state = self.state();
+        let before = config::parse(&source).map(|l| l.config).unwrap_or_default();
+        let mut state = self.changed_state(&before);
         state["saved"] = json!(path);
+        state
+    }
+
+    /// The state after a change from `before` (PLAN M19 P18): the configuration and its
+    /// problems from one reading, the app grid's arrangement, the words only when the
+    /// language changed, the look's colours and cursor previews only when the appearance
+    /// did; the page keeps the rest (`"partial": true`). The whole state again asked the
+    /// shell twice (a second without one, each question waiting out its time) and was
+    /// 74 KB.
+    fn changed_state(&self, before: &Config) -> Value {
+        let parsed = config::parse(&self.read());
+        let cfg = parsed.as_ref().map(|l| l.config.clone()).unwrap_or_default();
+        let i18n = kabuk_win::system::i18n(Some(&cfg));
+        let problems: Vec<String> = match &parsed {
+            Ok(_) => Vec::new(),
+            Err(errors) => errors.iter().map(|e| e.describe(&i18n)).collect(),
+        };
+        let mut state = json!({
+            "op": "state",
+            "partial": true,
+            "config": serde_json::to_value(&cfg).unwrap_or(Value::Null),
+            "problems": problems,
+            "app_grid": self.app_grid_state(),
+        });
+        if cfg.language.language != before.language.language {
+            state["lang"] = json!(lang_code(i18n.lang()));
+            state["strings"] = Value::Object(strings(&i18n));
+        }
+        if cfg.appearance != before.appearance {
+            for (k, v) in look_state(&cfg) {
+                state[k] = v;
+            }
+        }
         state
     }
 
@@ -355,6 +457,13 @@ impl Bridge {
             .unwrap_or_default()
     }
 
+    /// The app grid's arrangement as the page shows it: the hidden apps and whether an
+    /// order was set. Sent after every change too: the shell changes it meanwhile.
+    fn app_grid_state(&self) -> Value {
+        let grid = self.app_grid();
+        json!({ "hidden": grid.hidden, "ordered": !grid.order.is_empty() })
+    }
+
     /// Changes the app grid's arrangement with `change` and writes it when it changed;
     /// a fresh `state` either way.
     fn arrange_app_grid(&self, change: impl FnOnce(&mut Arrangement) -> bool) -> Value {
@@ -375,49 +484,20 @@ impl Bridge {
 
     pub fn state(&self) -> Value {
         let cfg = self.config();
-        let grid = self.app_grid();
         let i18n = kabuk_win::system::i18n(Some(&cfg));
-        let strings: Map<String, Value> = i18n
-            .table(VALUE_MARK)
-            .into_iter()
-            .map(|(k, v)| (k, Value::String(v)))
-            .collect();
-        let hour = kabuk_win::system::local_time().hour;
-        let mode = mode_now(
-            mode_choice(cfg.appearance.mode),
-            kabuk_win::system::apps_use_light_theme(),
-            hour,
-        );
-        let accent = (cfg.appearance.accent != config::THEME_ACCENT).then_some(cfg.appearance.accent.as_str());
-        let resolved = kabuk_theme::resolve::resolve(cfg.appearance.look.code(), mode, accent);
-        let tokens: Map<String, Value> = resolved
-            .as_ref()
-            .map(|r| {
-                r.tokens
-                    .entries()
-                    .into_iter()
-                    .map(|(k, v)| (k, Value::String(v)))
-                    .collect()
-            })
-            .unwrap_or_default();
         let system = kabuk_i18n::Lang::from_system_tag(&kabuk_win::system::ui_language_tag());
-        json!({
+        let mut state = json!({
             "op": "state",
             "config": serde_json::to_value(&cfg).unwrap_or(Value::Null),
             "defaults": serde_json::to_value(Config::default()).unwrap_or(Value::Null),
-            "lang": if i18n.lang() == Lang::Tr { "tr" } else { "en" },
-            "system_lang": if system == Lang::Tr { "tr" } else { "en" },
-            "strings": strings,
+            "lang": lang_code(i18n.lang()),
+            "system_lang": lang_code(system),
+            "strings": strings(&i18n),
             "mark": VALUE_MARK,
-            "look": cfg.appearance.look.code(),
-            "mode": if mode == kabuk_theme::Mode::Light { "light" } else { "dark" },
-            "tokens": tokens,
-            "cursor_previews": resolved.as_ref().map(|r| cursor_previews(&cfg.appearance, &r.tokens)),
-            "accent_adapted": resolved.and_then(|r| r.accent_adapted),
             "info": self.info()["info"].clone(),
             "create": self.create_state(),
             "gallery": crate::gallery::list(),
-            "app_grid": { "hidden": grid.hidden, "ordered": !grid.order.is_empty() },
+            "app_grid": self.app_grid_state(),
             "version": env!("CARGO_PKG_VERSION"),
             "problems": self.problems(&i18n),
             // Installed from the Microsoft Store, which updates it (DECISIONS D84).
@@ -427,7 +507,11 @@ impl Bridge {
                 "tr": kabuk_i18n::I18n::new(Lang::Tr).tr("lang-name"),
                 "en": kabuk_i18n::I18n::new(Lang::En).tr("lang-name"),
             },
-        })
+        });
+        for (k, v) in look_state(&cfg) {
+            state[k] = v;
+        }
+        state
     }
 
     /// The recorder takes the keys (`on`) or gives them back.
@@ -499,8 +583,14 @@ impl Bridge {
 
     /// The running shell's figures for the About page; `running: false` without one.
     pub fn info(&self) -> Value {
-        let state = self.ask(&["query", "state"]);
-        let windows = self.ask(&["query", "windows"]);
+        // Asked only of a shell that runs: without one each question waited out its time
+        // (PLAN M19 P18: a second for the page's first state).
+        let running = kabuk_win::takeover::shell_running(&kabuk_core::paths::Paths {
+            config_file: self.config_file.clone(),
+            state_dir: self.state_dir.clone(),
+        });
+        let state = running.then(|| self.ask(&["query", "state"])).flatten();
+        let windows = state.as_ref().and_then(|_| self.ask(&["query", "windows"]));
         let info = match state {
             Some(s) => {
                 let pid = s["pid"].as_u64().and_then(|p| u32::try_from(p).ok());
@@ -746,6 +836,63 @@ mod tests {
             text.contains("# mine") && text.contains("workspaces = 6") && text.contains("gap = 12"),
             "{text}"
         );
+    }
+
+    /// PLAN M19 P18: a change is answered with what it can have changed, not the whole
+    /// state again; the words come again only with another language, the look's colours
+    /// and cursor previews only with another appearance.
+    #[test]
+    fn a_change_is_answered_with_what_it_changed() {
+        let dir = tempfile::tempdir().unwrap();
+        let b = bridge(&dir, Some("schema = 1\n[language]\nlanguage = \"tr\"\n"));
+        let full = b.handle(&json!({"op": "load"}).to_string()).unwrap();
+        let text = b
+            .handle(&json!({"op": "set", "path": "windows.gap", "value": 12}).to_string())
+            .unwrap();
+        let s: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!((s["op"].as_str(), s["partial"].as_bool()), (Some("state"), Some(true)));
+        assert_eq!(s["config"]["windows"]["gap"], 12);
+        assert_eq!(s["problems"], json!([]));
+        for heavy in [
+            "strings",
+            "tokens",
+            "cursor_previews",
+            "info",
+            "gallery",
+            "create",
+            "defaults",
+        ] {
+            assert!(s.get(heavy).is_none(), "{heavy} sent again");
+        }
+        assert!(text.len() * 4 < full.len(), "{} of {} bytes", text.len(), full.len());
+        let s = reply(&b, json!({"op": "set", "path": "language.language", "value": "en"}));
+        assert_eq!(
+            (s["lang"].as_str(), s["strings"]["nav-look"].as_str()),
+            (Some("en"), Some("Appearance"))
+        );
+        assert!(s.get("tokens").is_none());
+        let s = reply(&b, json!({"op": "set", "path": "appearance.look", "value": "devre"}));
+        // The design's letter for Devre, which the page styles itself by.
+        assert_eq!(s["look"], "c");
+        assert!(s["tokens"]["fg-s"].is_string() && s["cursor_previews"]["styles"].is_object());
+        assert!(s.get("strings").is_none());
+    }
+
+    /// PLAN M19 P18: without a running shell neither the first state nor a change waits
+    /// for one (each answer took a second: two questions waiting out their time).
+    #[test]
+    fn no_answer_waits_for_a_shell_that_does_not_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let b = bridge(&dir, Some("schema = 1\n"));
+        for m in [
+            json!({"op": "load"}),
+            json!({"op": "info"}),
+            json!({"op": "set", "path": "windows.gap", "value": 12}),
+        ] {
+            let started = std::time::Instant::now();
+            b.handle(&m.to_string()).unwrap();
+            assert!(started.elapsed() < INFO_TIMEOUT, "{m} took {:?}", started.elapsed());
+        }
     }
 
     #[test]

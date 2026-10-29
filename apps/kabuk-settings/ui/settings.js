@@ -965,7 +965,8 @@
     const m = JSON.parse(e.data);
     switch (m.op) {
       case "state":
-        S = m;
+        // After a change only what it can have changed comes (PLAN M19 P18).
+        S = m.partial && S ? { ...S, ...m } : m;
         if (m.theme_imported != null) ui.themeMsg = tv("thImported", m.theme_imported);
         A = A || window.kabukDesignArt(t, escapeHtml);
         ui.refused = null;

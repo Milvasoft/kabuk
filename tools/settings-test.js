@@ -112,12 +112,18 @@ async function main() {
   const unasked = (m) => UNASKED.includes(m.op) || (m.op === "update" && m.state !== "checking");
   let sent = 0, answered = 0, refused = 0;
   const pending = [];
+  // The size of each whole state and of each answer to a change that kept the language
+  // (PLAN M19 P18).
+  const sizes = { full: [], partial: [] };
   lines.on("line", async (line) => {
     const m = line ? JSON.parse(line) : {};
     const op = m.op ?? null;
     if (!unasked(m)) answered++;
     if (!line) return;
     if (op === "refused") refused++;
+    // Another language brings its words again, as it must.
+    if (op === "state" && !m.strings) sizes.partial.push(line.length);
+    if (op === "state" && !m.partial) sizes.full.push(line.length);
     pending.push(page.evaluate((text) => window.__fromRust(text), line));
   });
   await page.exposeFunction("__toRust", (text) => {
@@ -186,6 +192,9 @@ async function main() {
     check(refused === before, `${p}: ${controls} controls written, none refused`);
   }
   check(toml().includes("# the user's own comment"), "the user's comment kept");
+  // PLAN M19 P18: a change is answered with what it changed, not the whole state again.
+  const biggest = Math.max(...sizes.partial);
+  check(sizes.partial.length > 50 && biggest * 4 < Math.min(...sizes.full), `a change's answer is small (${biggest} bytes at most, the whole state ${Math.min(...sizes.full)})`);
 
   // Specific values land in the file as TOML.
   const restart = async () => { fs.writeFileSync(config, "schema = 1\n[language]\nlanguage = \"tr\"\n"); await page.evaluate(() => window.chrome.webview.postMessage('{"op":"load"}')); await settled(); };
