@@ -90,6 +90,7 @@ pub fn groups(s: &Shortcuts) -> Vec<(&'static str, Vec<Row>)> {
                 row("set-key-toggle-float", first(&s.toggle_float)),
                 row("set-key-cycle-layout", first(&s.cycle_layout)),
                 row("set-key-toggle-group", first(&s.toggle_group)),
+                row("set-key-next-tab", first(&s.next_tab)),
                 row("set-key-close-window", first(&s.close_window)),
             ],
         ),
@@ -100,6 +101,7 @@ pub fn groups(s: &Shortcuts) -> Vec<(&'static str, Vec<Row>)> {
                 row("keys-move-to", format!("{}+1\u{2026}9", s.move_to_workspace)),
                 row("set-key-overview", first(&s.overview)),
                 row("set-key-toggle-scratchpad", first(&s.toggle_scratchpad)),
+                row("set-key-to-scratchpad", first(&s.to_scratchpad)),
                 row("set-key-drag", s.drag.clone()),
             ],
         ),
@@ -108,6 +110,7 @@ pub fn groups(s: &Shortcuts) -> Vec<(&'static str, Vec<Row>)> {
             vec![
                 row("set-key-launcher", first(&s.launcher)),
                 row("set-key-app-grid", first(&s.app_grid)),
+                row("set-key-dropdown", first(&s.dropdown)),
                 row("set-key-start-saver", first(&s.start_saver)),
                 row("set-key-keys-card", first(&s.keys_card)),
                 row("keys-emergency", EMERGENCY.to_string()),
@@ -256,6 +259,10 @@ mod tests {
         assert_eq!(keys("keys-workspace").as_deref(), Some("Win+1\u{2026}9"));
         assert_eq!(keys("set-key-app-grid").as_deref(), Some("Win+Shift+A"));
         assert_eq!(keys("set-key-keys-card").as_deref(), Some("Win+F1"));
+        // PLAN M19 U20: the card left these out.
+        assert_eq!(keys("set-key-next-tab").as_deref(), Some("Win+Shift+T"));
+        assert_eq!(keys("set-key-to-scratchpad").as_deref(), Some("Win+Shift+Z"));
+        assert_eq!(keys("set-key-dropdown").as_deref(), Some("Win+Enter"));
         assert_eq!(keys("keys-emergency").as_deref(), Some(EMERGENCY));
         assert!(all.iter().all(|r| !r.keys.is_empty()));
     }
