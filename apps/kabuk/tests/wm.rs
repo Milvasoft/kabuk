@@ -446,9 +446,13 @@ fn swap_float_and_close_act_on_the_focused_window() {
     wm.focus(left);
     wm.act(test_action::MOVE, 3);
     assert!(wait_until(SETTLE, || frame(left) == Some(rr) && frame(right) == Some(rl)).is_some());
-    // Float it: the other one takes the whole area.
+    // Float it: the other one takes the whole area, and it is said (PLAN M19 U7).
     wm.act(test_action::TOGGLE_FLOAT, 0);
     assert!(wait_until(SETTLE, || fills(right)).is_some());
+    assert!(wait_until(SETTLE, || sandbox.log_lines("notice=Floated") == 1).is_some());
+    // The layout changes, and is said.
+    wm.act(test_action::CYCLE_LAYOUT, 0);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("notice=Layout") == 1).is_some());
     // Close it.
     wm.act(test_action::CLOSE, 0);
     assert!(wait_until(SETTLE, || !left.hwnd.exists()).is_some());

@@ -1002,8 +1002,14 @@ impl Wm {
             Order::Drop { window, rect } => {
                 self.held = None;
                 tracing::info!(hwnd = window, "window let go after a grab");
+                let was_floating = self.desk.is_floating(window);
                 let effects = self.desk.dropped(window, rect_of(rect));
                 self.apply(effects);
+                // A grab always floats it (D23): said, as a drag off its tile says it
+                // (PLAN M19 U7).
+                if !was_floating && self.desk.is_floating(window) {
+                    self.notice(crate::notify::Notice::Floated);
+                }
             }
             Order::Retile { window } => {
                 if self.desk.is_floating(window) {
@@ -1097,6 +1103,8 @@ impl Wm {
         let started = Instant::now();
         let monitor = self.action_monitor();
         let focused = self.desk.focus();
+        let was_floating = focused.map(|f| self.desk.is_floating(f));
+        let acted_on = monitor.clone();
         let effects = match a {
             Action::Workspace(n) => monitor.map(|m| self.desk.switch(&m, n)).unwrap_or_default(),
             Action::StepWorkspace(by) => monitor.map(|m| self.desk.step(&m, by)).unwrap_or_default(),
@@ -1128,6 +1136,32 @@ impl Wm {
         }
         self.apply(effects);
         self.unmaximizing = None;
+        // Float and layout changes say so, as a drag off a tile does (PLAN M19 U7).
+        match a {
+            Action::ToggleFloat => {
+                if let (Some(f), Some(before)) = (focused, was_floating) {
+                    let now = self.desk.is_floating(f);
+                    if now != before {
+                        self.notice(if now {
+                            crate::notify::Notice::Floated
+                        } else {
+                            crate::notify::Notice::Tiled
+                        });
+                    }
+                }
+            }
+            Action::CycleLayout => {
+                let kind = acted_on
+                    .as_deref()
+                    .and_then(|m| self.desk.active_workspace(m).and_then(|n| self.desk.layout(m, n)));
+                if let Some(kind) = kind {
+                    self.notice(crate::notify::Notice::Layout {
+                        master: kind == kabuk_layout::Kind::Master,
+                    });
+                }
+            }
+            _ => {}
+        }
         tracing::info!(action = ?a, apply_us = started.elapsed().as_micros() as u64, "action applied");
     }
 
@@ -2400,6 +2434,7 @@ impl Wm {
     fn notice(&mut self, n: crate::notify::Notice) {
         /// Notices kept for a bar that is slow to read them.
         const KEPT: usize = 8;
+        tracing::debug!(notice = ?n, "notice for the bar");
         self.notice_seq += 1;
         self.notices.push_back((self.notice_seq, n));
         while self.notices.len() > KEPT {

@@ -585,3 +585,9 @@ notify-failed-output = Ses çıkışı değişmedi
 notify-failed-dropdown = Açılır terminal başlamadı
 notify-failed-copy = Kopyalanamadı
 notify-failed-s = Nedeni Kabuk'un günlüğünde.
+
+# Döşeme düzeni değişti (PLAN M19 U7).
+notify-layout-dwindle = Bölünen düzen
+notify-layout-dwindle-s = Her yeni pencere sondakini ikiye böler.
+notify-layout-master = Ana pencere düzeni
+notify-layout-master-s = Bir büyük pencere, öbürleri yanında bir sütunda.

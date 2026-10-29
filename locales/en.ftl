@@ -586,3 +586,9 @@ notify-failed-output = The sound output did not change
 notify-failed-dropdown = The drop-down terminal did not start
 notify-failed-copy = It was not copied
 notify-failed-s = Kabuk's log says why.
+
+# The tiling layout changed (PLAN M19 U7).
+notify-layout-dwindle = Dwindle layout
+notify-layout-dwindle-s = Each new window splits the last one.
+notify-layout-master = Master layout
+notify-layout-master-s = One large window, the others in a column beside it.

@@ -36,6 +36,11 @@ pub enum Notice {
     },
     /// Something the user asked for did not happen (PLAN M19 U6: it was only logged).
     Failed(Failure),
+    /// The workspace's tiling layout changed (PLAN M19 U7: only a small glyph on the bar
+    /// said so): `master` for the master layout, else dwindle.
+    Layout {
+        master: bool,
+    },
 }
 
 /// What did not happen, for [`Notice::Failed`].
@@ -105,13 +110,19 @@ impl Notice {
             Notice::ConfigRejected { .. } => ("notify-config-rejected", None),
             Notice::ConfigUnknown { .. } => ("notify-config-unknown", None),
             Notice::Failed(f) => (f.key(), Some("notify-failed-s")),
+            Notice::Layout { master: true } => ("notify-layout-master", Some("notify-layout-master-s")),
+            Notice::Layout { master: false } => ("notify-layout-dwindle", Some("notify-layout-dwindle-s")),
         }
     }
 
     /// The icon in its box (the design shows `check`; the layout ones show the layout's).
     pub fn icon(self) -> &'static str {
         match self {
-            Notice::FloatingLayout | Notice::TilingLayout | Notice::Floated | Notice::Tiled => "tile",
+            Notice::FloatingLayout
+            | Notice::TilingLayout
+            | Notice::Floated
+            | Notice::Tiled
+            | Notice::Layout { .. } => "tile",
             Notice::GameOn | Notice::GameOff { .. } => "pad",
             Notice::Copied => "check",
             Notice::ConfigRejected { .. } | Notice::ConfigUnknown { .. } | Notice::Failed(_) => "app",
@@ -210,12 +221,15 @@ mod tests {
                 Notice::ConfigRejected { kept: false, line: 7 },
                 Notice::ConfigRejected { kept: true, line: 0 },
                 Notice::ConfigUnknown { line: 2 },
+                Notice::Layout { master: true },
+                Notice::Layout { master: false },
             ]
             .into_iter()
             .chain(Failure::ALL.map(Notice::Failed))
             {
                 let (title, _) = n.words(&i18n);
-                assert!(!title.is_empty() && !title.contains('-'), "{n:?} {lang:?}: {title}");
+                // Words, not the key (a title may have a hyphen: "drop-down").
+                assert!(!title.is_empty() && title != n.keys().0, "{n:?} {lang:?}: {title}");
             }
         }
         let tr = I18n::new(Lang::Tr);
