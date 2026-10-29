@@ -287,7 +287,7 @@
     const p = cfg().create.provider, connected = genConnected(p), g = ui.gen;
     let status, button;
     if (p === "ollama") {
-      status = ui.ollama ? (ui.ollama.ok ? tv("genOllamaModel", escapeHtml(ui.ollama.model)) : tv("genOllamaMissing", escapeHtml(cfg().create.ollama_url))) : t("gConnLocal");
+      status = ui.ollama ? (ui.ollama.ok ? tv("genOllamaModel", escapeHtml(ui.ollama.model)) : tv("genOllamaMissing", escapeHtml(cfg().create.ollama_url))) : tv("genOllamaAt", escapeHtml(cfg().create.ollama_url));
       button = `<button class="set-btn ghost" type="button" data-genconnect>${t("gConnect")}</button>`;
     } else if (ui.keyEntry) {
       status = `<span class="num"><input type="password" id="gen-key" autocomplete="off" spellcheck="false" style="width:260px;font-family:var(--num)" placeholder="${t("genKeyPh")}" aria-label="${t("genKeyPh")}"></span>`;
@@ -308,7 +308,10 @@
     const tries = g.phase === "idle" ? "" : `<p class="gen-note" data-gentries>${tv("genTry", g.attempt)}${g.reason && g.phase !== "failed" ? " · " + escapeHtml(g.reason) : ""}</p>`;
     const failed = g.phase === "failed" ? `<div class="note" role="alert" style="color:var(--err-fg)" data-genfailed>${escapeHtml(g.reason)}</div>` : "";
     const result = g.phase === "done" ? `<div class="saver gen-res"><span class="sp">${g.preview ? `<img src="${g.preview}" alt="" style="width:100%;height:100%;object-fit:cover">` : A.wallSvg("waves", 400, 225, 7)}</span><span class="sn">${escapeHtml(g.name)}<span>${t("wGenH")}</span></span><span class="acts"><button class="set-btn" type="button" data-genapply>${t("gApply")}</button><button class="set-btn ghost" type="button" data-genrun>${t("gRetry")}</button></span></div>` : "";
+    // Ollama's address (PLAN M19 U11: it was in kabuk.toml alone).
+    const address = p === "ollama" ? rowFor("create.ollama_url", t("genOllamaUrl"), t("genOllamaUrlH"), `<span class="num"><input type="text" id="gen-ollama-url" data-text="create.ollama_url" spellcheck="false" style="width:260px;font-family:var(--num)" value="${escapeHtml(cfg().create.ollama_url)}" placeholder="${escapeHtml(S.defaults.create.ollama_url)}" aria-label="${t("genOllamaUrl")}"></span>`) : "";
     return `<div class="set-grp">${rowFor("create.provider", t("gProv"), t("gProvH"), segFor("create.provider", t("gProv"), [["claude", "Claude"], ["openai", "OpenAI"], ["ollama", t("gOllama")]]))}
+        ${address}
         ${row(t("gConn"), "", `<span class="conn"><span class="st${connected ? " yes" : ""}">${status}</span>${button}</span>`)}</div>
         <div class="set-grp"><span class="gl">${t("gPrompt")}</span><textarea class="gen-in" id="gen-prompt" rows="2" placeholder="${t("gPromptPh")}" aria-label="${t("gPrompt")}" ${running ? "disabled" : ""}>${escapeHtml(ui.prompt)}</textarea>
         <div class="gen-run">${runBtn}<span class="gen-note">${t("genNote")}</span></div></div>
@@ -810,7 +813,11 @@
     if (el.id === "rule-what") ui.ruleForm.what = el.value;
     if (el.id === "bar-color") set("bar.color", el.value.toUpperCase());
     if (el.dataset.select) set(el.dataset.select, el.value);
-    if (el.dataset.text) set(el.dataset.text, el.value.trim());
+    if (el.dataset.text) {
+      // Another address: what Ollama said at the old one no longer holds.
+      if (el.dataset.text === "create.ollama_url") ui.ollama = null;
+      set(el.dataset.text, el.value.trim());
+    }
   });
 
   /* ---------- messages from Rust ---------- */

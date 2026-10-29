@@ -518,6 +518,9 @@ gen-note = The model writes the wallpaper; Kabuk checks it and sends one that fa
 gen-stop = Stop
 gen-ollama-missing = Ollama did not answer at { $value }
 gen-ollama-model = Connected · local model { $value }
+gen-ollama-url = Address
+gen-ollama-url-h = Where Ollama answers, on this computer or on your network
+gen-ollama-at = Local model at { $value }
 
 ## Installing (kabuk --install, --uninstall, --startup)
 

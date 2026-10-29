@@ -517,6 +517,9 @@ gen-note = Duvar kâğıdını model yazar; Kabuk denetler, geçemeyeni düzelti
 gen-stop = Durdur
 gen-ollama-missing = Ollama { $value } adresinde yanıt vermedi
 gen-ollama-model = Bağlı · yerel model { $value }
+gen-ollama-url = Adres
+gen-ollama-url-h = Ollama'nın bu bilgisayarda ya da ağında yanıt verdiği yer
+gen-ollama-at = { $value } adresinde yerel model
 
 ## Kurulum (kabuk --install, --uninstall, --startup)
 

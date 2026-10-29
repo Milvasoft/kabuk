@@ -487,6 +487,20 @@ async function main() {
   check(await until(async () => ["latest", "newer", "failed"].includes(await said()), 15000), "update: checked and answered");
   check((await page.locator("[data-update-check][disabled]").count()) === 0, "update: can be checked again");
 
+  // PLAN M19 U11: Ollama's address, in kabuk.toml alone before: one without http is
+  // refused and says why, a right one is written and named in the status.
+  await go("wall");
+  await page.click(`[data-walltab="gen"]`); await settled();
+  await page.click(`[data-set="create.provider"][data-val='"ollama"']`); await settled();
+  const address = async (text) => { await page.fill("#gen-ollama-url", text); await page.press("#gen-ollama-url", "Tab"); await settled(); };
+  await address("localhost:11434");
+  check(!/ollama_url/.test(toml()) && (await page.locator("[data-refusal]").innerText()).includes("localhost:11434"), "ollama: an address without http refused, and why");
+  await address("http://192.168.1.20:11434");
+  check(/ollama_url = "http:\/\/192\.168\.1\.20:11434"/.test(toml()), "ollama: its address written");
+  check((await page.locator(".conn .st").innerText()).includes("192.168.1.20"), "ollama: the status names the address");
+  await page.click(`[data-set="create.provider"][data-val='"claude"']`); await settled();
+  check((await page.locator("#gen-ollama-url").count()) === 0, "ollama: its address only with Ollama chosen");
+
   // Create: a wallpaper from a stand-in Ollama; its first answer is too bright and goes
   // back to the model with the reason, the second passes, is previewed and applied.
   const reply = (hlsl) => "```toml\n" + SAMPLE_TOML + "```\n```hlsl\n" + hlsl + "```\n";
