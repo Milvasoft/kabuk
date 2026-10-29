@@ -30,6 +30,7 @@
     update: null, // null: not asked; { state, version, page } from the bridge
     previews: {}, // the gallery's previews by design key (DECISIONS D58), as they come
     previewsAsked: false,
+    previewsDone: false, // every preview sent: a card without one stops waiting for it
   };
 
   // The design page's keys are camelCase; the language files use kebab-case
@@ -236,14 +237,21 @@
     const e = monitorEntry(Number(ui.wallMon));
     return e ? e.gallery : w.gallery;
   }
-  // The gallery's cards (DECISIONS D58): each design's preview as the bridge draws it.
+  // The gallery's cards (DECISIONS D58): each design's preview as the bridge draws it, a
+  // placeholder in its place until it comes (PLAN M19 U20: an empty black area before).
   function galleryCards(designs, isOn, attrs, hint) {
     return designs.map((d) => {
       const on = isOn(d.key);
       const url = ui.previews[d.key];
+      const waiting = !url && !ui.previewsDone;
       const img = `<img data-gprev="${escapeHtml(d.key)}" ${url ? `src="${url}"` : ""} alt="" style="width:100%;height:100%;object-fit:cover;display:block">`;
-      return `<button class="saver${on ? " on" : ""}" type="button" ${attrs(d)} aria-pressed="${on}"><span class="sp">${img}</span><span class="sn">${t(d.name)}<span>${hint(d)}</span></span></button>`;
+      return `<button class="saver${on ? " on" : ""}" type="button" ${attrs(d)} aria-pressed="${on}"${waiting ? ` aria-busy="true"` : ""}><span class="sp${waiting ? " skel" : ""}">${img}</span><span class="sn">${t(d.name)}<span>${hint(d)}</span></span></button>`;
     }).join("");
+  }
+  /* A preview came (or none will): its card's placeholder goes, without drawing the page. */
+  function previewCame(img) {
+    img.closest(".sp")?.classList.remove("skel");
+    img.closest(".saver")?.removeAttribute("aria-busy");
   }
   function askPreviews() {
     if (ui.previewsAsked) return;
@@ -804,7 +812,7 @@
     // kabuk.toml has a mistake: what and where, and a way to it (PLAN M19 U1).
     const problems = (S.problems || []).length
       ? `<div class="note" role="alert" style="color:var(--err-fg)">${t("setProblems")}<ul>${S.problems.map((p) => `<li>${escapeHtml(p)}</li>`).join("")}</ul><button class="set-btn ghost" type="button" data-open-config>${t("setOpenConfig")}</button></div>` : "";
-    app.innerHTML = `<div class="screen settings-screen" data-dir="${code()}" data-mode="${S.mode}">
+    app.innerHTML = `<div class="screen settings-screen" data-dir="${code()}" data-mode="${S.mode}" data-motion="${cfg().appearance.animations}">
       <div class="set-win">
         <nav class="set-side" aria-label="${t("setNav")}"><div class="set-brand"><img class="mark" src="mark-${S.mode === "light" ? "light" : "dark"}.svg" alt="">${t("setBrand")}</div>
           ${navItems.map(([k, ic]) => `<button class="set-nav${ui.page === k ? " on" : ""}" type="button" data-page="${k}" aria-current="${ui.page === k ? "page" : "false"}">${icon(ic)}${t("nav-" + k)}</button>`).join("")}
@@ -1055,7 +1063,11 @@
         break;
       case "gallery-preview":
         ui.previews[m.key] = m.url;
-        document.querySelectorAll("img[data-gprev]").forEach((img) => { if (img.dataset.gprev === m.key) img.src = m.url; });
+        document.querySelectorAll("img[data-gprev]").forEach((img) => { if (img.dataset.gprev === m.key) { img.src = m.url; previewCame(img); } });
+        break;
+      case "gallery-previews-done":
+        ui.previewsDone = true;
+        document.querySelectorAll("img[data-gprev]").forEach(previewCame);
         break;
       case "profile":
         ui.profileMsg = m.done === "empty" ? t("pfEmpty") : m.done === "not-running" ? t("pfNotRunning") : t("pfOpened");

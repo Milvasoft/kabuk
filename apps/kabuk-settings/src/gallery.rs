@@ -77,69 +77,77 @@ fn draw(gpu: &Gpu, d: &Design, colors: &[(String, (f32, f32, f32))], file: &Path
 }
 
 /// Sends every design's preview to the page from a thread of its own: the kept ones
-/// first, then the others as they are drawn. Previews of older versions go.
+/// first, then the others as they are drawn, then `{"op":"gallery-previews-done"}`, after
+/// which the page stops waiting for those not drawn (PLAN M19 U20: its cards show a
+/// placeholder meanwhile). Previews of older versions go.
 pub fn send_previews(state_dir: &Path, colors: Vec<(String, (f32, f32, f32))>, outbox: Outbox) {
     let dir = state_dir.join(PREVIEWS_DIR);
     let spawned = std::thread::Builder::new()
         .name("gallery-previews".into())
         .spawn(move || {
             kabuk_win::system::com_init();
-            if let Err(e) = std::fs::create_dir_all(&dir) {
-                tracing::warn!(error = %e, "gallery previews not kept");
-            }
-            let wanted: Vec<PathBuf> = DESIGNS.iter().map(|d| preview_file(&dir, d)).collect();
-            if let Ok(entries) = std::fs::read_dir(&dir) {
-                for e in entries.flatten() {
-                    if !wanted.contains(&e.path()) {
-                        let _ = std::fs::remove_file(e.path());
-                    }
-                }
-            }
-            let (kept, missing): (Vec<&Design>, Vec<&Design>) =
-                DESIGNS.iter().partition(|d| preview_file(&dir, d).exists());
-            for d in kept {
-                if let Ok(bytes) = std::fs::read(preview_file(&dir, d)) {
-                    outbox(message(d, &bytes));
-                }
-            }
-            if missing.is_empty() {
-                return;
-            }
-            let started = std::time::Instant::now();
-            let gpu = match Gpu::with(Raster::Hardware) {
-                Ok(g) => g,
-                Err(e) => {
-                    tracing::warn!(error = %e, "gallery previews not drawn");
-                    return;
-                }
-            };
-            let count = missing.len();
-            for d in missing {
-                let file = preview_file(&dir, d);
-                if draw(&gpu, d, &colors, &file).is_some() {
-                    if let Ok(bytes) = std::fs::read(&file) {
-                        outbox(message(d, &bytes));
-                    }
-                } else {
-                    tracing::warn!(key = %d.key(), "gallery preview not drawn");
-                }
-            }
-            tracing::info!(
-                count,
-                ms = started.elapsed().as_millis() as u64,
-                "gallery previews drawn"
-            );
+            send_each(&dir, &colors, &outbox);
+            outbox(json!({ "op": "gallery-previews-done" }).to_string());
         });
     if let Err(e) = spawned {
         tracing::warn!(error = %e, "gallery previews not started");
     }
 }
 
+/// [`send_previews`]' work on its thread: each preview kept in `dir` or drawn into it.
+fn send_each(dir: &Path, colors: &[(String, (f32, f32, f32))], outbox: &Outbox) {
+    if let Err(e) = std::fs::create_dir_all(dir) {
+        tracing::warn!(error = %e, "gallery previews not kept");
+    }
+    let wanted: Vec<PathBuf> = DESIGNS.iter().map(|d| preview_file(dir, d)).collect();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for e in entries.flatten() {
+            if !wanted.contains(&e.path()) {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+    let (kept, missing): (Vec<&Design>, Vec<&Design>) = DESIGNS.iter().partition(|d| preview_file(dir, d).exists());
+    for d in kept {
+        if let Ok(bytes) = std::fs::read(preview_file(dir, d)) {
+            outbox(message(d, &bytes));
+        }
+    }
+    if missing.is_empty() {
+        return;
+    }
+    let started = std::time::Instant::now();
+    let gpu = match Gpu::with(Raster::Hardware) {
+        Ok(g) => g,
+        Err(e) => {
+            tracing::warn!(error = %e, "gallery previews not drawn");
+            return;
+        }
+    };
+    let count = missing.len();
+    for d in missing {
+        let file = preview_file(dir, d);
+        if draw(&gpu, d, colors, &file).is_some() {
+            if let Ok(bytes) = std::fs::read(&file) {
+                outbox(message(d, &bytes));
+            }
+        } else {
+            tracing::warn!(key = %d.key(), "gallery preview not drawn");
+        }
+    }
+    tracing::info!(
+        count,
+        ms = started.elapsed().as_millis() as u64,
+        "gallery previews drawn"
+    );
+}
+
 #[cfg(test)]
 mod tests {
     //! Edge cases: every design is listed with its use and name key; a preview's file
     //! names the design and its version; the first run draws and keeps the previews, a
-    //! second sends the kept ones, and an old version's preview goes.
+    //! second sends the kept ones, and an old version's preview goes; the end is told
+    //! after the last preview.
     use super::*;
     use std::sync::{Arc, Mutex};
 
@@ -204,8 +212,11 @@ mod tests {
             }
             got.lock().unwrap().len()
         };
+        // Every preview, then the end (PLAN M19 U20).
+        let sent = DESIGNS.len() + 1;
         send_previews(dir.path(), Vec::new(), outbox.clone());
-        assert_eq!(all(&got, DESIGNS.len()), DESIGNS.len());
+        assert_eq!(all(&got, sent), sent);
+        assert_eq!(got.lock().unwrap().pop().unwrap()["op"], "gallery-previews-done");
         assert!(!old.exists(), "an old version's preview goes");
         for d in DESIGNS {
             assert!(
@@ -226,7 +237,8 @@ mod tests {
         got.lock().unwrap().clear();
         let started = std::time::Instant::now();
         send_previews(dir.path(), Vec::new(), outbox);
-        assert_eq!(all(&got, DESIGNS.len()), DESIGNS.len());
+        assert_eq!(all(&got, sent), sent);
         assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        assert_eq!(got.lock().unwrap().last().unwrap()["op"], "gallery-previews-done");
     }
 }

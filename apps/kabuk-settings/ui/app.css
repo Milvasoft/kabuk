@@ -41,3 +41,11 @@ body { background: var(--desk, #000); }
 .screen[data-dir="i"] .rule-win, .screen[data-dir="k"] .rule-win { border-radius: 0; }
 /* A rule matching on several fields fills its cell: the columns keep apart. */
 .rules-t { column-gap: 16px; }
+
+/* A gallery card's picture while its preview is drawn (PLAN M19 U20): a placeholder in
+   its place, so nothing jumps when it comes; still with fewer animations. */
+.sp.skel { background: linear-gradient(100deg, var(--surf) 40%, var(--surf-sel) 50%, var(--surf) 60%) 0 0 / 200% 100%; animation: skel 1.4s linear infinite; }
+.sp.skel img { visibility: hidden; }
+@keyframes skel { to { background-position: -200% 0; } }
+.screen:not([data-motion="full"]) .sp.skel { animation: none; }
+@media (prefers-reduced-motion: reduce) { .sp.skel { animation: none; } }

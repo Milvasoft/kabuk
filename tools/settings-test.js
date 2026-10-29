@@ -108,7 +108,7 @@ async function main() {
   // The bridge answers in order; the page sees each answer as WebView2's message event.
   // The Create tab's steps, the update check's result and the gallery's previews come from
   // another thread and answer nothing.
-  const UNASKED = ["gen-step", "gen-done", "gen-failed", "gallery-preview"];
+  const UNASKED = ["gen-step", "gen-done", "gen-failed", "gallery-preview", "gallery-previews-done"];
   const unasked = (m) => UNASKED.includes(m.op) || (m.op === "update" && m.state !== "checking");
   let sent = 0, answered = 0, refused = 0;
   const pending = [];
@@ -177,6 +177,12 @@ async function main() {
   for (const p of PAGES) {
     await go(p);
     check((await page.locator(".set-main h3").count()) >= 1, `${p}: drawn`);
+    if (p === "wall") {
+      // PLAN M19 U20: a gallery card whose preview has not come yet shows a placeholder.
+      const waiting = await page.locator("img[data-gprev]:not([src])").count();
+      const placeholders = await page.locator(".saver[aria-busy=true] .sp.skel img[data-gprev]:not([src])").count();
+      check(waiting > 0 && placeholders === waiting, `gallery: a placeholder for each preview to come (${placeholders} of ${waiting})`);
+    }
     if (shots) {
       fs.mkdirSync(shots, { recursive: true });
       await page.screenshot({ path: path.join(shots, `${p}.png`) });
@@ -246,6 +252,8 @@ async function main() {
   check(/gallery = "wall-still\/agate-slice"/.test(toml()), "gallery: a still wallpaper chosen");
   await page.waitForFunction(() => document.querySelectorAll("img[data-gprev][src^='data:image/jpeg']").length >= 20, null, { timeout: 120000 }).catch(() => {});
   check((await page.locator("img[data-gprev][src^='data:image/jpeg']").count()) >= 20, "gallery: the previews came");
+  await page.waitForFunction(() => !document.querySelector(".sp.skel"), null, { timeout: 120000 }).catch(() => {});
+  check((await page.locator(".sp.skel, .saver[aria-busy]").count()) === 0, "gallery: no placeholder left once the previews came");
   await page.click(`[data-wall="windows"]`); await settled();
   await go("saver");
   check((await page.locator(`[data-saver-gal]`).count()) >= 20, "gallery: twenty screen savers or more");
