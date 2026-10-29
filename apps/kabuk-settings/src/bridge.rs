@@ -343,7 +343,10 @@ impl Bridge {
             state["lang"] = json!(lang_code(i18n.lang()));
             state["strings"] = Value::Object(strings(&i18n));
         }
-        if cfg.appearance != before.appearance {
+        // A mode that follows Windows or the time of day can have turned since the page was
+        // drawn: its look comes with every change, as with the whole state before.
+        let follows = matches!(cfg.appearance.mode, Mode::System | Mode::Time);
+        if cfg.appearance != before.appearance || follows {
             for (k, v) in look_state(&cfg) {
                 state[k] = v;
             }
@@ -1101,6 +1104,18 @@ mod tests {
         assert_eq!(s["look"], "c");
         assert!(s["tokens"]["fg-s"].is_string() && s["cursor_previews"]["styles"].is_object());
         assert!(s.get("strings").is_none());
+    }
+
+    /// Found merging P18: with the mode following Windows or the time of day, an open page
+    /// kept its colours after the mode turned, as no change answered with the look.
+    #[test]
+    fn a_mode_that_follows_brings_the_look_with_every_change() {
+        for (mode, comes) in [("time", true), ("system", true), ("dark", false), ("light", false)] {
+            let dir = tempfile::tempdir().unwrap();
+            let b = bridge(&dir, Some(&format!("schema = 1\n[appearance]\nmode = \"{mode}\"\n")));
+            let s = reply(&b, json!({"op": "set", "path": "windows.gap", "value": 12}));
+            assert_eq!(s["tokens"].is_object() && s["mode"].is_string(), comes, "{mode}");
+        }
     }
 
     /// PLAN M19 P18: without a running shell neither the first state nor a change waits
