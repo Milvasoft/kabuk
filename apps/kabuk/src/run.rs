@@ -48,6 +48,7 @@ pub fn main(options: Run) -> i32 {
     tracing::info!(
         version = env!("CARGO_PKG_VERSION"),
         restart = options.restart_count,
+        took_over = options.took_over,
         state_dir = %paths.state_dir.display(),
         "starting"
     );
@@ -57,9 +58,12 @@ pub fn main(options: Run) -> i32 {
     // directory gives way, and so does this one's own when it is started again.
     kabuk_win::takeover::take_desk_from_others(&paths);
     let mut lock = sync::acquire_instance(&instance.shell_mutex());
+    // Started while Kabuk ran (PLAN M19 U20): said once the bars are up.
+    let mut took_over = options.took_over;
     if matches!(lock, Ok(None)) && kabuk_win::takeover::shell_running(&paths) {
         tracing::info!("another shell runs for this state directory; it gives way");
         kabuk_win::takeover::give_way(&paths);
+        took_over = true;
     }
     // The lock may be held for a moment by a restore or a check looking at it (found by
     // a test: a shell restarted by its watchdog took that for another shell and undid the
@@ -74,6 +78,10 @@ pub fn main(options: Run) -> i32 {
         Ok(Some(lock)) => lock,
         Ok(None) => {
             tracing::info!("another shell runs for this state directory");
+            // The running one tells the user it runs already (PLAN M19 U20: this start
+            // ended without a word).
+            let told = crate::msg_cmd::tell_running(&paths, &[kabuk_core::ipc::STARTED_AGAIN.to_string()]);
+            tracing::info!(told, "the running shell was told of this start");
             return exit::ALREADY_RUNNING;
         }
         Err(e) => {
@@ -189,6 +197,8 @@ pub fn main(options: Run) -> i32 {
             Ok(m) => {
                 if options.restart_count > 0 {
                     m.restarted();
+                } else if took_over {
+                    m.took_over();
                 }
                 Some(m)
             }

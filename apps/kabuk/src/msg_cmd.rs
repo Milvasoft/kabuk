@@ -32,6 +32,19 @@ fn fail(i18n: &I18n, message: &Message, code: i32) -> i32 {
     code
 }
 
+/// Sends `words` to the shell running for `paths` and says whether it answered that it
+/// did them (a second `kabuk` start tells the running one, PLAN M19 U20).
+pub fn tell_running(paths: &Paths, words: &[String]) -> bool {
+    let Ok(sid) = kabuk_win::pipe::user_sid() else {
+        return false;
+    };
+    let name = ipc::pipe_name(&sid, Instance::for_state_dir(&paths.state_dir).id());
+    kabuk_win::pipe::request(&name, &ipc::request_line(words), TIMEOUT, |_| {})
+        .ok()
+        .and_then(|line| Response::read(&line).ok())
+        .is_some_and(|r| r.ok)
+}
+
 pub fn main(common: &Common, words: &[String]) -> i32 {
     kabuk_win::system::attach_parent_console();
     let paths = Paths::resolve(
@@ -116,6 +129,7 @@ mod tests {
                 "<dwindle|master|floating|tiling|cycle>",
                 "<quick|network|calendar|volume>",
                 "<state|windows|monitors|tray>",
+                "<on|off|toggle>",
             ] {
                 assert!(usage.contains(form), "{lang:?}: `{form}` missing from:\n{usage}");
             }

@@ -20,7 +20,7 @@
 // what it changed; search finds a setting by its label, hint or page and opens it; the
 // settings file is exported, imported (a refused one not taken) and reset behind a
 // confirmation, each undone from kabuk.toml.bak; the gallery shows placeholders until its
-// previews come; a rule's monitor is one of the connected ones.
+// previews come; a rule's monitor is one of the connected ones; Kabuk's do not disturb (PLAN M19 U20).
 "use strict";
 const fs = require("fs");
 const os = require("os");
@@ -444,6 +444,15 @@ async function main() {
     await page.click(`[data-reset="${p}"]`); await settled();
   }
   check(!/workspaces =|tiling_layout|double_click_to_tile/.test(toml()), "window manager settings back to their defaults");
+
+  // PLAN M19 U20: Kabuk's do not disturb, a switch on the bar's page.
+  await go("bar");
+  check(await page.$eval(`[data-tgl="notices.quiet"]`, (e) => e.getAttribute("aria-checked") === "false"), "do not disturb: off by default");
+  await page.click(`[data-tgl="notices.quiet"]`); await settled();
+  check(/\[notices\]\s*quiet = true/.test(toml()), "do not disturb: on");
+  check(await page.$eval(`[data-tgl="notices.quiet"]`, (e) => e.getAttribute("aria-checked") === "true"), "do not disturb: its switch on");
+  await page.click(`[data-reset="notices.quiet"]`); await settled();
+  check(!/quiet = true/.test(toml()), "do not disturb: off again");
 
   // The mode's hint says what the chosen mode does.
   await go("look");

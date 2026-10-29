@@ -30,7 +30,7 @@ fn main() {
 }
 
 fn run() -> i32 {
-    let options = match cli::parse_watchdog(std::env::args_os().skip(1)) {
+    let mut options = match cli::parse_watchdog(std::env::args_os().skip(1)) {
         Ok(o) => o,
         Err(e) => {
             kabuk_win::system::attach_parent_console();
@@ -56,6 +56,7 @@ fn run() -> i32 {
     if matches!(lock, Ok(None)) {
         tracing::info!("a watchdog already runs for this state directory; it gives way");
         kabuk_win::takeover::give_way(&paths);
+        options.took_over = true;
         lock = sync::acquire_instance(&instance.watchdog_mutex());
     }
     let Ok(Some(_lock)) = lock else {

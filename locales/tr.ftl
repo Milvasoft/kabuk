@@ -17,7 +17,7 @@ cli-usage =
                                 group <toggle|next>, layout <dwindle|master|floating|tiling|cycle>,
                                 dropdown, desktop, launcher, overview, apps, keys, saver,
                                 panel <quick|network|calendar|volume>, profile <ad>, reload,
-                                query <state|windows|monitors|tray>, restore
+                                query <state|windows|monitors|tray>, quiet <on|off|toggle>, restore
     Seçenekler:
       --state-dir <klasör>    Durum dosyası ve log klasörü
       --config <dosya>        Yapılandırma dosyası
@@ -99,6 +99,8 @@ vol-settings = Ses ayarları
 vol-troubleshoot = Ses sorunlarını gider
 clock-adjust = Tarih ve saati ayarla
 notif-focus = Rahatsız etme
+notif-quiet-on = Kabuk'un bildirimlerini beklet
+notif-quiet-off = Kabuk'un bildirimlerini yeniden göster
 stats-task-manager = Görev Yöneticisi
 stats-resource-monitor = Kaynak İzleyicisi
 net-troubleshoot = Ağ sorunlarını gider
@@ -431,6 +433,8 @@ keys-emergency = Acil çıkış (her zaman çalışır)
 set-key-app-grid = Tüm uygulamaları göster
 set-bar-color = Bar rengi
 set-bar-color-h = Arka plan düz ya da bulanıkken barı boyar
+set-quiet = Kabuk'un bildirimlerini beklet
+set-quiet-h = Rahatsız etme: kapatınca tek bir özet olarak gelirler; Kabuk'un yeniden başlaması yine gösterilir
 set-bar-color-own = Temanın kendi rengi
 set-bar-color-custom = İstediğin renk
 set-bar-color-low = Temanın yazıları bu renk üstünde zor okunur
@@ -692,9 +696,16 @@ notify-restarted = Kabuk yeniden başladı
 notify-restarted-s = Beklenmedik biçimde durdu; nedeni günlüğünde.
 notify-elevated = Bir program yönetici olarak çalışıyor
 notify-elevated-s = Kabuk onun pencerelerini taşıyamaz, bu yüzden yüzerler. Onları da düzenlemesi için Kabuk'u yönetici olarak başlat.
+notify-quiet-off = Rahatsız etme kapandı
+notify-quiet-missed = { $value } bildirim bekletildi
+notify-already-running = Kabuk zaten çalışıyor
+notify-already-running-s = Yeniden başlatıldı; çalışan Kabuk sürüyor.
+notify-started-again = Kabuk zaten çalışıyordu
+notify-started-again-s = Yeniden başlatıldı ve çalışanın yerini aldı.
 
 # Bar modülünün ipucu (PLAN M19 U15).
 tip-workspace = Çalışma alanı { $value }
+workspace-named = Çalışma alanı { $value } · { $name }
 
 # Ekran okuyucunun bir bar modülü için söylediği: adı, ardından değeri (DECISIONS D97).
 acc-part = { $label }: { $value }

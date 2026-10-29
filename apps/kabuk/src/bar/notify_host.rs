@@ -70,6 +70,15 @@ pub(super) struct NotifyState {
     from_bar: Option<(usize, std::time::Instant)>,
 }
 
+impl NotifyState {
+    /// At the start, do not disturb as set (`quiet`): nothing to sum up yet.
+    pub(super) fn new(quiet: bool) -> NotifyState {
+        let mut s = NotifyState::default();
+        s.queue.quiet(quiet);
+        s
+    }
+}
+
 /// How long after a change made on a bar what it shows still counts as that bar's.
 const FROM_BAR: std::time::Duration = std::time::Duration::from_secs(2);
 
@@ -109,6 +118,36 @@ impl Shared {
         let mute = self.config().game.silence_notifications;
         if let Some(n) = self.notices.queue.game_mode(on, mute) {
             self.show_toast(n);
+        }
+    }
+
+    /// Do not disturb follows the setting (read again); turned off, the summary of what
+    /// it held back (PLAN M19 U20).
+    pub(super) fn notices_quiet(&mut self) {
+        let quiet = self.config().notices.quiet;
+        if let Some(n) = self.notices.queue.quiet(quiet) {
+            self.show_toast(n);
+        }
+    }
+
+    /// Turns do not disturb on (`Some(true)`), off, or the other way (`None`) by writing
+    /// the setting to `kabuk.toml` (the notification menu's entry, `kabuk msg quiet`);
+    /// the file's reload applies it, as a change made in Settings.
+    pub(super) fn set_quiet(&mut self, on: Option<bool>) {
+        let on = on.unwrap_or(!self.config().notices.quiet);
+        // The file as it is now: a change made a moment ago may not be read back yet.
+        let source = std::fs::read_to_string(&self.config_file).unwrap_or_default();
+        let written = kabuk_core::config::edit::set(&source, "notices.quiet", &serde_json::Value::Bool(on))
+            .map_err(|e| e.to_string())
+            .and_then(|text| {
+                kabuk_core::fsutil::write_atomic(&self.config_file, text.as_bytes()).map_err(|e| e.to_string())
+            });
+        match written {
+            Ok(()) => tracing::info!(on, "do not disturb set"),
+            Err(e) => {
+                tracing::warn!(on, error = %e, "do not disturb not set");
+                self.notify(Notice::Failed(Failure::Switch));
+            }
         }
     }
 

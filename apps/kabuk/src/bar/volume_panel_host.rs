@@ -129,7 +129,7 @@ impl Shared {
             level,
             &outputs,
             &apps,
-            menu.entries(),
+            menu.entries(self.config().notices.quiet),
         );
         popup_keys::marked(node, volume_panel::HIT, selected, &TIP)
     }
@@ -414,10 +414,13 @@ impl Shared {
                 self.redraw_volume_panel();
             }
             entry => {
-                let (_, _, page) = *p.menu.entries().get(usize::try_from(entry - FIRST_ENTRY).ok()?)?;
+                let entries = p.menu.entries(self.config().notices.quiet);
+                let (_, _, page) = *entries.get(usize::try_from(entry - FIRST_ENTRY).ok()?)?;
                 self.close_volume_panel();
                 tracing::info!(page, "volume panel entry");
-                if page == volume_panel::KABUK_SETTINGS {
+                if page == volume_panel::KABUK_QUIET {
+                    self.set_quiet(None);
+                } else if page == volume_panel::KABUK_SETTINGS {
                     if let Err(e) = self.open_settings() {
                         tracing::warn!(error = %e, "settings not opened");
                         self.notify(crate::notify::Notice::Failed(crate::notify::Failure::Settings));

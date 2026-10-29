@@ -296,6 +296,72 @@ fn float_on_and_off_set_the_focused_window_either_way() {
     assert_eq!(sandbox.restore().0, 0);
 }
 
+/// PLAN M19 U20: a `kabuk` that finds this one running and must give way to it asks it,
+/// over the pipe, to tell the user Kabuk is already running.
+#[test]
+fn a_start_that_gives_way_is_told_by_the_running_shell() {
+    let sandbox = Sandbox::new();
+    let _shell = Shell::start_with(&sandbox, NO_GAME);
+    let told = "notice shown title=Kabuk is already running";
+    assert_eq!(sandbox.log_lines(told), 0);
+    ok(&sandbox, &[kabuk_core::ipc::STARTED_AGAIN]);
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines(told) == 1).is_some(),
+        "not told"
+    );
+    assert_eq!(sandbox.restore().0, 0);
+}
+
+/// PLAN M19 U20: do not disturb holds Kabuk's notices back, set from `kabuk msg quiet`
+/// (written to `kabuk.toml`, as Settings writes it); turned off, one summary counts them.
+#[test]
+fn do_not_disturb_holds_notices_back_and_sums_them_up() {
+    let sandbox = Sandbox::new();
+    let shell = Shell::start_with(&sandbox, NO_GAME);
+    let a = TestWindow::open(&["--title", &title("ipc-quiet-a")]);
+    let b = TestWindow::open(&["--title", &title("ipc-quiet-b")]);
+    managed(&sandbox, &a);
+    managed(&sandbox, &b);
+    let file = || std::fs::read_to_string(sandbox.config_file()).unwrap_or_default();
+    ok(&sandbox, &["quiet", "on"]);
+    assert!(
+        wait_until(SETTLE, || file().contains("quiet = true")).is_some(),
+        "not written"
+    );
+    assert!(wait_until(SETTLE, || sandbox.log_lines("configuration reloaded") >= 1).is_some());
+    let shown = sandbox.log_lines("notice shown");
+    shell.focus(&b);
+    ok(&sandbox, &["float", "toggle"]);
+    assert!(wait_until(SETTLE, || window_entry(&sandbox, &b)["floating"] == true).is_some());
+    ok(&sandbox, &["float", "toggle"]);
+    assert!(wait_until(SETTLE, || window_entry(&sandbox, &b)["floating"] == false).is_some());
+    assert_eq!(sandbox.log_lines("notice shown"), shown, "a notice came through");
+    ok(&sandbox, &["quiet", "toggle"]);
+    assert!(
+        wait_until(SETTLE, || file().contains("quiet = false")).is_some(),
+        "not written"
+    );
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("notice shown title=Do not disturb is off")
+            == 1)
+        .is_some(),
+        "no summary"
+    );
+    let summary = sandbox
+        .last_log_line(&["notice shown title=Do not disturb is off"])
+        .unwrap_or_default();
+    assert!(summary.contains("2 notices"), "{summary}");
+    // Shown again.
+    ok(&sandbox, &["float", "toggle"]);
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("notice shown title=Window is floating")
+            == 1)
+        .is_some(),
+        "notices stayed held back"
+    );
+    assert_eq!(sandbox.restore().0, 0);
+}
+
 /// DECISIONS D65: `query windows` tells each window's program and what opens it again;
 /// a layout profile opened by name moves the program's open window to its workspace and
 /// starts the program again for its second place, whose window goes there as it comes.

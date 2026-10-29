@@ -4544,6 +4544,32 @@ fn something_that_does_not_open_is_told() {
     assert!(wait_until(SETTLE, || restored(&before)).is_some());
 }
 
+/// PLAN M19 U20: Kabuk started while it runs took over without a word (the user's choice
+/// of 2026-10-14 keeps the takeover): the new shell says Kabuk was already running.
+#[test]
+fn kabuk_started_while_it_runs_says_so() {
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(
+        sandbox.config_file(),
+        "schema = 1\n[language]\nlanguage = \"en\"\n[game]\ndetect = false\n",
+    )
+    .unwrap();
+    let mut first = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("late start done") == 1).is_some());
+    let told = "notice shown title=Kabuk was already running";
+    assert_eq!(sandbox.log_lines(told), 0, "the first start said it");
+    let _second = sandbox.shell_with_bar(&[]);
+    assert!(first.wait_exit(SETTLE).is_some(), "the first stayed");
+    assert!(
+        wait_until(STARTUP_TIMEOUT, || sandbox.log_lines(told) == 1).is_some(),
+        "the second start said nothing"
+    );
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}
+
 /// PLAN M19 U18: a brightness Kabuk set (a wheel notch over the battery) showed nothing;
 /// the volume's OSD shows it, with the sun, on that bar's monitor. A monitor with no
 /// brightness to set (no DDC/CI, no laptop panel) is told instead, and no OSD comes: each

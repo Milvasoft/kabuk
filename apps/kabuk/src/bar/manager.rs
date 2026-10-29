@@ -493,6 +493,30 @@ const MSG_MEDIA: u32 = msg::APP + 2;
 pub const MSG_OPEN_LAUNCHER: u32 = msg::APP + 9;
 /// `kabuk msg reload`: read `kabuk.toml` again (posted to the control window).
 pub const MSG_RELOAD: u32 = msg::APP + 25;
+/// `kabuk msg quiet`: do not disturb on, off or the other way (`wparam` from
+/// [`quiet_wparam`]; posted to the control window; PLAN M19 U20).
+pub const MSG_SET_QUIET: u32 = msg::APP + 122;
+/// A second `kabuk` found this one running (`kabuk msg started-again`; posted to the
+/// control window; PLAN M19 U20).
+pub const MSG_STARTED_AGAIN: u32 = msg::APP + 123;
+
+/// [`MSG_SET_QUIET`]'s `wparam` for on (`Some(true)`), off, or the other way (`None`).
+pub fn quiet_wparam(on: Option<bool>) -> usize {
+    match on {
+        Some(false) => 0,
+        Some(true) => 1,
+        None => 2,
+    }
+}
+
+/// The do not disturb [`quiet_wparam`] asked for.
+fn quiet_asked(wparam: usize) -> Option<bool> {
+    match wparam {
+        0 => Some(false),
+        1 => Some(true),
+        _ => None,
+    }
+}
 /// The bars' AppBar callback message (tests post the shell's notifications with it).
 pub const MSG_APPBAR: u32 = msg::APP + 3;
 /// The window manager's workspace summary changed.
@@ -755,6 +779,8 @@ struct Shared {
     game_devices: Vec<String>,
     /// Started again by the watchdog after a stop: said at the end of the start.
     restarted: bool,
+    /// Started while Kabuk ran, the running one giving way (PLAN M19 U20): said too.
+    took_over: bool,
     /// The installed input languages as last read (D88).
     input_langs: Option<Vec<kabuk_win::input_lang::InputLang>>,
     /// The shell's notices about windows (attention), to the control window.
@@ -1020,6 +1046,7 @@ impl BarManager {
         );
         gpu.text.set_families(theme::families(&look.tokens));
         let i18n = kabuk_win::system::i18n(Some(&config));
+        let quiet = config.notices.quiet;
         let shared = Rc::new_cyclic(|me| {
             RefCell::new(Shared {
                 gpu,
@@ -1069,9 +1096,10 @@ impl BarManager {
                 colors_applied: None,
                 genie_warmed: None,
                 colors_turn: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
-                notices: notify_host::NotifyState::default(),
+                notices: notify_host::NotifyState::new(quiet),
                 game_devices: Vec::new(),
                 restarted: false,
+                took_over: false,
                 input_langs: None,
                 shell_hook: None,
                 displays: None,
@@ -1324,6 +1352,14 @@ impl BarManager {
     pub fn restarted(&self) {
         if let Ok(mut s) = self.shared.try_borrow_mut() {
             s.restarted = true;
+        }
+    }
+
+    /// Kabuk was started while it ran, and the one running gave way to this one: said once
+    /// the start is over (PLAN M19 U20).
+    pub fn took_over(&self) {
+        if let Ok(mut s) = self.shared.try_borrow_mut() {
+            s.took_over = true;
         }
     }
 
@@ -2003,6 +2039,14 @@ impl Shared {
                 }
                 Some(0)
             }
+            MSG_SET_QUIET => {
+                self.set_quiet(quiet_asked(m.wparam));
+                Some(0)
+            }
+            MSG_STARTED_AGAIN => {
+                self.notify(crate::notify::Notice::AlreadyRunning);
+                Some(0)
+            }
             #[cfg(feature = "integration")]
             MSG_TEST_TRAY_PANEL => {
                 if m.wparam == 1 {
@@ -2118,6 +2162,9 @@ impl Shared {
         timed("create_app_grid", || self.create_app_grid());
         if std::mem::take(&mut self.restarted) {
             self.notify(crate::notify::Notice::Restarted);
+        }
+        if std::mem::take(&mut self.took_over) {
+            self.notify(crate::notify::Notice::StartedAgain);
         }
         // What the start read in kabuk.toml, said once the bars are there to say it.
         match kabuk_core::config::load_file(&self.config_file) {
@@ -2456,6 +2503,7 @@ impl Shared {
                 }
                 tracing::info!("configuration reloaded");
                 self.config_read(&[], &warnings, true);
+                self.notices_quiet();
             }
             Reload::Rejected { errors } => {
                 for e in &errors {
@@ -5038,6 +5086,14 @@ mod tests {
         assert_eq!(brightness_after(100, 4), 100);
         assert_eq!(brightness_after(40, i32::MAX), 100);
         assert_eq!(brightness_after(40, i32::MIN), 0);
+    }
+
+    /// PLAN M19 U20: `kabuk msg quiet` reaches the bar thread as it was asked.
+    #[test]
+    fn do_not_disturb_goes_to_the_bar_as_asked() {
+        for on in [Some(true), Some(false), None] {
+            assert_eq!(quiet_asked(quiet_wparam(on)), on);
+        }
     }
 
     /// PLAN M19 U16: the wheel did only the volume.

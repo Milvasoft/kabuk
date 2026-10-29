@@ -455,6 +455,7 @@
       ${row(t("setHeight"), heightHint, range("bar-height", "bar.height", RANGES.height, height, t("setHeight")))}
       ${row(t("setTrayShown"), t("setTrayShownH"), trayRange)}</div>
       ${barColorRow(b)}
+      ${quietGroup()}
       <div class="set-grp"><span class="gl">${t("modules")}. ${t("modulesH")}</span>
         <div class="chips" role="group" aria-label="${t("modules")}">${chips}</div></div>`;
   }
@@ -468,6 +469,7 @@
       ${rowFor("windows.tiling_layout", t("setTilingLayout"), t("setTilingLayoutH"), segFor("windows.tiling_layout", t("setTilingLayout"), [["dwindle", t("setLayoutDwindle")], ["master", t("setLayoutMaster")]]))}
       ${rowFor("windows.workspaces", t("setWorkspaces"), t("setWorkspacesH"), countRange("ws-count", "windows.workspaces", RANGES.workspaces, t("setWorkspaces")))}
       ${rowFor("windows.shown_workspaces", t("setShownWorkspaces"), t("setShownWorkspacesH"), countRange("ws-shown", "windows.shown_workspaces", RANGES.workspaces, t("setShownWorkspaces")))}
+      ${workspaceNamesRow()}
       ${tgl("windows.drag_to_float", t("dragFloat"), t("dragFloatH"))}
       ${tgl("windows.alt_drag", t("altDrag"), t("altDragH"))}
       ${tgl("windows.double_click_to_tile", t("setDoubleClick"), t("setDoubleClickH"))}
@@ -480,6 +482,11 @@
       ${profilesGroup()}
       ${hotCornersGroup()}
       ${gesturesGroup()}`;
+  }
+
+  // Kabuk's do not disturb (PLAN M19 U20): its own notices held back, summed up when off.
+  function quietGroup() {
+    return `<div class="set-grp">${tgl("notices.quiet", t("setQuiet"), t("setQuietH"))}</div>`;
   }
 
   // Layout profiles (DECISIONS D65): programs over monitors and workspaces, saved from the
@@ -1111,6 +1118,7 @@
       CORNERS.filter(([k]) => k !== el.value && c[k] === "screen_saver").forEach(([k]) => set("hot_corners." + k, "none"));
       if (el.value !== "none") set("hot_corners." + el.value, "screen_saver");
     }
+    if (el.dataset.wsName !== undefined) set("windows.workspace_names", workspaceNames());
     if (el.dataset.text) {
       // Another address: what Ollama said at the old one no longer holds.
       if (el.dataset.text === "create.ollama_url") ui.ollama = null;

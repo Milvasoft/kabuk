@@ -17,7 +17,7 @@ cli-usage =
                                 group <toggle|next>, layout <dwindle|master|floating|tiling|cycle>,
                                 dropdown, desktop, launcher, overview, apps, keys, saver,
                                 panel <quick|network|calendar|volume>, profile <name>, reload,
-                                query <state|windows|monitors|tray>, restore
+                                query <state|windows|monitors|tray>, quiet <on|off|toggle>, restore
     Options:
       --state-dir <folder>    Folder for the state file and logs
       --config <file>         Configuration file
@@ -100,6 +100,8 @@ vol-settings = Sound settings
 vol-troubleshoot = Troubleshoot sound problems
 clock-adjust = Adjust date and time
 notif-focus = Do not disturb
+notif-quiet-on = Hold Kabuk's notices back
+notif-quiet-off = Show Kabuk's notices again
 stats-task-manager = Task Manager
 stats-resource-monitor = Resource Monitor
 net-troubleshoot = Troubleshoot network problems
@@ -432,6 +434,8 @@ keys-emergency = Emergency exit (always works)
 set-key-app-grid = Show all apps
 set-bar-color = Bar colour
 set-bar-color-h = Fills the bar when its background is solid or blurred
+set-quiet = Hold Kabuk's notices back
+set-quiet-h = Do not disturb: they come as one summary when it is turned off; that Kabuk had to start again still shows
 set-bar-color-own = The theme's own
 set-bar-color-custom = Any colour
 set-bar-color-low = The theme's text is hard to read on this colour
@@ -693,9 +697,16 @@ notify-restarted = Kabuk started again
 notify-restarted-s = It stopped unexpectedly; its log says why.
 notify-elevated = A program runs as administrator
 notify-elevated-s = Kabuk cannot move its windows, so they float. Start Kabuk as administrator to arrange them too.
+notify-quiet-off = Do not disturb is off
+notify-quiet-missed = { $value } notices held back while not to be disturbed
+notify-already-running = Kabuk is already running
+notify-already-running-s = It was started again; this one stays.
+notify-started-again = Kabuk was already running
+notify-started-again-s = It was started again and took over from the one running.
 
 # A bar module's tooltip (PLAN M19 U15).
 tip-workspace = Workspace { $value }
+workspace-named = Workspace { $value } · { $name }
 
 # What a screen reader says of a bar module: its name, then its value (DECISIONS D97).
 acc-part = { $label }: { $value }

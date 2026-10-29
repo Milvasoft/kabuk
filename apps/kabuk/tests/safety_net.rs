@@ -315,6 +315,12 @@ fn a_second_watchdog_for_the_same_state_takes_over() {
         sandbox.log_lines("a watchdog already runs for this state directory; it gives way"),
         1
     );
+    // PLAN M19 U20: its shell knows Kabuk was started while it ran, to say so.
+    assert!(
+        wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("restart=0 took_over=true") == 1).is_some(),
+        "the second watchdog's shell was not told"
+    );
+    assert_eq!(sandbox.log_lines("restart=0 took_over=false"), 1, "the first shell");
     assert_eq!(sandbox.restore().0, 0);
 }
 

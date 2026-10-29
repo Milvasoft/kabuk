@@ -1221,6 +1221,33 @@ mod tests {
         assert_eq!(r["at"], "windows.shown_workspaces", "{r}");
     }
 
+    /// PLAN M19 U20: the workspaces' names and do not disturb are written as the page sends
+    /// them and come back in the state; a name list of the wrong kind is refused at its key.
+    #[test]
+    fn workspace_names_and_do_not_disturb_are_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let b = bridge(&dir, None);
+        let r = reply(
+            &b,
+            json!({"op": "set", "path": "windows.workspace_names", "value": ["Web", "", "Kod"]}),
+        );
+        assert_eq!(r["op"], "state", "{r}");
+        assert_eq!(r["config"]["windows"]["workspace_names"], json!(["Web", "", "Kod"]));
+        let r = reply(&b, json!({"op": "set", "path": "notices.quiet", "value": true}));
+        assert_eq!(r["config"]["notices"]["quiet"], true, "{r}");
+        let file = std::fs::read_to_string(&b.config_file).unwrap();
+        assert!(file.contains("quiet = true") && file.contains("\"Kod\""), "{file}");
+        let r = reply(
+            &b,
+            json!({"op": "set", "path": "windows.workspace_names", "value": "Web"}),
+        );
+        assert_eq!(
+            (r["op"].as_str(), r["at"].as_str()),
+            (Some("refused"), Some("windows.workspace_names")),
+            "{r}"
+        );
+    }
+
     /// SPEC §2.3 "Pick an open window": the managed windows' program, class and title,
     /// each once, by program; a window with neither program nor class is left out.
     #[test]

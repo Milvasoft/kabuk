@@ -12,7 +12,8 @@ use serde_json::{json, Value};
 
 use crate::bar::manager::{
     MSG_OPEN_APP_GRID, MSG_OPEN_CALENDAR_PANEL, MSG_OPEN_KEYS_CARD, MSG_OPEN_LAUNCHER, MSG_OPEN_NETWORK_PANEL,
-    MSG_OPEN_OVERVIEW, MSG_OPEN_QUICK_PANEL, MSG_OPEN_VOLUME_PANEL, MSG_RELOAD, MSG_START_SAVER,
+    MSG_OPEN_OVERVIEW, MSG_OPEN_QUICK_PANEL, MSG_OPEN_VOLUME_PANEL, MSG_RELOAD, MSG_SET_QUIET, MSG_STARTED_AGAIN,
+    MSG_START_SAVER,
 };
 use crate::wm::{self, Command, SharedState, WmLink};
 
@@ -43,15 +44,11 @@ pub fn start(targets: Targets) -> std::io::Result<PipeServer> {
 }
 
 fn post(to: Hwnd, id: u32) -> bool {
-    msgloop::post_message(
-        to,
-        Msg {
-            id,
-            wparam: 0,
-            lparam: 0,
-        },
-    )
-    .is_ok()
+    post_with(to, id, 0)
+}
+
+fn post_with(to: Hwnd, id: u32, wparam: usize) -> bool {
+    msgloop::post_message(to, Msg { id, wparam, lparam: 0 }).is_ok()
 }
 
 fn done(r: Response) -> Reply {
@@ -78,10 +75,11 @@ fn handle(line: &str, t: &Targets) -> Reply {
         }
         None => Response::failed(error::NO_WM),
     };
-    let to_bar = |id: u32| match t.bar {
-        Some(b) if post(b, id) => Response::done(),
+    let to_bar_with = |id: u32, wparam: usize| match t.bar {
+        Some(b) if post_with(b, id, wparam) => Response::done(),
         _ => Response::failed(error::NO_BAR),
     };
+    let to_bar = |id: u32| to_bar_with(id, 0);
     let r = match request {
         Request::Layout(name) => to_wm(Command::SetLayout(name)),
         Request::ShowDesktop => to_wm(Command::ToggleDesktop),
@@ -106,6 +104,8 @@ fn handle(line: &str, t: &Targets) -> Reply {
             PanelName::Volume => MSG_OPEN_VOLUME_PANEL,
         }),
         Request::Profile(name) => to_wm(Command::OpenProfile(name)),
+        Request::Quiet(on) => to_bar_with(MSG_SET_QUIET, crate::bar::manager::quiet_wparam(on)),
+        Request::StartedAgain => to_bar(MSG_STARTED_AGAIN),
         Request::Query(kind) => Response::with(query(kind, t)),
         Request::Restore => {
             let event = t.instance.emergency_event();

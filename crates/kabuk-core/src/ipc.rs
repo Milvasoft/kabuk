@@ -67,6 +67,11 @@ pub enum Request {
     Profile(String),
     /// `restore`: emergency stop and restore, as `kabuk --restore`.
     Restore,
+    /// `quiet on|off|toggle`: Kabuk's do not disturb (PLAN M19 U20); `None` toggles.
+    Quiet(Option<bool>),
+    /// `started-again`: a second `kabuk` that found this one running and gives way to it
+    /// tells it so, and the user is told (PLAN M19 U20). Not for people: not in the usage.
+    StartedAgain,
 }
 
 impl Request {
@@ -99,7 +104,9 @@ impl Request {
             | Request::KeysCard
             | Request::Panel(_)
             | Request::Profile(_)
-            | Request::Restore => return None,
+            | Request::Restore
+            | Request::Quiet(_)
+            | Request::StartedAgain => return None,
         })
     }
 
@@ -178,8 +185,12 @@ pub const COMMANDS: &[&str] = &[
     "profile",
     "reload",
     "query",
+    "quiet",
     "restore",
 ];
+
+/// The word of [`Request::StartedAgain`].
+pub const STARTED_AGAIN: &str = "started-again";
 
 /// The workspace numbers commands accept (SPEC §2.2: 1-9).
 pub const WORKSPACES: std::ops::RangeInclusive<u32> = 1..=9;
@@ -343,6 +354,20 @@ pub fn parse(words: &[String]) -> Result<Request, IpcError> {
             takes(0, "no arguments")?;
             Request::Restore
         }
+        "quiet" => {
+            const EXPECTED: &str = "on, off or toggle";
+            takes(1, EXPECTED)?;
+            Request::Quiet(match arg {
+                Some("on") => Some(true),
+                Some("off") => Some(false),
+                Some("toggle") => None,
+                _ => return Err(one(EXPECTED)),
+            })
+        }
+        STARTED_AGAIN => {
+            takes(0, "no arguments")?;
+            Request::StartedAgain
+        }
         other => return Err(IpcError::Unknown(other.to_string())),
     };
     Ok(r)
@@ -460,6 +485,14 @@ mod tests {
         assert_eq!(p("profile Kodlama gece"), Ok(Request::Profile("Kodlama gece".into())));
         assert!(matches!(p("profile"), Err(IpcError::BadArgs { .. })));
         assert_eq!(p("restore"), Ok(Request::Restore));
+        assert_eq!(p("quiet on"), Ok(Request::Quiet(Some(true))));
+        assert_eq!(p("quiet off"), Ok(Request::Quiet(Some(false))));
+        assert_eq!(p("quiet toggle"), Ok(Request::Quiet(None)));
+        assert_eq!(p(STARTED_AGAIN), Ok(Request::StartedAgain));
+        for bad in ["quiet", "quiet maybe", "quiet on now", "started-again now"] {
+            assert!(matches!(p(bad), Err(IpcError::BadArgs { .. })), "{bad}");
+        }
+        assert!(!COMMANDS.contains(&STARTED_AGAIN), "not for people");
     }
 
     /// SPEC §8.23: every action has a command (PLAN M19 U4).
@@ -637,6 +670,8 @@ mod tests {
             "panel quick",
             "profile Kodlama",
             "restore",
+            "quiet toggle",
+            "started-again",
         ] {
             assert_eq!(p(command).unwrap().action(), None, "{command}");
         }

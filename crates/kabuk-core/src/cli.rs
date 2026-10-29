@@ -55,6 +55,9 @@ pub struct Run {
     pub no_hotkey: bool,
     /// Set by the watchdog: how many times it restarted the shell.
     pub restart_count: u32,
+    /// Set by a watchdog that made a running one give way (`--took-over`): Kabuk was
+    /// started while it ran, and the user is told (PLAN M19 U20).
+    pub took_over: bool,
     /// Test mode: manage only windows of this class.
     pub manage_class: Option<String>,
     /// Do not show the bar (tests that must not reserve screen space).
@@ -111,6 +114,9 @@ pub struct Watchdog {
     pub kabuk: Option<PathBuf>,
     /// Extra arguments passed to `kabuk.exe` unchanged (everything after `--`).
     pub forward: Vec<OsString>,
+    /// Not an argument: set when this watchdog made a running one give way, so its first
+    /// shell says so (`--took-over`; PLAN M19 U20).
+    pub took_over: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -294,6 +300,10 @@ pub fn parse_kabuk(args: impl IntoIterator<Item = OsString>) -> Result<KabukComm
                 run.restart_count = number(&flag, &args.value(&flag, inline)?)?;
                 run_only.get_or_insert(flag);
             }
+            "--took-over" => {
+                run.took_over = true;
+                run_only.get_or_insert(flag);
+            }
             "--manage-class" => {
                 run.manage_class = Some(string(args.value(&flag, inline)?));
                 run_only.get_or_insert(flag);
@@ -384,6 +394,8 @@ pub fn shell_args(w: &Watchdog, restart_count: u32) -> Vec<OsString> {
     if restart_count > 0 {
         out.push("--restart-count".into());
         out.push(restart_count.to_string().into());
+    } else if w.took_over {
+        out.push("--took-over".into());
     }
     out.extend(w.forward.iter().cloned());
     out
@@ -632,6 +644,25 @@ mod tests {
         };
         assert_eq!(run.common, w.common);
         assert_eq!(run.restart_count, 1);
+        assert!(!run.took_over);
+    }
+
+    /// PLAN M19 U20: a watchdog that made a running one give way tells its first shell,
+    /// which says so; a shell it restarts later does not.
+    #[test]
+    fn a_watchdog_that_took_over_tells_its_first_shell() {
+        let mut w = parse_watchdog(os(&["--state-dir", "S"])).unwrap();
+        assert!(!w.took_over, "not an argument");
+        w.took_over = true;
+        let KabukCommand::Run(first) = parse_kabuk(shell_args(&w, 0)).unwrap() else {
+            panic!()
+        };
+        assert!(first.took_over);
+        let KabukCommand::Run(later) = parse_kabuk(shell_args(&w, 1)).unwrap() else {
+            panic!()
+        };
+        assert!(!later.took_over && later.restart_count == 1);
+        assert!(parse_watchdog(os(&["--took-over"])).is_err());
     }
 
     #[test]

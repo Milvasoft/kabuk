@@ -140,9 +140,18 @@ const CLOCK: [Entry; 2] = [
     ("app", "clock-adjust", "ms-settings:dateandtime"),
     ("bell", "notif-settings", "ms-settings:notifications"),
 ];
-const NOTIFICATIONS: [Entry; 2] = [
+/// Turns Kabuk's own do not disturb on or off (PLAN M19 U20): its notices, not Windows'.
+pub const KABUK_QUIET: &str = "kabuk:quiet";
+const NOTIFICATIONS: [Entry; 3] = [
     ("bell", "notif-settings", "ms-settings:notifications"),
     ("app", "notif-focus", "ms-settings:quiethours"),
+    ("bell", "notif-quiet-on", KABUK_QUIET),
+];
+/// [`NOTIFICATIONS`] while Kabuk's notices are held back.
+const NOTIFICATIONS_QUIET: [Entry; 3] = [
+    ("bell", "notif-settings", "ms-settings:notifications"),
+    ("app", "notif-focus", "ms-settings:quiethours"),
+    ("bell", "notif-quiet-off", KABUK_QUIET),
 ];
 const STATS: [Entry; 2] = [
     ("cpu", "stats-task-manager", "taskmgr.exe"),
@@ -162,10 +171,13 @@ const NETWORK: [Entry; 2] = [
 ];
 
 impl Menu {
-    pub fn entries(self) -> &'static [Entry] {
+    /// The menu's entries; `quiet`: Kabuk's notices are held back (the notifications' menu
+    /// offers to show them again).
+    pub fn entries(self, quiet: bool) -> &'static [Entry] {
         match self {
             Menu::Volume => &ENTRIES,
             Menu::Clock => &CLOCK,
+            Menu::Notifications if quiet => &NOTIFICATIONS_QUIET,
             Menu::Notifications => &NOTIFICATIONS,
             Menu::Stats => &STATS,
             Menu::Network => &NETWORK,
@@ -468,20 +480,21 @@ mod tests {
         let notify = NotifyStyle::of(Look::Ada);
         for lang in [Lang::Tr, Lang::En] {
             let i18n = I18n::new(lang);
-            for menu in [
-                Menu::Volume,
-                Menu::Clock,
-                Menu::Notifications,
-                Menu::Stats,
-                Menu::Network,
-                Menu::Bar,
+            for (menu, quiet) in [
+                (Menu::Volume, false),
+                (Menu::Clock, false),
+                (Menu::Notifications, false),
+                (Menu::Notifications, true),
+                (Menu::Stats, false),
+                (Menu::Network, false),
+                (Menu::Bar, false),
             ] {
-                for (_, key, _) in menu.entries() {
+                for (_, key, _) in menu.entries(quiet) {
                     let w = i18n.tr(key);
                     assert!(!w.is_empty() && w != *key, "{key} {lang:?}");
                 }
-                let m = view(&i18n, 1.0, &TIP, &notify, None, &[], &[], menu.entries());
-                let n = u32::try_from(menu.entries().len()).unwrap();
+                let m = view(&i18n, 1.0, &TIP, &notify, None, &[], &[], menu.entries(quiet));
+                let n = u32::try_from(menu.entries(quiet).len()).unwrap();
                 assert_eq!(hits(&m), (FIRST_ENTRY..FIRST_ENTRY + n).collect::<Vec<_>>(), "{menu:?}");
             }
             let panel = view(&i18n, 1.0, &TIP, &notify, Some((40, false)), &[], &[], &ENTRIES);
@@ -500,6 +513,35 @@ mod tests {
         );
         assert!(texts(&muted).contains(&"0".to_string()));
         assert_eq!(I18n::new(Lang::En).tr("vol-mixer"), "Open volume mixer");
+    }
+
+    /// PLAN M19 U20: the notifications' menu turns Kabuk's do not disturb on, and while
+    /// it is on, off; the other menus do not change with it.
+    #[test]
+    fn the_notifications_menu_switches_do_not_disturb_by_its_state() {
+        let quiet_entry = |quiet: bool| {
+            Menu::Notifications
+                .entries(quiet)
+                .iter()
+                .find(|(_, _, target)| *target == KABUK_QUIET)
+                .map(|(_, key, _)| *key)
+        };
+        assert_eq!(quiet_entry(false), Some("notif-quiet-on"));
+        assert_eq!(quiet_entry(true), Some("notif-quiet-off"));
+        for menu in [
+            Menu::Volume,
+            Menu::Clock,
+            Menu::Stats,
+            Menu::Network,
+            Menu::Battery,
+            Menu::Bar,
+        ] {
+            assert_eq!(menu.entries(true), menu.entries(false), "{menu:?}");
+            assert!(
+                menu.entries(false).iter().all(|(_, _, t)| *t != KABUK_QUIET),
+                "{menu:?}"
+            );
+        }
     }
 
     fn session(pid: u32, exe: Option<&str>, percent: u32, muted: bool, active: bool) -> Session {
