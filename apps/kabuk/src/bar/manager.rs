@@ -1776,7 +1776,7 @@ impl Shared {
                 Some(0)
             }
             MSG_WM => {
-                let notices = self.wm.as_ref().map(|l| l.view().notices).unwrap_or_default();
+                let notices = self.wm.as_ref().map(|l| l.view().notices.clone()).unwrap_or_default();
                 self.wm_notices(&notices);
                 self.sync_tab_strips();
                 self.render_all(false);
@@ -3166,7 +3166,7 @@ impl Shared {
         let primary = self.bars.iter().position(|b| b.primary);
         // Each window's genie goes to its app's icon on the bar of its own monitor (D53).
         let devices: std::collections::HashMap<u64, String> =
-            link.view().windows.into_iter().map(|w| (w.hwnd, w.device)).collect();
+            link.view().windows.iter().map(|w| (w.hwnd, w.device.clone())).collect();
         let bar_of = |h: u64| {
             devices
                 .get(&h)

@@ -277,7 +277,7 @@ pub struct WmHandle {
     thread: Option<std::thread::JoinHandle<()>>,
     window: Hwnd,
     queue: Arc<Mutex<VecDeque<Command>>>,
-    view: Arc<Mutex<WmView>>,
+    view: Arc<Mutex<Arc<WmView>>>,
     listener: Listener,
     /// The only class it manages, in test mode.
     manage_class: Option<String>,
@@ -288,7 +288,7 @@ pub struct WmHandle {
 pub struct WmLink {
     window: Hwnd,
     queue: Arc<Mutex<VecDeque<Command>>>,
-    view: Arc<Mutex<WmView>>,
+    view: Arc<Mutex<Arc<WmView>>>,
     listener: Listener,
     manage_class: Option<String>,
 }
@@ -298,8 +298,10 @@ impl WmLink {
         send(&self.queue, self.window, c);
     }
 
-    pub fn view(&self) -> WmView {
-        self.view.lock().map(|v| v.clone()).unwrap_or_default()
+    /// The window manager's summary as last published, shared: reading it copies nothing
+    /// (PLAN M19 P9: every reader cloned every window, monitor and tab strip).
+    pub fn view(&self) -> Arc<WmView> {
+        self.view.lock().map(|v| Arc::clone(&v)).unwrap_or_default()
     }
 
     /// The only window class it manages, in test mode: the bar lists no other windows
@@ -355,7 +357,7 @@ impl WmHandle {
     /// Starts the thread and waits until it manages the existing windows.
     pub fn start(options: Options) -> std::io::Result<WmHandle> {
         let queue = Arc::new(Mutex::new(VecDeque::new()));
-        let view = Arc::new(Mutex::new(WmView::default()));
+        let view = Arc::new(Mutex::new(Arc::new(WmView::default())));
         let listener: Listener = Arc::new(Mutex::new(None));
         let snapshot: SharedSnapshot = Arc::new(Mutex::new(Snapshot::default()));
         let manage_class = options.manage_class.clone();
@@ -491,8 +493,11 @@ struct Wm {
     notice_seq: u64,
     /// The elevated programs already said to float (once each).
     elevated_told: std::collections::HashSet<u32>,
+    /// Windows' monitors as last read (at the start and on a display or work area
+    /// change): read on every event before (PLAN M19 P9).
+    screens: Vec<kabuk_win::shell::Monitor>,
     queue: Arc<Mutex<VecDeque<Command>>>,
-    view: Arc<Mutex<WmView>>,
+    view: Arc<Mutex<Arc<WmView>>>,
     listener: Listener,
     /// What the mouse hook knows about the managed windows.
     snapshot: SharedSnapshot,
@@ -512,7 +517,7 @@ struct Wm {
 fn run(
     options: Options,
     queue: Arc<Mutex<VecDeque<Command>>>,
-    view: Arc<Mutex<WmView>>,
+    view: Arc<Mutex<Arc<WmView>>>,
     listener: Listener,
     snapshot: SharedSnapshot,
     ready: mpsc::Sender<std::io::Result<Hwnd>>,
@@ -545,6 +550,7 @@ fn run(
         notices: VecDeque::new(),
         notice_seq: 0,
         elevated_told: std::collections::HashSet::new(),
+        screens: kabuk_win::shell::monitors(),
         game: std::collections::HashSet::new(),
         covered: Vec::new(),
         yielded: false,
@@ -887,6 +893,7 @@ impl Wm {
                     }
                     timer::MONITORS => {
                         self.kill(timer::MONITORS);
+                        self.screens = kabuk_win::shell::monitors();
                         if let Ok(mut s) = self.snapshot.lock() {
                             s.monitors = kabuk_win::shell::monitors().iter().map(|m| m.rect).collect();
                         }
@@ -1619,8 +1626,7 @@ impl Wm {
         }
         // A minimised window sits off screen: its place is where Windows will restore it.
         let frame = if minimised {
-            let monitors = kabuk_win::shell::monitors();
-            let primary = monitors.iter().find(|m| m.primary);
+            let primary = self.screens.iter().find(|m| m.primary);
             hwnd.restored_place()
                 .zip(primary)
                 .map(|((normal, _), p)| kabuk_core::genie::workspace_to_screen(normal, p.rect, p.work_area))
@@ -1663,7 +1669,7 @@ impl Wm {
         if rule.no_grab {
             self.no_grab.insert(hwnd.0);
         }
-        let monitors = kabuk_win::shell::monitors();
+        let monitors = self.screens.clone();
         // The rule's monitor ("Monitor n"), else the one the window opened on.
         let target = rule
             .monitor
@@ -2474,8 +2480,9 @@ impl Wm {
                 .collect();
         }
         let next = WmView {
-            monitors: kabuk_win::shell::monitors()
-                .into_iter()
+            monitors: self
+                .screens
+                .iter()
                 .map(|m| MonitorView {
                     workspaces: self.desk.workspaces(&m.device),
                     number: m.number,
@@ -2485,7 +2492,7 @@ impl Wm {
                         .and_then(|n| self.desk.layout(&m.device, n))
                         .unwrap_or(Kind::Dwindle),
                     game: self.game.contains(&m.device),
-                    device: m.device,
+                    device: m.device.clone(),
                 })
                 .collect(),
             windows: self
@@ -2519,8 +2526,8 @@ impl Wm {
                 .collect(),
         };
         let changed = match self.view.lock() {
-            Ok(mut v) if *v != next => {
-                *v = next;
+            Ok(mut v) if **v != next => {
+                *v = Arc::new(next);
                 true
             }
             _ => false,

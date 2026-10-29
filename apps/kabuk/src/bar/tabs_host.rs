@@ -52,7 +52,7 @@ fn scale_at(r: kabuk_layout::Rect) -> Scale {
 impl Shared {
     /// Brings the strips in line with the window manager's view.
     pub(super) fn sync_tab_strips(&mut self) {
-        let views = self.wm.as_ref().map(|l| l.view().tab_strips).unwrap_or_default();
+        let views = self.wm.as_ref().map(|l| l.view().tab_strips.clone()).unwrap_or_default();
         self.tabs.strips.retain(|g, _| views.iter().any(|v| v.group == *g));
         for v in views {
             let current = self.tabs.strips.get(&v.group);

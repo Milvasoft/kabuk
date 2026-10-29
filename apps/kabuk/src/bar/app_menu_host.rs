@@ -147,7 +147,7 @@ impl Shared {
         let workspace = self.wm.as_ref().and_then(|l| {
             l.view()
                 .windows
-                .into_iter()
+                .iter()
                 .find(|w| app.windows.contains(&w.hwnd) && !w.minimized)
                 .map(|w| w.workspace)
                 .filter(|n| *n != kabuk_layout::desk::SCRATCHPAD)
