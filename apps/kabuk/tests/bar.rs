@@ -4600,17 +4600,6 @@ fn a_wheel_step_on_the_brightness_shows_its_osd() {
     let before = work_areas();
     let sandbox = Sandbox::new();
     std::fs::write(sandbox.config_file(), "schema = 1\n[game]\ndetect = false\n").unwrap();
-
-/// PLAN M19 U17: Kabuk's notices were drawn only. A screen reader hears a notice as it
-/// comes, and finds its words in its window.
-#[test]
-fn a_screen_reader_hears_and_reads_a_notice() {
-    use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_OPEN_MISSING};
-    use kabuk_win::msgloop::{post_message, Msg};
-    use kabuk_win::uia::{self, Role};
-    let before = work_areas();
-    let sandbox = Sandbox::new();
-    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
     let _shell = sandbox.shell_with_bar(&[]);
     assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
     let pid = sandbox.state().kabuk_pid.expect("pid");
@@ -4672,7 +4661,27 @@ fn a_screen_reader_hears_and_reads_a_notice() {
             assert!(osd().is_none());
         }
     }
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}
 
+/// PLAN M19 U17: Kabuk's notices were drawn only. A screen reader hears a notice as it
+/// comes, and finds its words in its window.
+#[test]
+fn a_screen_reader_hears_and_reads_a_notice() {
+    use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_OPEN_MISSING};
+    use kabuk_win::msgloop::{post_message, Msg};
+    use kabuk_win::uia::{self, Role};
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
     let i18n = kabuk_win::system::i18n(None);
     let title = i18n.tr("notify-failed-open");
     // Listening everywhere: the notice's window is not there yet.
