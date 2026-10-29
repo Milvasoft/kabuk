@@ -446,6 +446,8 @@ pub const MSG_TEST_SHOW_DESKTOP: u32 = msg::APP + 65;
 /// Integration tests: an auto-hiding bar (`wparam` its place plus 1) or the dock (0)
 /// comes in (`lparam` 1) or slides off (0), as the mouse would make it.
 pub const MSG_TEST_PEEK: u32 = msg::APP + 70;
+/// Integration tests: something that cannot be opened is opened (PLAN M19 U6).
+pub const MSG_TEST_OPEN_MISSING: u32 = msg::APP + 92;
 /// Integration tests: a change made on bar `wparam` shows a notice (DECISIONS D95).
 pub const MSG_TEST_NOTICE_FROM_BAR: u32 = msg::APP + 90;
 /// The notices for the calendar panel were read (D88).
@@ -1665,6 +1667,12 @@ impl Shared {
                 Some(0)
             }
             #[cfg(feature = "integration")]
+            MSG_TEST_OPEN_MISSING => {
+                let missing = std::env::temp_dir().join("kabuk-no-such-program.exe");
+                self.open_off_thread(missing.display().to_string(), crate::notify::Failure::Open);
+                Some(0)
+            }
+            #[cfg(feature = "integration")]
             MSG_TEST_NOTICE_FROM_BAR => {
                 self.change_on_bar(m.wparam);
                 self.notify(crate::notify::Notice::Copied);
@@ -1739,6 +1747,12 @@ impl Shared {
                 }
                 self.drop_dead_tray_icons();
                 self.render_all(false);
+                Some(0)
+            }
+            notify_host::MSG_FAILED => {
+                if let Some(f) = crate::notify::Failure::ALL.get(m.wparam) {
+                    self.notify(crate::notify::Notice::Failed(*f));
+                }
                 Some(0)
             }
             MSG_LATE_START => {
@@ -4240,12 +4254,7 @@ impl Shared {
                 } else {
                     "taskmgr.exe"
                 };
-                std::thread::spawn(move || {
-                    kabuk_win::system::com_init();
-                    if let Err(e) = kabuk_win::shellitems::open(target) {
-                        tracing::warn!(error = %e, target, "not opened");
-                    }
-                });
+                self.open_off_thread(target.into(), crate::notify::Failure::Open);
             }
             Some((module @ (view::hit::NOTIF | view::hit::CLOCK), value)) if self.config().bar.modules.calendar => {
                 // Kabuk's calendar and notifications in place of Windows' centre (D88).
@@ -4253,12 +4262,7 @@ impl Shared {
             }
             Some((view::hit::NOTIF, _)) | Some((view::hit::CLOCK, _)) => {
                 // Windows' notification centre; the count is read again once it closes.
-                std::thread::spawn(|| {
-                    kabuk_win::system::com_init();
-                    if let Err(e) = kabuk_win::shellitems::open(NOTIFICATION_CENTRE) {
-                        tracing::warn!(error = %e, "notification centre not opened");
-                    }
-                });
+                self.open_off_thread(NOTIFICATION_CENTRE.into(), crate::notify::Failure::Settings);
                 self.count_notifications();
             }
             Some((view::hit::APP, i)) => self.app_click(

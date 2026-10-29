@@ -34,6 +34,59 @@ pub enum Notice {
     ConfigUnknown {
         line: u32,
     },
+    /// Something the user asked for did not happen (PLAN M19 U6: it was only logged).
+    Failed(Failure),
+}
+
+/// What did not happen, for [`Notice::Failed`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Failure {
+    /// A launcher result or an app did not open.
+    Open,
+    /// Windows did not lock, sleep, restart or shut down.
+    Command,
+    /// A settings page (Kabuk's or Windows') or the notification centre did not open.
+    Settings,
+    /// A quick settings switch (Wi-Fi, Bluetooth, airplane mode, hotspot) did not change.
+    Switch,
+    Brightness,
+    /// The sound output did not change.
+    Output,
+    /// The drop-down terminal's program did not start.
+    Dropdown,
+    /// A launcher result was not copied.
+    Copy,
+}
+
+impl Failure {
+    pub const ALL: [Failure; 8] = [
+        Failure::Open,
+        Failure::Command,
+        Failure::Settings,
+        Failure::Switch,
+        Failure::Brightness,
+        Failure::Output,
+        Failure::Dropdown,
+        Failure::Copy,
+    ];
+
+    /// Its place in [`Failure::ALL`], to post it from another thread.
+    pub fn index(self) -> usize {
+        Failure::ALL.iter().position(|f| *f == self).unwrap_or(0)
+    }
+
+    fn key(self) -> &'static str {
+        match self {
+            Failure::Open => "notify-failed-open",
+            Failure::Command => "notify-failed-command",
+            Failure::Settings => "notify-failed-settings",
+            Failure::Switch => "notify-failed-switch",
+            Failure::Brightness => "notify-failed-brightness",
+            Failure::Output => "notify-failed-output",
+            Failure::Dropdown => "notify-failed-dropdown",
+            Failure::Copy => "notify-failed-copy",
+        }
+    }
 }
 
 impl Notice {
@@ -51,6 +104,7 @@ impl Notice {
             Notice::GameOff { .. } => ("t-game-off", None),
             Notice::ConfigRejected { .. } => ("notify-config-rejected", None),
             Notice::ConfigUnknown { .. } => ("notify-config-unknown", None),
+            Notice::Failed(f) => (f.key(), Some("notify-failed-s")),
         }
     }
 
@@ -60,7 +114,7 @@ impl Notice {
             Notice::FloatingLayout | Notice::TilingLayout | Notice::Floated | Notice::Tiled => "tile",
             Notice::GameOn | Notice::GameOff { .. } => "pad",
             Notice::Copied => "check",
-            Notice::ConfigRejected { .. } | Notice::ConfigUnknown { .. } => "app",
+            Notice::ConfigRejected { .. } | Notice::ConfigUnknown { .. } | Notice::Failed(_) => "app",
         }
     }
 
@@ -156,7 +210,10 @@ mod tests {
                 Notice::ConfigRejected { kept: false, line: 7 },
                 Notice::ConfigRejected { kept: true, line: 0 },
                 Notice::ConfigUnknown { line: 2 },
-            ] {
+            ]
+            .into_iter()
+            .chain(Failure::ALL.map(Notice::Failed))
+            {
                 let (title, _) = n.words(&i18n);
                 assert!(!title.is_empty() && !title.contains('-'), "{n:?} {lang:?}: {title}");
             }
@@ -167,6 +224,10 @@ mod tests {
         // PLAN M19 U1: a refused file says what is used now and where to look.
         let (_, sub) = Notice::ConfigRejected { kept: false, line: 7 }.words(&tr);
         assert!(sub.contains("Varsayılan") && sub.contains('7'), "{sub}");
+        // Every failure goes there and back by its place.
+        for f in Failure::ALL {
+            assert_eq!(Failure::ALL[f.index()], f);
+        }
         let (_, sub) = Notice::ConfigRejected { kept: true, line: 0 }.words(&tr);
         assert!(sub.contains("Son çalışan") && !sub.contains("Satır"), "{sub}");
     }

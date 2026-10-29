@@ -4357,3 +4357,38 @@ fn a_notice_comes_on_the_monitor_of_the_bar_it_was_made_on() {
     assert_eq!(sandbox.restore().0, 0);
     assert!(wait_until(SETTLE, || restored(&before)).is_some());
 }
+
+/// PLAN M19 U6: something asked for that did not open was only logged. The user is told.
+#[test]
+fn something_that_does_not_open_is_told() {
+    use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_OPEN_MISSING};
+    use kabuk_win::msgloop::{post_message, Msg};
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
+    let shown = sandbox.log_lines("notice shown");
+    post_message(
+        control,
+        Msg {
+            id: MSG_TEST_OPEN_MISSING,
+            wparam: 0,
+            lparam: 0,
+        },
+    )
+    .unwrap();
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("notice shown") > shown).is_some(),
+        "nothing told"
+    );
+    let told = sandbox.last_log_line(&["notice shown"]).unwrap_or_default();
+    assert!(told.contains("did not open") || told.contains("Açılamadı"), "{told}");
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}

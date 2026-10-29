@@ -194,12 +194,7 @@ impl Shared {
                 self.close_keyboard_panel();
                 if value == SETTINGS {
                     tracing::info!(page = SETTINGS_PAGE, "keyboard panel link");
-                    std::thread::spawn(|| {
-                        kabuk_win::system::com_init();
-                        if let Err(e) = kabuk_win::shellitems::open(SETTINGS_PAGE) {
-                            tracing::warn!(error = %e, "language settings not opened");
-                        }
-                    });
+                    self.open_off_thread(SETTINGS_PAGE.into(), crate::notify::Failure::Settings);
                 } else if let (Some(hkl), Some(window)) = (chosen, target) {
                     tracing::info!("input language chosen");
                     kabuk_win::input_lang::switch(window, hkl);

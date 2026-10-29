@@ -335,6 +335,7 @@ impl Shared {
                     };
                     if let Err(e) = r {
                         tracing::warn!(error = %e, ?tile, on, "quick setting not switched");
+                        super::notify_host::post_failed(control, crate::notify::Failure::Switch);
                     }
                     let read = QuickRead {
                         radios: kabuk_win::radios::read(),
@@ -413,6 +414,7 @@ impl Shared {
         }
         if !p.setting.swap(true, Ordering::SeqCst) {
             let (pending, setting) = (p.pending.clone(), p.setting.clone());
+            let control = self.control.as_ref().map(Window::hwnd);
             std::thread::spawn(move || {
                 kabuk_win::system::com_init_mta();
                 loop {
@@ -423,6 +425,7 @@ impl Shared {
                     for (panel, v) in next {
                         if let Err(e) = brightness::set(panel, v) {
                             tracing::warn!(error = %e, "brightness not set");
+                            super::notify_host::post_failed(control, crate::notify::Failure::Brightness);
                         }
                     }
                 }

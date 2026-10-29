@@ -374,6 +374,7 @@ impl Shared {
                         tracing::info!(name = %chosen.name, "audio output chosen");
                         if let Err(e) = kabuk_win::audio::set_default_output(&chosen.id) {
                             tracing::warn!(error = %e, "audio output not changed");
+                            self.notify(crate::notify::Notice::Failed(crate::notify::Failure::Output));
                         }
                         // The level is the new device's: Core Audio says so, and the
                         // panel is drawn again then; this redraw shows the choice now.
@@ -386,6 +387,7 @@ impl Shared {
                         if page == volume_panel::KABUK_SETTINGS {
                             if let Err(e) = self.open_settings() {
                                 tracing::warn!(error = %e, "settings not opened");
+                                self.notify(crate::notify::Notice::Failed(crate::notify::Failure::Settings));
                             }
                             return Some(0);
                         }

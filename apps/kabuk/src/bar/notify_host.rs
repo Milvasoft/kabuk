@@ -13,9 +13,26 @@ use kabuk_win::msgloop::{msg, PxRect, Window};
 use super::motion_host::Shown;
 use super::{timer, Shared};
 use crate::launcher::place::BarSpace;
-use crate::notify::{self, style::NotifyStyle, Notice, Queue};
+use crate::notify::{self, style::NotifyStyle, Failure, Notice, Queue};
 
 const TOAST_CLASS: &str = "Kabuk.Notice";
+/// Something asked for did not happen (`wparam`: its [`Failure::index`]), posted from the
+/// thread that tried it.
+pub(super) const MSG_FAILED: u32 = msg::APP + 91;
+
+/// Tells the bar thread (its control window `control`) that `f` did not happen.
+pub(super) fn post_failed(control: Option<kabuk_win::window::Hwnd>, f: Failure) {
+    if let Some(c) = control {
+        let _ = kabuk_win::msgloop::post_message(
+            c,
+            kabuk_win::msgloop::Msg {
+                id: MSG_FAILED,
+                wparam: f.index(),
+                lparam: 0,
+            },
+        );
+    }
+}
 const OSD_CLASS: &str = "Kabuk.Osd";
 
 #[derive(Default)]
@@ -114,6 +131,24 @@ impl Shared {
         self.kill(timer::OSD);
         let osd = self.notices.osd.take();
         self.retire(osd);
+    }
+
+    /// Opens `target` (a page, a program) through the shell off the bar thread, as it can
+    /// take a while; if it does not open, the user is told (PLAN M19 U6: it was only
+    /// logged).
+    pub(super) fn open_off_thread(&mut self, target: String, failure: Failure) {
+        let control = self.control.as_ref().map(Window::hwnd);
+        let spawned = std::thread::Builder::new().name("open".into()).spawn(move || {
+            kabuk_win::system::com_init();
+            if let Err(e) = kabuk_win::shellitems::open(&target) {
+                tracing::warn!(target = %target, error = %e, "not opened");
+                post_failed(control, failure);
+            }
+        });
+        if let Err(e) = spawned {
+            tracing::warn!(error = %e, "not opened");
+            self.notify(Notice::Failed(failure));
+        }
     }
 
     /// A change was made on bar `index`: what it shows comes on that bar's monitor.

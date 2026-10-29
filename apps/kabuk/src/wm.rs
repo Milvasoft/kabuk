@@ -1167,7 +1167,10 @@ impl Wm {
                         tracing::info!(%program, "dropdown started");
                         self.dropdown_wait = Some(Instant::now());
                     }
-                    Err(e) => tracing::warn!(%program, error = %e, "dropdown program not started"),
+                    Err(e) => {
+                        tracing::warn!(%program, error = %e, "dropdown program not started");
+                        self.notice(crate::notify::Notice::Failed(crate::notify::Failure::Dropdown));
+                    }
                 }
             }
         }

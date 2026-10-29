@@ -605,15 +605,7 @@ impl Shared {
             }
             apps::ClickAction::Start(target) => {
                 tracing::info!(target = %target, new_window, "app started from the bar");
-                let started = std::thread::Builder::new().name("app-start".into()).spawn(move || {
-                    kabuk_win::system::com_init();
-                    if let Err(e) = kabuk_win::shellitems::open(&target) {
-                        tracing::warn!(target = %target, error = %e, "app not started");
-                    }
-                });
-                if let Err(e) = started {
-                    tracing::warn!(error = %e, "app not started");
-                }
+                self.open_off_thread(target, crate::notify::Failure::Open);
             }
             apps::ClickAction::Previews | apps::ClickAction::Nothing => {}
         }

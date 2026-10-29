@@ -575,3 +575,14 @@ notify-config-line = Line { $value }.
 set-problems = kabuk.toml could not be read, so these are the default settings. Fix it, then the changes here are saved again:
 set-open-config = Open kabuk.toml
 set-key-windows-hint = Windows uses { $value } too; while Kabuk runs, this shortcut does Kabuk's action instead.
+
+# Something asked for did not happen (PLAN M19 U6).
+notify-failed-open = It did not open
+notify-failed-command = Windows did not do that
+notify-failed-settings = The settings did not open
+notify-failed-switch = It did not change
+notify-failed-brightness = The brightness did not change
+notify-failed-output = The sound output did not change
+notify-failed-dropdown = The drop-down terminal did not start
+notify-failed-copy = It was not copied
+notify-failed-s = Kabuk's log says why.

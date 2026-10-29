@@ -550,15 +550,7 @@ impl Shared {
             Target::Shell(t) => {
                 // The shell can take a while (a network path, a slow program); never on
                 // the bar thread.
-                let spawned = std::thread::Builder::new().name("launcher-open".into()).spawn(move || {
-                    kabuk_win::system::com_init();
-                    if let Err(e) = kabuk_win::shellitems::open(&t) {
-                        tracing::warn!(target = %t, error = %e, "not opened");
-                    }
-                });
-                if let Err(e) = spawned {
-                    tracing::warn!(error = %e, "not opened");
-                }
+                self.open_off_thread(t, crate::notify::Failure::Open);
             }
             Target::Window(h) => match &self.wm {
                 Some(link) => link.send(wm::Command::Reveal(h)),
@@ -568,7 +560,10 @@ impl Shared {
             },
             Target::Copy(text) => match kabuk_win::clipboard::set_text(&text) {
                 Ok(()) => self.notify(crate::notify::Notice::Copied),
-                Err(e) => tracing::warn!(error = %e, "result not copied"),
+                Err(e) => {
+                    tracing::warn!(error = %e, "result not copied");
+                    self.notify(crate::notify::Notice::Failed(crate::notify::Failure::Copy));
+                }
             },
             Target::Profile(name) => {
                 if let Some(link) = &self.wm {
@@ -591,6 +586,12 @@ impl Shared {
                 };
                 if let Err(e) = r {
                     tracing::warn!(command = ?c, error = %e, "command failed");
+                    let what = if c == SystemCommand::Settings {
+                        crate::notify::Failure::Settings
+                    } else {
+                        crate::notify::Failure::Command
+                    };
+                    self.notify(crate::notify::Notice::Failed(what));
                 }
             }
         }

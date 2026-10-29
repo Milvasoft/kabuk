@@ -574,3 +574,14 @@ notify-config-line = Satır { $value }.
 set-problems = kabuk.toml okunamadı, bu yüzden bunlar varsayılan ayarlar. Dosyayı düzeltince buradaki değişiklikler yine kaydedilir:
 set-open-config = kabuk.toml'u aç
 set-key-windows-hint = Windows da { $value } kullanıyor; Kabuk çalışırken bu kısayol onun yerine Kabuk'un işini yapar.
+
+# İstenen bir şey olmadı (PLAN M19 U6).
+notify-failed-open = Açılamadı
+notify-failed-command = Windows bunu yapmadı
+notify-failed-settings = Ayarlar açılamadı
+notify-failed-switch = Değişmedi
+notify-failed-brightness = Parlaklık değişmedi
+notify-failed-output = Ses çıkışı değişmedi
+notify-failed-dropdown = Açılır terminal başlamadı
+notify-failed-copy = Kopyalanamadı
+notify-failed-s = Nedeni Kabuk'un günlüğünde.

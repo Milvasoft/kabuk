@@ -152,12 +152,7 @@ impl Shared {
                 if value == SETTINGS {
                     self.close_privacy_panel();
                     tracing::info!(page = SETTINGS_PAGE, "privacy panel link");
-                    std::thread::spawn(|| {
-                        kabuk_win::system::com_init();
-                        if let Err(e) = kabuk_win::shellitems::open(SETTINGS_PAGE) {
-                            tracing::warn!(error = %e, "privacy settings not opened");
-                        }
-                    });
+                    self.open_off_thread(SETTINGS_PAGE.into(), crate::notify::Failure::Settings);
                 }
                 Some(0)
             }
