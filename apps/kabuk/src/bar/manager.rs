@@ -361,6 +361,12 @@ pub const VOLUME_STEP: i32 = 2;
 /// How far a wheel notch over the battery moves the monitor's brightness (PLAN M19 U16).
 pub const BRIGHTNESS_STEP: i32 = 5;
 
+/// The brightness `notches` wheel notches (up positive) make of `now`, within 0-100.
+fn brightness_after(now: u8, notches: i32) -> u8 {
+    let to = i32::from(now).saturating_add(notches.saturating_mul(BRIGHTNESS_STEP));
+    u8::try_from(to.clamp(0, 100)).unwrap_or(now)
+}
+
 /// How soon a notification that arrived while the bars were busy is handled again.
 const PENDING_RETRY: Duration = Duration::from_millis(15);
 
@@ -471,6 +477,9 @@ pub const MSG_TEST_SHOW_DESKTOP: u32 = msg::APP + 65;
 pub const MSG_TEST_PEEK: u32 = msg::APP + 70;
 /// Integration tests: the mouse rests on the primary bar's clock (PLAN M19 U15).
 pub const MSG_TEST_CLOCK_TIP: u32 = msg::APP + 93;
+/// Integration tests: the wheel turns `lparam` notches (up positive) over the primary
+/// bar's battery, which sets its monitor's brightness (PLAN M19 U18).
+pub const MSG_TEST_WHEEL_BRIGHTNESS: u32 = msg::APP + 121;
 /// Integration tests: something that cannot be opened is opened (PLAN M19 U6).
 pub const MSG_TEST_OPEN_MISSING: u32 = msg::APP + 92;
 /// Integration tests: a change made on bar `wparam` shows a notice (DECISIONS D95).
@@ -1855,6 +1864,17 @@ impl Shared {
                 if let Some(f) = crate::notify::Failure::ALL.get(m.wparam) {
                     self.notify(crate::notify::Notice::Failed(*f));
                 }
+                Some(0)
+            }
+            notify_host::MSG_BRIGHTNESS_SET => {
+                let bar = usize::try_from(m.lparam).unwrap_or(0);
+                self.brightness_set(bar, u32::try_from(m.wparam).unwrap_or(0));
+                Some(0)
+            }
+            #[cfg(feature = "integration")]
+            MSG_TEST_WHEEL_BRIGHTNESS => {
+                let b = self.bars.iter().position(|b| b.primary)?;
+                self.wheel_over(b, view::hit::BATTERY, i32::try_from(m.lparam).unwrap_or(0));
                 Some(0)
             }
             id if self.shell_hook.as_ref().is_some_and(|h| h.message() == id) => {
@@ -4465,9 +4485,17 @@ impl Shared {
                 let control = self.control.as_ref().map(Window::hwnd);
                 std::thread::spawn(move || {
                     kabuk_win::system::com_init_mta();
-                    if let Some((panel, now)) = kabuk_win::brightness::read(handle, &device) {
-                        let to = (i32::from(now) + notches * BRIGHTNESS_STEP).clamp(0, 100);
-                        if let Err(e) = kabuk_win::brightness::set(panel, u8::try_from(to).unwrap_or(now)) {
+                    // Set, it shows in the OSD on this bar's monitor (PLAN M19 U18); a
+                    // monitor without a brightness to set says so (U6: it did nothing).
+                    let Some((panel, now)) = kabuk_win::brightness::read(handle, &device) else {
+                        tracing::warn!("brightness not set: the monitor has none to set");
+                        notify_host::post_failed(control, crate::notify::Failure::Brightness);
+                        return;
+                    };
+                    let to = brightness_after(now, notches);
+                    match kabuk_win::brightness::set(panel, to) {
+                        Ok(()) => notify_host::post_brightness(control, index, to),
+                        Err(e) => {
                             tracing::warn!(error = %e, "brightness not set");
                             notify_host::post_failed(control, crate::notify::Failure::Brightness);
                         }
@@ -4997,6 +5025,19 @@ mod tests {
         assert!(ask_again(Some(t0), t0 + ASK_AGAIN_QUIET));
         // A clock that went backwards never asks too early.
         assert!(!ask_again(Some(t0 + Duration::from_secs(5)), t0));
+    }
+
+    /// PLAN M19 U16, U18: a notch is a step of the brightness, which stays within 0-100.
+    #[test]
+    fn a_wheel_notch_steps_the_brightness_within_its_range() {
+        assert_eq!(brightness_after(50, 1), 55);
+        assert_eq!(brightness_after(50, -2), 40);
+        assert_eq!(brightness_after(98, 1), 100);
+        assert_eq!(brightness_after(3, -1), 0);
+        assert_eq!(brightness_after(0, -3), 0);
+        assert_eq!(brightness_after(100, 4), 100);
+        assert_eq!(brightness_after(40, i32::MAX), 100);
+        assert_eq!(brightness_after(40, i32::MIN), 0);
     }
 
     /// PLAN M19 U16: the wheel did only the volume.

@@ -4544,6 +4544,101 @@ fn something_that_does_not_open_is_told() {
     assert!(wait_until(SETTLE, || restored(&before)).is_some());
 }
 
+/// PLAN M19 U18: a brightness Kabuk set (a wheel notch over the battery) showed nothing;
+/// the volume's OSD shows it, with the sun, on that bar's monitor. A monitor with no
+/// brightness to set (no DDC/CI, no laptop panel) is told instead, and no OSD comes: each
+/// machine checks the path it has.
+#[test]
+fn a_wheel_step_on_the_brightness_shows_its_osd() {
+    use kabuk::bar::manager::{BRIGHTNESS_STEP, CONTROL_CLASS, MSG_TEST_WHEEL_BRIGHTNESS};
+    use kabuk_win::brightness::Panel;
+    use kabuk_win::msgloop::{post_message, Msg};
+
+    /// Gives the monitor its brightness back, even when the test fails.
+    struct Back(Option<(Panel, u8)>);
+    impl Drop for Back {
+        fn drop(&mut self) {
+            if let Some((panel, level)) = self.0 {
+                let _ = kabuk_win::brightness::set(panel, level);
+            }
+        }
+    }
+
+    kabuk_win::system::com_init_mta();
+    let primary = kabuk_win::shell::monitors()
+        .into_iter()
+        .find(|m| m.primary)
+        .expect("a main monitor");
+    let back = Back(kabuk_win::brightness::read(primary.handle, &primary.device));
+    eprintln!("the main monitor's brightness: {:?}", back.0);
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n[game]\ndetect = false\n").unwrap();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
+    // Down, unless that is the bottom already.
+    let notches: i32 = match back.0 {
+        Some((_, now)) if i32::from(now) >= BRIGHTNESS_STEP => -1,
+        _ => 1,
+    };
+    let shown = sandbox.log_lines("notice shown");
+    post_message(
+        control,
+        Msg {
+            id: MSG_TEST_WHEEL_BRIGHTNESS,
+            wparam: 0,
+            lparam: notches as isize,
+        },
+    )
+    .unwrap();
+    let osd = || {
+        kabuk_win::window::windows_of_class("Kabuk.Osd")
+            .into_iter()
+            .find(|h| h.pid() == Some(pid) && h.is_visible())
+            .and_then(|h| h.window_rect())
+    };
+    match back.0 {
+        Some((_, now)) => {
+            assert!(
+                wait_until(SETTLE, || sandbox.log_lines("level shown level=Brightness") == 1).is_some(),
+                "no brightness OSD"
+            );
+            let r = osd().expect("the OSD's window");
+            let (cx, cy) = ((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+            let m = primary.rect;
+            assert!(
+                m.left <= cx && cx < m.right && m.top <= cy && cy < m.bottom,
+                "the OSD {r:?} is not on the main monitor {m:?}"
+            );
+            let to = (i32::from(now) + notches * BRIGHTNESS_STEP).clamp(0, 100);
+            let line = sandbox
+                .last_log_line(&["level shown level=Brightness"])
+                .unwrap_or_default();
+            assert!(line.contains(&format!("percent={to}")), "{line}");
+            let read = kabuk_win::brightness::read(primary.handle, &primary.device).map(|(_, p)| i32::from(p));
+            assert_eq!(read, Some(to), "the monitor's brightness");
+        }
+        None => {
+            assert!(
+                wait_until(SETTLE, || sandbox.log_lines("notice shown") > shown).is_some(),
+                "nothing told"
+            );
+            assert_eq!(sandbox.log_lines("brightness not set"), 1);
+            let told = sandbox.last_log_line(&["notice shown"]).unwrap_or_default();
+            assert!(told.contains("brightness") || told.contains("Parlaklık"), "{told}");
+            assert_eq!(sandbox.log_lines("level shown"), 0, "an OSD for nothing set");
+            assert!(osd().is_none());
+        }
+    }
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}
+
 /// PLAN M19 U14: a window flashing for attention (a chat's new message) showed nothing on
 /// the bar; Windows' taskbar marks its button. The bar hears it from the shell.
 #[test]

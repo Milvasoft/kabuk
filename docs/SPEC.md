@@ -120,6 +120,7 @@ Target platform: Windows 11 22H2 and later. Windows 10 22H2 is supported on a be
 
 - Kabuk's own notifications (e.g. "Window is floating", "Game mode on") are shown in a style matching the look and disappear by themselves.
 - When the volume changes, the OSD (volume indicator) appears. The keyboard's volume keys are Kabuk's while it runs (they step the volume by 2 as Windows does), so Windows' own volume flyout does not show beside Kabuk's OSD (reported by the user on 2026-10-14; D50). In game mode they are Windows' again (while the window in front is on a full-screen monitor; elsewhere they stay Kabuk's).
+- When Kabuk sets a monitor's brightness (the wheel over the battery, a level in the quick settings), the same OSD shows it with a sun, on that monitor (PLAN M19 U18); a monitor with no brightness to set says so in a notice. The brightness keys stay Windows': on laptops they are no keyboard events (the firmware hands them to Windows), so Windows' own flyout shows for them.
 - The notification badge on the bar shows the unread count of Windows notifications (technical risk: see ARCHITECTURE §Notifications).
 
 ### 2.7 Screen saver

@@ -90,7 +90,7 @@ fn main() {
     });
     let volume = arg("--osd").and_then(|v| v.parse::<u8>().ok()).map(|p| {
         let s = kabuk::notify::style::NotifyStyle::of(look);
-        kabuk::notify::view::osd(p, &s, 1.0)
+        kabuk::notify::view::osd(kabuk::notify::view::Level::Volume, p, &s, 1.0)
     });
     // The volume panel (`--volume-panel <percent>`; `--volume-panel menu` for the right
     // click's menu).

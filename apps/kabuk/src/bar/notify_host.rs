@@ -1,4 +1,4 @@
-//! Kabuk's notices and the volume OSD on the bar thread (SPEC §2.6): small windows on
+//! Kabuk's notices and the volume and brightness OSD on the bar thread (SPEC §2.6): small windows on
 //! the monitor in use (DECISIONS D95) in the look's style, gone after the design's time; held back in
 //! game mode and summed up after it (SPEC §2.4).
 
@@ -13,6 +13,7 @@ use kabuk_win::msgloop::{msg, PxRect, Window};
 use super::motion_host::Shown;
 use super::{timer, Shared};
 use crate::launcher::place::BarSpace;
+use crate::notify::view::Level;
 use crate::notify::{self, style::NotifyStyle, Failure, Notice, Queue};
 
 const TOAST_CLASS: &str = "Kabuk.Notice";
@@ -34,12 +35,32 @@ pub(super) fn post_failed(control: Option<kabuk_win::window::Hwnd>, f: Failure) 
     }
 }
 const OSD_CLASS: &str = "Kabuk.Osd";
+/// Kabuk set a monitor's brightness (`wparam`: the percent) from bar `lparam` (PLAN M19
+/// U18), posted from the thread that set it.
+pub(super) const MSG_BRIGHTNESS_SET: u32 = msg::APP + 120;
+
+/// Tells the bar thread (its control window `control`) that the brightness of bar `bar`'s
+/// monitor is `percent` now.
+pub(super) fn post_brightness(control: Option<kabuk_win::window::Hwnd>, bar: usize, percent: u8) {
+    if let Some(c) = control {
+        let _ = kabuk_win::msgloop::post_message(
+            c,
+            kabuk_win::msgloop::Msg {
+                id: MSG_BRIGHTNESS_SET,
+                wparam: usize::from(percent),
+                lparam: isize::try_from(bar).unwrap_or(0),
+            },
+        );
+    }
+}
 
 #[derive(Default)]
 pub(super) struct NotifyState {
     queue: Queue,
     toast: Option<Shown>,
     osd: Option<Shown>,
+    /// The bar whose monitor the OSD is on: a level of another monitor shows it anew there.
+    osd_bar: Option<usize>,
     /// The last volume seen, so only a change shows the OSD.
     volume: Option<Volume>,
     /// The number of the last window-manager notice shown.
@@ -115,10 +136,17 @@ impl Shared {
                     // The open panel shows the level itself.
                     self.redraw_volume_panel();
                 } else {
-                    self.show_osd(if new.muted { 0 } else { new.percent });
+                    self.show_osd(Level::Volume, if new.muted { 0 } else { new.percent });
                 }
             }
         }
+    }
+
+    /// Kabuk set the brightness of bar `bar`'s monitor to `percent` (the wheel over the
+    /// battery, a quick settings level; PLAN M19 U18): the OSD shows it on that monitor.
+    pub(super) fn brightness_set(&mut self, bar: usize, percent: u32) {
+        self.change_on_bar(bar);
+        self.show_osd(Level::Brightness, percent);
     }
 
     pub(super) fn hide_toast(&mut self) {
@@ -246,6 +274,9 @@ impl Shared {
             (l.size.w * scale.0).ceil() as u32,
             ((l.size.h + above + below) * scale.0).ceil() as u32,
         );
+        if self.notices.osd_bar != Some(bar) {
+            return false;
+        }
         let Some(s) = self.notices.osd.as_mut().and_then(Shown::surface_mut) else {
             return false;
         };
@@ -253,23 +284,23 @@ impl Shared {
             return false;
         }
         if let Err(e) = s.render(&self.gpu, &l, &self.look.palette, scale, (0.0, above), None) {
-            tracing::warn!(error = %e, "volume render failed");
+            tracing::warn!(error = %e, "level render failed");
         }
         let _ = self.gpu.commit();
         true
     }
 
-    fn show_osd(&mut self, percent: u32) {
+    fn show_osd(&mut self, level: Level, percent: u32) {
         let style = NotifyStyle::of(self.look.style.look);
         let p = u8::try_from(percent.min(100)).unwrap_or(100);
-        let node = notify::view::osd(p, &style, self.look.style.text_scale);
+        let node = notify::view::osd(level, p, &style, self.look.style.text_scale);
         let Some((i, monitor, bar)) = self.notice_monitor() else {
             return;
         };
         // Not over a full-screen program: a window over a game takes its frames off their
         // direct way to the screen (D85). The game, or Windows, shows the volume there.
         if self.game_devices.contains(&self.bars[i].monitor.device) {
-            tracing::debug!(percent = p, "volume not shown over a full-screen program");
+            tracing::debug!(?level, percent = p, "level not shown over a full-screen program");
             return;
         }
         // A bar on the left or right leaves the bottom free.
@@ -280,8 +311,9 @@ impl Shared {
             self.notices.osd = self.popup(OSD_CLASS, &node, motion::OSD, |size| {
                 notify::place::osd(&style, monitor, bar, size)
             });
+            self.notices.osd_bar = Some(i);
         }
-        tracing::debug!(percent = p, "volume shown");
+        tracing::debug!(?level, percent = p, "level shown");
         if let Some(c) = &self.control {
             c.set_timer(timer::OSD, std::time::Duration::from_millis(u64::from(style.osd_ms)));
         }

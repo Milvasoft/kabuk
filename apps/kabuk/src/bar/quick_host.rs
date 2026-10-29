@@ -423,6 +423,18 @@ impl Shared {
                 p.quick.screens.clone_from(&quick.screens);
             }
             self.set_brightness_of(&changed);
+            // The OSD shows the level on the monitor dragged (PLAN M19 U18); a monitor
+            // without a bar of its own shows it on the panel's.
+            if let Some(s) = quick.screens.get(i) {
+                let bar = self
+                    .bars
+                    .iter()
+                    .position(|b| b.monitor.number == s.number)
+                    .or(self.quick_panel.as_ref().map(|p| p.bar));
+                if let Some(bar) = bar {
+                    self.brightness_set(bar, u32::from(s.percent));
+                }
+            }
         }
         self.reshow_quick_panel(quick);
     }

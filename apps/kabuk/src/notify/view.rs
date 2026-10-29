@@ -88,8 +88,25 @@ pub(crate) fn track(t: &Track, level: f32) -> Node {
     .paint(fill(t.back, t.radius))
 }
 
-/// The volume OSD at `percent` (0-100).
-pub fn osd(percent: u8, s: &NotifyStyle, text_scale: f32) -> Node {
+/// What an OSD shows the level of.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Level {
+    Volume,
+    /// A monitor's brightness (PLAN M19 U18), with the quick settings' sun.
+    Brightness,
+}
+
+impl Level {
+    pub fn icon(self) -> &'static str {
+        match self {
+            Level::Volume => "vol",
+            Level::Brightness => "sun",
+        }
+    }
+}
+
+/// The OSD of `level` at `percent` (0-100).
+pub fn osd(level: Level, percent: u8, s: &NotifyStyle, text_scale: f32) -> Node {
     let value = Node::row(vec![text(
         vec![span(percent.to_string(), Role::Fg, s.value_weight)],
         FontRole::Num,
@@ -98,7 +115,7 @@ pub fn osd(percent: u8, s: &NotifyStyle, text_scale: f32) -> Node {
     )])
     .size(Some(s.value_width), None);
     Node::row(vec![
-        Node::icon("vol", s.icon_size, Role::Fg),
+        Node::icon(level.icon(), s.icon_size, Role::Fg),
         track(&s.track, f32::from(percent) / 100.0),
         value,
     ])
@@ -111,7 +128,8 @@ pub fn osd(percent: u8, s: &NotifyStyle, text_scale: f32) -> Node {
 #[cfg(test)]
 mod tests {
     //! Edge cases: the notice's width and parts, with and without the line under the
-    //! title; the OSD's fill at 0, 40 and 100 %; Konsol's dashes.
+    //! title; the OSD's fill at 0, 40 and 100 %; Konsol's dashes; the volume's and the
+    //! brightness's icons.
     use super::*;
     use kabuk_core::config::Look;
     use kabuk_ui::geom::Point;
@@ -192,7 +210,7 @@ mod tests {
     fn the_osd_fills_its_track_by_the_level() {
         let s = NotifyStyle::of(Look::Ada);
         let filled = |p: u8| {
-            panels(&osd(p, &s, 1.0))
+            panels(&osd(Level::Volume, p, &s, 1.0))
                 .iter()
                 .find(|(_, r)| *r == Role::AccentFill)
                 .map(|(w, _)| *w)
@@ -201,10 +219,33 @@ mod tests {
         assert_eq!(filled(100), Some(220.0));
         assert_eq!(filled(0), Some(0.0));
         let k = NotifyStyle::of(Look::Konsol);
-        let dashes = panels(&osd(50, &k, 1.0));
+        let dashes = panels(&osd(Level::Brightness, 50, &k, 1.0));
         let lit = dashes.iter().filter(|(w, r)| *w == 6.0 && *r == Role::Accent).count();
         let dark = dashes.iter().filter(|(w, r)| *w == 6.0 && *r == Role::Faint).count();
         assert_eq!(lit + dark, 24);
         assert_eq!(lit, 12);
+    }
+
+    /// PLAN M19 U18: the brightness has the volume's OSD with the sun instead of the
+    /// speaker.
+    #[test]
+    fn the_brightness_osd_is_the_volumes_with_the_sun() {
+        let s = NotifyStyle::of(Look::Ada);
+        let icons = |level: Level| -> Vec<String> {
+            layout(&osd(level, 70, &s, 1.0), Point::default(), &Fake)
+                .draws
+                .iter()
+                .filter_map(|d| match d {
+                    Draw::Icon { spec, .. } => Some(spec.name.to_string()),
+                    _ => None,
+                })
+                .collect()
+        };
+        assert_eq!(icons(Level::Volume), vec!["vol".to_string()]);
+        assert_eq!(icons(Level::Brightness), vec!["sun".to_string()]);
+        assert_eq!(
+            panels(&osd(Level::Brightness, 70, &s, 1.0)),
+            panels(&osd(Level::Volume, 70, &s, 1.0))
+        );
     }
 }
