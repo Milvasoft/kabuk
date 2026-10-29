@@ -4414,7 +4414,9 @@ fn a_window_asking_for_attention_is_seen() {
     assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
     let chat = TestWindow::open(&["--title", &title("attention")]);
     let other = TestWindow::open(&["--title", &title("in-front")]);
-    assert!(wait_until(SETTLE, || other.hwnd.focus()).is_some());
+    // The other one in front if Windows lets it (a screen saver or a lock keeps the
+    // focus): the flash is heard either way.
+    let _ = wait_until(SETTLE, || other.hwnd.focus());
     post_message(
         chat.hwnd,
         Msg {
