@@ -204,6 +204,11 @@ pub enum Command {
         device: String,
         number: u32,
     },
+    /// The wheel over the bar's workspace indicator: this many workspaces on (PLAN M19 U16).
+    StepOn {
+        device: String,
+        by: i32,
+    },
     Action(Action),
     /// The launcher chose an open window: show its workspace and focus it.
     Reveal(u64),
@@ -924,6 +929,10 @@ impl Wm {
         match c {
             Command::SwitchOn { device, number } => {
                 let effects = self.desk.switch(&device, number);
+                self.apply(effects);
+            }
+            Command::StepOn { device, by } => {
+                let effects = self.desk.step(&device, by);
                 self.apply(effects);
             }
             Command::Action(a) => self.act_on_front(a),

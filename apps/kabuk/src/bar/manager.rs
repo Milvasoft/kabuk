@@ -347,6 +347,8 @@ pub const DISPLAY_DEBOUNCE: Duration = Duration::from_millis(500);
 const RASTER: Raster = Raster::Software;
 /// Volume change per wheel notch, in percent points.
 pub const VOLUME_STEP: i32 = 2;
+/// How far a wheel notch over the battery moves the monitor's brightness (PLAN M19 U16).
+pub const BRIGHTNESS_STEP: i32 = 5;
 
 /// How soon a notification that arrived while the bars were busy is handled again.
 const PENDING_RETRY: Duration = Duration::from_millis(15);
@@ -590,6 +592,26 @@ struct Dock {
     drawn_grow: (f32, f32, bool),
     /// Hidden while a full-screen program covers its monitor, as the bar is.
     aside: bool,
+}
+
+/// What the wheel does over a bar module (PLAN M19 U16).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Wheel {
+    Volume,
+    Workspace,
+    Track,
+    Brightness,
+}
+
+/// What the wheel does over `module` (`None`: nothing).
+fn wheel_action(module: &str) -> Option<Wheel> {
+    match module {
+        view::hit::VOLUME => Some(Wheel::Volume),
+        view::hit::WORKSPACE => Some(Wheel::Workspace),
+        view::hit::MEDIA => Some(Wheel::Track),
+        view::hit::BATTERY => Some(Wheel::Brightness),
+        _ => None,
+    }
 }
 
 /// What the mouse rests on for a tooltip: a tray icon, or a module of the bar.
@@ -4256,12 +4278,10 @@ impl Shared {
                 let (sx, sy) = msg::point(m.lparam);
                 let bar = &self.bars[index];
                 let (x, y) = (sx - bar.rect.x, sy - bar.rect.y);
-                if self.hit(index, x, y).is_some_and(|h| h.0 == view::hit::VOLUME) {
+                let notches = msg::wheel(m.wparam) / msg::WHEEL_DELTA;
+                if let Some((module, _)) = self.hit(index, x, y) {
                     self.change_on_bar(index);
-                    let notches = msg::wheel(m.wparam) / msg::WHEEL_DELTA;
-                    if let Some(a) = &self.audio {
-                        a.step(notches * VOLUME_STEP);
-                    }
+                    self.wheel_over(index, module, notches);
                 }
                 Some(0)
             }
@@ -4303,6 +4323,52 @@ impl Shared {
             y: bar.scale.dips(y) - bar.origin.y,
         };
         bar.layout.hit_test(p).map(|h| (h.module, h.value))
+    }
+
+    /// The wheel turned `notches` (up positive) over `module` of bar `index` (PLAN M19 U16:
+    /// only the volume took it): the volume, the workspaces, the track, the brightness.
+    fn wheel_over(&mut self, index: usize, module: &str, notches: i32) {
+        match wheel_action(module) {
+            Some(Wheel::Volume) => {
+                if let Some(a) = &self.audio {
+                    a.step(notches * VOLUME_STEP);
+                }
+            }
+            Some(Wheel::Workspace) => {
+                if let (Some(link), Some(bar)) = (&self.wm, self.bars.get(index)) {
+                    // Up goes back, as a list scrolls.
+                    link.send(wm::Command::StepOn {
+                        device: bar.monitor.device.clone(),
+                        by: -notches.signum(),
+                    });
+                }
+            }
+            Some(Wheel::Track) => {
+                if let Some(media) = &self.media {
+                    if notches > 0 {
+                        media.previous();
+                    } else {
+                        media.next();
+                    }
+                }
+            }
+            Some(Wheel::Brightness) => {
+                let Some(bar) = self.bars.get(index) else { return };
+                let (handle, device) = (bar.monitor.handle, bar.monitor.device.clone());
+                let control = self.control.as_ref().map(Window::hwnd);
+                std::thread::spawn(move || {
+                    kabuk_win::system::com_init_mta();
+                    if let Some((panel, now)) = kabuk_win::brightness::read(handle, &device) {
+                        let to = (i32::from(now) + notches * BRIGHTNESS_STEP).clamp(0, 100);
+                        if let Err(e) = kabuk_win::brightness::set(panel, u8::try_from(to).unwrap_or(now)) {
+                            tracing::warn!(error = %e, "brightness not set");
+                            notify_host::post_failed(control, crate::notify::Failure::Brightness);
+                        }
+                    }
+                });
+            }
+            None => {}
+        }
     }
 
     fn click(&mut self, index: usize, x: i32, y: i32, button: Click) {
@@ -4779,6 +4845,17 @@ mod tests {
         assert!(ask_again(Some(t0), t0 + ASK_AGAIN_QUIET));
         // A clock that went backwards never asks too early.
         assert!(!ask_again(Some(t0 + Duration::from_secs(5)), t0));
+    }
+
+    /// PLAN M19 U16: the wheel did only the volume.
+    #[test]
+    fn the_wheel_does_what_suits_each_module() {
+        assert_eq!(wheel_action(view::hit::VOLUME), Some(Wheel::Volume));
+        assert_eq!(wheel_action(view::hit::WORKSPACE), Some(Wheel::Workspace));
+        assert_eq!(wheel_action(view::hit::MEDIA), Some(Wheel::Track));
+        assert_eq!(wheel_action(view::hit::BATTERY), Some(Wheel::Brightness));
+        assert_eq!(wheel_action(view::hit::CLOCK), None);
+        assert_eq!(wheel_action(view::hit::APP), None);
     }
 
     #[test]
