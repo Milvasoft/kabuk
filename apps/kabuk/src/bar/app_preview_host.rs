@@ -31,6 +31,8 @@ pub(super) struct AppPreview {
     /// The app's index in the list and the windows of its cards, in order.
     pub(super) app: usize,
     windows: Vec<u64>,
+    /// Shown by a click on the app (a second click takes them away).
+    pub(super) clicked: bool,
 }
 
 impl Shared {
@@ -172,6 +174,7 @@ impl Shared {
             scale,
             app: index,
             windows,
+            clicked: false,
         });
     }
 

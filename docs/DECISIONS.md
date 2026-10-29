@@ -8,6 +8,9 @@ No open decisions (the user decided D39, D43, D44 and the still pictures' drift 
 
 ## Decided and proposed
 
+### D92 · A click on an app with several windows shows their previews — Decided by the user (2026-10-29)
+Asked for by the user: a click on an app with more than one window went to its windows in turn; Windows' taskbar shows their previews instead. Now a click on such an app shows the same previews the mouse resting on it shows, to pick a window from (a click on a card brings it forward, its × closes it); a second click takes them away. Shown by resting the mouse, a click keeps them. An app with one window is unchanged: in front, a click minimises it; else it comes forward. A middle or Shift click still starts another window, and a drag resting on the app still brings its last window forward (D86).
+
 ### D91 · Each monitor's brightness in the quick settings — Decided by the user (2026-10-22, changed 2026-10-23)
 Asked for by the user: the quick settings' brightness set only the monitor under the panel. First built as one level with a monitor chooser above it (the user's choice on 2026-10-22); after trying it the user asked instead for a level for each monitor, one under the other, each with a monitor-and-sun icon and the monitor's number at its lower right, under a "Sync" switch: on, moving any level moves them all, and turning it on brings every monitor to the main one's brightness; off, each moves alone. The switch is remembered in `quick-settings.json` next to the state file (a panel's memory, as the app grid's order, not a setting). With one monitor answering there is one level with the sun and no switch. Where each is set is read per monitor: the computer's own panel (a display path whose output technology is internal or embedded) through WMI, any other monitor over DDC/CI. Before, WMI was tried first for every monitor, so on a laptop with an external monitor the level would have set the laptop's screen.
 

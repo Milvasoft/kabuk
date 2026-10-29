@@ -546,11 +546,30 @@ impl Shared {
         // A minimised window can stay Windows' foreground one: it is not in front (found
         // with a probe: a second click minimised the minimised window again).
         let front = front.filter(|h| !Hwnd(*h).is_minimized());
+        let action = apps::click_action(&app, front, new_window);
+        self.kill(super::timer::APP_PREVIEW);
+        if action == apps::ClickAction::Previews {
+            // Shown by a click, a second click takes them away; shown by resting the
+            // mouse, a click keeps them (as on Windows' taskbar).
+            if self.app_preview.as_ref().is_some_and(|p| p.app == i && p.clicked) {
+                self.preview_held = Some(i);
+                self.hide_app_preview();
+            } else {
+                let bar = self.preview_bar;
+                if self.app_preview.as_ref().is_none_or(|p| p.app != i) {
+                    self.show_app_preview(bar, i);
+                }
+                if let Some(p) = self.app_preview.as_mut() {
+                    p.clicked = true;
+                }
+                tracing::info!(source = %app.source, "app previews shown by a click");
+            }
+            return;
+        }
         // No preview over what the click does, until the mouse leaves the app.
         self.preview_held = Some(i);
-        self.kill(super::timer::APP_PREVIEW);
         self.hide_app_preview();
-        match apps::click_action(&app, front, new_window) {
+        match action {
             apps::ClickAction::Minimize(hwnd) => {
                 tracing::info!(hwnd, source = %app.source, "app minimized from the bar");
                 match &self.wm {
@@ -582,7 +601,7 @@ impl Shared {
                     tracing::warn!(error = %e, "app not started");
                 }
             }
-            apps::ClickAction::Nothing => {}
+            apps::ClickAction::Previews | apps::ClickAction::Nothing => {}
         }
     }
 
@@ -609,7 +628,8 @@ impl Shared {
         let Some(app) = self.drag_rest.and_then(|i| self.apps.list.get(i)).cloned() else {
             return;
         };
-        if let apps::ClickAction::Show(hwnd) = apps::click_action(&app, None, false) {
+        // Its first window (with several, the one most recently in front).
+        if let Some(&hwnd) = app.windows.first() {
             tracing::info!(hwnd, source = %app.source, "app shown for a drag");
             match &self.wm {
                 Some(link) => link.send(wm::Command::Reveal(hwnd)),

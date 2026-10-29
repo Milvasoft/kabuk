@@ -469,6 +469,7 @@ Asked for by the user on 2026-10-29, during the review:
 - B1 Apps missing from the bar: every window Windows' taskbar would show has its app on the bar.
 - B2 Tray icons missing: every icon Windows' notification area would show is in Kabuk's tray.
 - B3 A right click on an empty part of the bar opens a menu with what Windows' taskbar menu holds.
+- B4 A click on an app with several windows shows their previews, as Windows' taskbar does (DECISIONS D92). *Done: `clicks_on_an_app_do_what_windows_taskbar_does`, `a_click_on_an_app_with_several_windows_shows_their_previews`.*
 
 **Done criteria**
 - [ ] Each item above done or stated as not done with its reason.

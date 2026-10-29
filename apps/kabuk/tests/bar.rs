@@ -4090,3 +4090,55 @@ fn the_figures_stop_while_no_bar_shows_them() {
     assert!(wait_until(SETTLE, || restored(&before)).is_some());
 }
 
+/// Asked for by the user on 2026-10-29: a click on an app with several windows went to
+/// them in turn. As on Windows' taskbar, it shows their previews to pick one from, and a
+/// second click takes them away.
+#[test]
+fn a_click_on_an_app_with_several_windows_shows_their_previews() {
+    use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_APP_CLICK};
+    use kabuk_win::msgloop::{post_message, Msg};
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    let _shell = sandbox.shell_with_bar_and_wm();
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let a = TestWindow::open(&["--title", &title("several-a")]);
+    let b = TestWindow::open(&["--title", &title("several-b")]);
+    for w in [&a, &b] {
+        let managed = format!("managing window hwnd={}", w.hwnd.0);
+        assert!(wait_until(SETTLE, || sandbox.log_lines(&managed) == 1).is_some());
+    }
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
+    let click = || {
+        post_message(
+            control,
+            Msg {
+                id: MSG_TEST_APP_CLICK,
+                wparam: b.hwnd.0 as usize,
+                lparam: 1,
+            },
+        )
+        .expect("post to the bar");
+    };
+    click();
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("app previews shown by a click") == 1).is_some(),
+        "no previews for a click"
+    );
+    assert!(wait_until(SETTLE, || sandbox.log_lines("windows=2") >= 1).is_some());
+    assert_eq!(sandbox.log_lines("app shown from the bar"), 0, "a window was shown instead");
+    assert_eq!(sandbox.log_lines("app minimized from the bar"), 0);
+    click();
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("app previews hidden") >= 1).is_some(),
+        "a second click left the previews"
+    );
+    drop(b);
+    drop(a);
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}
