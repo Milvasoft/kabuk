@@ -4303,3 +4303,57 @@ fn a_mistake_in_the_settings_file_is_told() {
     assert_eq!(sandbox.restore().0, 0);
     assert!(wait_until(SETTLE, || restored(&before)).is_some());
 }
+
+/// DECISIONS D95: notices came on Monitor 1 (main) even for a change made on Monitor 2's
+/// bar. A change made on a bar is told on that bar's monitor.
+#[test]
+fn a_notice_comes_on_the_monitor_of_the_bar_it_was_made_on() {
+    use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_NOTICE_FROM_BAR};
+    use kabuk_win::msgloop::{post_message, Msg};
+    let monitors = kabuk_win::shell::monitors();
+    if monitors.len() < 2 {
+        eprintln!("one monitor: nothing to tell apart");
+        return;
+    }
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
+    // The bars are made in Windows' monitor order: a bar of a monitor that is not the main one.
+    let (index, other) = monitors
+        .iter()
+        .enumerate()
+        .find(|(_, m)| !m.primary)
+        .map(|(i, m)| (i, m.rect))
+        .unwrap();
+    post_message(
+        control,
+        Msg {
+            id: MSG_TEST_NOTICE_FROM_BAR,
+            wparam: index,
+            lparam: 0,
+        },
+    )
+    .unwrap();
+    let notice = || {
+        kabuk_win::window::windows_of_class("Kabuk.Notice")
+            .into_iter()
+            .find(|h| h.pid() == Some(pid) && h.is_visible())
+            .and_then(|h| h.window_rect())
+    };
+    let r = wait_until(SETTLE, || notice().is_some()).and_then(|_| notice());
+    let r = r.expect("no notice");
+    let (cx, cy) = ((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+    assert!(
+        other.left <= cx && cx < other.right && other.top <= cy && cy < other.bottom,
+        "the notice {r:?} is not on the bar's monitor {other:?}"
+    );
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}

@@ -446,6 +446,8 @@ pub const MSG_TEST_SHOW_DESKTOP: u32 = msg::APP + 65;
 /// Integration tests: an auto-hiding bar (`wparam` its place plus 1) or the dock (0)
 /// comes in (`lparam` 1) or slides off (0), as the mouse would make it.
 pub const MSG_TEST_PEEK: u32 = msg::APP + 70;
+/// Integration tests: a change made on bar `wparam` shows a notice (DECISIONS D95).
+pub const MSG_TEST_NOTICE_FROM_BAR: u32 = msg::APP + 90;
 /// The notices for the calendar panel were read (D88).
 const MSG_NOTICES_READ: u32 = msg::APP + 67;
 /// The quick settings' slow parts were read (D88).
@@ -1660,6 +1662,12 @@ impl Shared {
             }
             MSG_PRIVACY => {
                 self.privacy_changed();
+                Some(0)
+            }
+            #[cfg(feature = "integration")]
+            MSG_TEST_NOTICE_FROM_BAR => {
+                self.change_on_bar(m.wparam);
+                self.notify(crate::notify::Notice::Copied);
                 Some(0)
             }
             #[cfg(feature = "integration")]
@@ -4068,6 +4076,7 @@ impl Shared {
                 let bar = &self.bars[index];
                 let (x, y) = (sx - bar.rect.x, sy - bar.rect.y);
                 if self.hit(index, x, y).is_some_and(|h| h.0 == view::hit::VOLUME) {
+                    self.change_on_bar(index);
                     let notches = msg::wheel(m.wparam) / msg::WHEEL_DELTA;
                     if let Some(a) = &self.audio {
                         a.step(notches * VOLUME_STEP);
@@ -4117,6 +4126,8 @@ impl Shared {
 
     fn click(&mut self, index: usize, x: i32, y: i32, button: Click) {
         self.hide_tooltip();
+        // What the click changes is told on this bar's monitor (DECISIONS D95).
+        self.change_on_bar(index);
         let hit = self.hit(index, x, y);
         tracing::debug!(?button, x, y, ?hit, "bar click");
         // A click on the bar is a click elsewhere for the tray panel (its own button

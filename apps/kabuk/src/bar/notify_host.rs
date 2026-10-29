@@ -1,5 +1,5 @@
 //! Kabuk's notices and the volume OSD on the bar thread (SPEC §2.6): small windows on
-//! the primary monitor in the look's style, gone after the design's time; held back in
+//! the monitor in use (DECISIONS D95) in the look's style, gone after the design's time; held back in
 //! game mode and summed up after it (SPEC §2.4).
 
 use kabuk_core::config::Edge;
@@ -27,7 +27,13 @@ pub(super) struct NotifyState {
     volume: Option<Volume>,
     /// The number of the last window-manager notice shown.
     seen: u64,
+    /// The bar a change was just made on (the wheel over the volume), and when: what it
+    /// shows comes on that bar's monitor.
+    from_bar: Option<(usize, std::time::Instant)>,
 }
+
+/// How long after a change made on a bar what it shows still counts as that bar's.
+const FROM_BAR: std::time::Duration = std::time::Duration::from_secs(2);
 
 impl Shared {
     /// Shows `n` now, or holds it back for game mode's summary.
@@ -110,9 +116,23 @@ impl Shared {
         self.retire(osd);
     }
 
-    /// The primary bar's monitor, in DIPs, and its bar.
+    /// A change was made on bar `index`: what it shows comes on that bar's monitor.
+    pub(super) fn change_on_bar(&mut self, index: usize) {
+        self.notices.from_bar = Some((index, std::time::Instant::now()));
+    }
+
+    /// The monitor in use's bar, its monitor in DIPs, and the bar's room (DECISIONS D95).
     fn notice_monitor(&self) -> Option<(usize, Size, Option<BarSpace>)> {
-        let i = self.bars.iter().position(|b| b.primary)?;
+        let from_bar = self
+            .notices
+            .from_bar
+            .filter(|(i, at)| at.elapsed() < FROM_BAR && *i < self.bars.len())
+            .map(|(i, _)| i);
+        let front = kabuk_win::events::foreground()
+            .and_then(|h| h.monitor_handle())
+            .and_then(|m| self.bars.iter().position(|b| b.monitor.handle == m));
+        let main = self.bars.iter().position(|b| b.primary);
+        let i = notify::place::monitor_in_use(from_bar, front, main)?;
         let b = &self.bars[i];
         let r = b.monitor.rect;
         let size = Size {

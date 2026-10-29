@@ -49,6 +49,12 @@ pub fn osd(s: &NotifyStyle, monitor: Size, bar: Option<BarSpace>, size: Size) ->
     }
 }
 
+/// Which monitor a notice or the OSD comes on (DECISIONS D95): the bar a change was made
+/// on, else the one of the window in front, else the main one.
+pub fn monitor_in_use(from_bar: Option<usize>, front: Option<usize>, main: Option<usize>) -> Option<usize> {
+    from_bar.or(front).or(main)
+}
+
 #[cfg(test)]
 mod tests {
     //! Edge cases: a top, right, bottom and no bar; Etkinlik centred.
@@ -112,5 +118,15 @@ mod tests {
         let size = Size { w: 330.0, h: 46.0 };
         assert_eq!(osd(&s, MON, bar(Edge::Top, 52.0), size), Point { x: 795.0, y: 964.0 });
         assert_eq!(osd(&s, MON, bar(Edge::Bottom, 30.0), size).y, 1080.0 - 70.0 - 46.0);
+    }
+
+    /// DECISIONS D95: the bar the change was made on first, then the window in front's
+    /// monitor, then the main one.
+    #[test]
+    fn a_notice_comes_on_the_monitor_in_use() {
+        assert_eq!(monitor_in_use(Some(1), Some(2), Some(0)), Some(1));
+        assert_eq!(monitor_in_use(None, Some(2), Some(0)), Some(2));
+        assert_eq!(monitor_in_use(None, None, Some(0)), Some(0));
+        assert_eq!(monitor_in_use(None, None, None), None);
     }
 }
