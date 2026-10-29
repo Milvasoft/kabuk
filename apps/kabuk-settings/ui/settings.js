@@ -43,7 +43,7 @@
   const LOOK_NAMES = { a: "ada", b: "cizgi", c: "devre", d: "ray", e: "konsol", f: "rihtim", g: "etkinlik", h: "pano", i: "izgara", j: "defter" };
   const DIM_MIN = 10, DIM_MAX = 3600, DIM_PRESETS = [30, 60, 120];
   const SAVER_WAITS = [3, 5, 10, 15];
-  const RANGES = { height: [24, 72], tray: [0, 12], gap: [0, 32], bright: [10, 100, 5], dropdown: [20, 90, 5] };
+  const RANGES = { height: [24, 72], tray: [0, 12], gap: [0, 32], bright: [10, 100, 5], dropdown: [20, 90, 5], workspaces: [1, 9] };
 
   const cfg = () => S.config;
   const at = (root, path) => path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), root);
@@ -63,6 +63,8 @@
     return `<button type="button" data-set="${path}" data-val='${escapeHtml(JSON.stringify(v))}' class="${on ? "on" : ""}" aria-pressed="${on}">${n}</button>`;
   }).join("");
   const segFor = (path, aria, options) => seg(aria, choice(path, get(path), options));
+  // A count on a slider: the number alone beside it.
+  const countRange = (id, path, [min, max], label) => `<span class="rng"><input type="range" id="${id}" data-range="${path}" data-unit="" min="${min}" max="${max}" value="${get(path)}" aria-label="${escapeHtml(label)}"><span class="v" data-v="${id}">${get(path)}</span></span>`;
   const range = (id, path, [min, max, step = 1], value, label) => `<span class="rng"><input type="range" id="${id}" data-range="${path}" min="${min}" max="${max}" step="${step}" value="${value}" aria-label="${escapeHtml(label)}"><span class="v" data-v="${id}">${tv("setPx", value)}</span></span>`;
   const resetLink = (path) => ` · <button type="button" class="linkish" data-reset="${path}">${t("posReset")}</button>`;
   const resetIfChanged = (path) => (changed(path) ? resetLink(path) : "");
@@ -420,8 +422,12 @@
     const gapHint = t("gapH") + (w.gap != null ? resetLink("windows.gap") : "");
     return head(t("navWindows"), t("winDesc")) + `
       <div class="set-grp">${rowFor("windows.default_layout", t("layoutDef"), t("layoutDefH"), segFor("windows.default_layout", t("layoutDef"), [["tiling", t("tiling")], ["floating", t("floating")]]))}
+      ${rowFor("windows.tiling_layout", t("setTilingLayout"), t("setTilingLayoutH"), segFor("windows.tiling_layout", t("setTilingLayout"), [["dwindle", t("setLayoutDwindle")], ["master", t("setLayoutMaster")]]))}
+      ${rowFor("windows.workspaces", t("setWorkspaces"), t("setWorkspacesH"), countRange("ws-count", "windows.workspaces", RANGES.workspaces, t("setWorkspaces")))}
+      ${rowFor("windows.shown_workspaces", t("setShownWorkspaces"), t("setShownWorkspacesH"), countRange("ws-shown", "windows.shown_workspaces", RANGES.workspaces, t("setShownWorkspaces")))}
       ${tgl("windows.drag_to_float", t("dragFloat"), t("dragFloatH"))}
       ${tgl("windows.alt_drag", t("altDrag"), t("altDragH"))}
+      ${tgl("windows.double_click_to_tile", t("setDoubleClick"), t("setDoubleClickH"))}
       ${row(t("gap"), gapHint, range("gap-range", "windows.gap", RANGES.gap, gap, t("gap")))}
       ${rowFor("windows.new_window", t("newWin"), t("newWinH"), segFor("windows.new_window", t("newWin"), [["right", t("right")], ["below", t("below")], ["floating", t("floating")]]))}
       ${tgl("windows.active_border", t("border"), t("borderH"))}

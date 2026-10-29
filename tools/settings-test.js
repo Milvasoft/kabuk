@@ -350,6 +350,27 @@ async function main() {
   await page.click(`[data-set="windows.minimize_effect"][data-val='"genie"']`); await settled();
   check(/minimize_effect = "genie"/.test(toml()), "minimise: the genie again");
 
+  // PLAN M19 U11: the window manager's settings that were in kabuk.toml alone: how many
+  // workspaces, how many on the bar, the tiling layout and the title's double click.
+  const slide = async (id, value) => {
+    await page.$eval(`#${id}`, (el, v) => { el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true })); }, value);
+    await settled();
+  };
+  await slide("ws-count", "6");
+  check(/\[windows\][^[]*\nworkspaces = 6/.test(toml()) && (await page.locator(`[data-v="ws-count"]`).innerText()) === "6", "workspaces: six");
+  await slide("ws-shown", "5");
+  check(/shown_workspaces = 5/.test(toml()), "workspaces on the bar: five");
+  check(await page.$eval(`[data-set="windows.tiling_layout"][data-val='"dwindle"']`, (e) => e.classList.contains("on")), "tiling layout: dwindle by default");
+  await page.click(`[data-set="windows.tiling_layout"][data-val='"master"']`); await settled();
+  check(/tiling_layout = "master"/.test(toml()), "tiling layout: master");
+  check(await page.$eval(`[data-tgl="windows.double_click_to_tile"]`, (e) => e.getAttribute("aria-checked") === "true"), "double click: on by default");
+  await page.click(`[data-tgl="windows.double_click_to_tile"]`); await settled();
+  check(/double_click_to_tile = false/.test(toml()), "double click: off");
+  for (const p of ["windows.workspaces", "windows.shown_workspaces", "windows.tiling_layout", "windows.double_click_to_tile"]) {
+    await page.click(`[data-reset="${p}"]`); await settled();
+  }
+  check(!/workspaces =|tiling_layout|double_click_to_tile/.test(toml()), "window manager settings back to their defaults");
+
   // The mode's hint says what the chosen mode does.
   await go("look");
   const modeHint = () => page.$eval(`[data-set="appearance.mode"]`, (e) => e.closest(".set-row").querySelector(".h").textContent);
