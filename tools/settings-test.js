@@ -16,7 +16,11 @@
 // an open window and removed; switching the language rewords the page; the Create tab makes a
 // wallpaper with a local stand-in for Ollama (the first answer too bright and sent back,
 // the second kept and applied), and an API key typed in is stored in Windows Credential
-// Manager and in no file or log, then removed.
+// Manager and in no file or log, then removed. PLAN M19: a change is answered with only
+// what it changed; search finds a setting by its label, hint or page and opens it; the
+// settings file is exported, imported (a refused one not taken) and reset behind a
+// confirmation, each undone from kabuk.toml.bak; the gallery shows placeholders until its
+// previews come; a rule's monitor is one of the connected ones.
 "use strict";
 const fs = require("fs");
 const os = require("os");
@@ -158,6 +162,32 @@ async function main() {
   await settled();
   check((await page.locator(".set-nav").count()) === 12, "12 pages in the navigation");
   check((await page.locator(".set-nav").first().innerText()).includes("Görünüm"), "Turkish words from the language files");
+
+  // PLAN M19 U20: search finds a setting by its label, its hint or its page, in the page's
+  // language (Turkish letters as Turkish), and takes the user to it, marked and focused.
+  const hits = () => page.locator(".set-found button").allInnerTexts();
+  const search = async (text) => { await page.fill("#set-search", ""); await page.type("#set-search", text); await settled(); };
+  await search("dizme düzeni");
+  const typed = await page.inputValue("#set-search");
+  const byLabel = await hits();
+  check(typed === "dizme düzeni" && byLabel.length >= 1 && byLabel[0].startsWith("Dizme düzeni") && byLabel[0].includes("Pencereler"), `search: by its label, typed key by key (${typed}: ${byLabel[0]})`);
+  await search("ekran kenarı");
+  check((await hits()).some((h) => h.startsWith("Pencere aralığı")), "search: by its hint");
+  await search("DİZME");
+  check((await hits()).some((h) => h.startsWith("Dizme düzeni")), "search: Turkish capitals as Turkish");
+  await search("zzqx");
+  check((await page.locator(".set-found button").count()) === 0 && (await page.locator(".set-main [role=status]").innerText()).length > 0, "search: nothing found, said so");
+  await page.press("#set-search", "Escape"); await settled();
+  check((await page.inputValue("#set-search")) === "" && (await page.locator(".set-found").count()) === 0, "search: Esc empties it");
+  await search("otomatik gizle");
+  await page.press("#set-search", "Enter"); await settled();
+  const autohide = await page.evaluate(() => ({ marked: !!document.querySelector(".set-row.found [data-tgl='bar.autohide']"), focused: document.activeElement?.dataset?.tgl }));
+  check((await page.locator(`[data-page="bar"].on`).count()) === 1 && autohide.marked && autohide.focused === "bar.autohide" && (await page.inputValue("#set-search")) === "", `search: Enter opens the first one, marked and focused (${JSON.stringify(autohide)})`);
+  await search("sıcak köşeler");
+  await page.click(".set-found button"); await settled();
+  const corners = await page.$eval(".set-main .found", (e) => { const r = e.getBoundingClientRect(); return { text: e.textContent, seen: r.top >= 0 && r.bottom <= window.innerHeight }; }).catch(() => ({}));
+  check((await page.locator(`[data-page="windows"].on`).count()) === 1 && (corners.text || "").startsWith("Sıcak köşeler") && corners.seen, `search: a click opens it, in view (${corners.text})`);
+  if (shots) { await search("ekran"); await page.screenshot({ path: path.join(shots, "search.png") }); await page.press("#set-search", "Escape"); await settled(); }
 
   // A short window: the menu scrolls, so its last page can be reached (found by the user:
   // the last pages were cut off).
@@ -724,6 +754,9 @@ async function main() {
   await go("lang");
   await page.click(`[data-set="language.language"][data-val='"en"']`); await settled();
   check((await page.locator(".set-nav").first().innerText()).includes("Appearance"), "English after switching");
+  await page.fill("#set-search", "hot corners"); await settled();
+  check((await page.locator(".set-found button").first().innerText()).startsWith("Hot corners"), "search: in the language switched to");
+  await page.press("#set-search", "Escape"); await settled();
 
   // PLAN M19 U1: a mistake in kabuk.toml is shown, with where, and a way to the file.
   const good = toml();

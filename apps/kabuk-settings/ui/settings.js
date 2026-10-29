@@ -33,6 +33,8 @@
     previewsDone: false, // every preview sent: a card without one stops waiting for it
     fileMsg: null, // what the settings file's export, import or reset said
     confirmReset: false, // "Reset all" asks before it does
+    search: "", // what is typed in the menu's search field (PLAN M19 U20)
+    found: null, // the setting a search led to, { page, n }, marked until the next click
   };
 
   // The design page's keys are camelCase; the language files use kebab-case
@@ -163,6 +165,12 @@
     save(c.path, list);
   }
   document.addEventListener("keydown", onKey, true);
+  // In the search field Enter opens the first setting found and Esc empties it.
+  document.addEventListener("keydown", (e) => {
+    if (e.target.id !== "set-search") return;
+    if (e.key === "Escape" && ui.search) { e.preventDefault(); ui.search = ""; render(); }
+    if (e.key === "Enter" && ui.search.trim()) { e.preventDefault(); const hit = searchSettings(ui.search)[0]; if (hit) goToFound(hit); }
+  });
   // Away from the window, the keys are the other programs' again.
   window.addEventListener("blur", () => { if (ui.capture) { ui.capture = null; capture(false); render(); } });
   document.addEventListener("keyup", onKey, true);
@@ -822,14 +830,88 @@
 
   const PAGES = { look: lookPage, wall: wallPage, saver: saverPage, bar: barPage, windows: windowsPage, rules: rulesPage, game: gamePage, launcher: launcherPage, keys: keysPage, lang: langPage, oled: oledPage, about: aboutPage };
 
+  /* ---------- search (PLAN M19 U20) ---------- */
+  /* Settings found by their label, hint and page in the language in use: every page drawn
+     as it opens, off screen, and what it shows read back, so nothing is listed twice and a
+     new row is found without more work. A hit opens its page at the setting. */
+  const FINDABLE = ".set-row, .set-grp > .gl, .chip, .keys > div:nth-child(odd), .theme-card, .saver";
+  // The page state a page opens with (as a click in the menu leaves it).
+  const OPENED = { refused: null, capture: null, ruleForm: null, rulePicking: false, dimCustom: null, fileMsg: null, confirmReset: false, wallTab: "pick" };
+  let searchIndex = null; // { of: S, entries }, drawn again when the state changes
+  const textOf = (el) => {
+    if (!el) return "";
+    const c = el.cloneNode(true);
+    // A text node has nothing in it to leave out.
+    c.querySelectorAll?.("button, [data-refusal]").forEach((x) => x.remove());
+    return c.textContent.replace(/\s+/g, " ").replace(/^[\s·]+|[\s·]+$/g, "");
+  };
+  // What a found element is called and what is said of it.
+  function findable(el) {
+    if (el.matches(".set-row")) return [textOf(el.querySelector(":scope > span > b")), textOf(el.querySelector(":scope > span > .h"))];
+    if (el.matches(".gl")) { const [label, ...hint] = el.textContent.split(". "); return [label, hint.join(". ")]; }
+    if (el.matches(".saver")) return [textOf(el.querySelector(".sn")?.firstChild), textOf(el.querySelector(".sn > span"))];
+    if (el.matches(".theme-card")) return [textOf(el.querySelector(".tn")?.firstChild), ""];
+    return [textOf(el), ""];
+  }
+  function indexSettings() {
+    if (searchIndex && searchIndex.of === S) return searchIndex.entries;
+    const kept = Object.fromEntries(Object.keys(OPENED).map((k) => [k, ui[k]]));
+    const entries = [];
+    try {
+      for (const [page] of navItems) {
+        Object.assign(ui, OPENED);
+        const tpl = document.createElement("template");
+        tpl.innerHTML = PAGES[page]();
+        const section = t("nav-" + page);
+        entries.push({ page, n: -1, label: section, hint: textOf(tpl.content.querySelector("h3 + p")), section });
+        tpl.content.querySelectorAll(FINDABLE).forEach((el, n) => {
+          const [label, hint] = findable(el);
+          if (label) entries.push({ page, n, label, hint, section });
+        });
+      }
+    } finally {
+      Object.assign(ui, kept);
+    }
+    searchIndex = { of: S, entries };
+    return entries;
+  }
+  // Every word typed is in the setting's label, hint or page; those found by their label first.
+  function searchSettings(query) {
+    const low = (s) => s.toLocaleLowerCase(S.lang);
+    const words = low(query).split(/\s+/).filter(Boolean);
+    const all = indexSettings().filter((e) => words.every((w) => low(`${e.label} ${e.hint} ${e.section}`).includes(w)));
+    const byLabel = all.filter((e) => words.every((w) => low(e.label).includes(w)));
+    return [...byLabel, ...all.filter((e) => !byLabel.includes(e))];
+  }
+  function searchPage() {
+    ui.hits = searchSettings(ui.search);
+    const hits = ui.hits.map((h, i) => `<button type="button" data-found="${i}"><b>${escapeHtml(h.label)}</b><span>${escapeHtml(h.n < 0 ? h.hint : h.section + (h.hint ? " · " + h.hint : ""))}</span></button>`).join("");
+    return `<div><h3>${t("setSearchTitle")}</h3><p role="status">${hits ? tv("setSearchCount", ui.hits.length) : t("setSearchNone")}</p></div>
+      ${hits ? `<div class="set-found" role="group" aria-label="${t("setSearchTitle")}">${hits}</div>` : ""}`;
+  }
+  // A hit opens its page at the setting, marked, its control focused.
+  function goToFound(hit) {
+    Object.assign(ui, OPENED, { page: hit.page, search: "", found: hit.n < 0 ? null : { page: hit.page, n: hit.n } });
+    capture(false);
+    if (ui.page === "about" || ui.page === "wall" || ui.page === "rules") post({ op: "info" });
+    render();
+    const el = document.querySelector(".set-main .found");
+    if (!el) { document.querySelector(`[data-page="${hit.page}"]`)?.focus({ preventScroll: true }); return; }
+    el.scrollIntoView({ block: "center" });
+    (el.matches("button") ? el : el.querySelector("button, input, select, textarea"))?.focus({ preventScroll: true });
+  }
+
   /* ---------- drawing ---------- */
   function render() {
     if (!S) return;
     const app = document.getElementById("app");
     const scrolled = app.querySelector(".set-main")?.scrollTop || 0;
     const focused = document.activeElement?.id;
+    // Where the caret was in the field typed in (the search field draws the page again).
+    let caret = null;
+    try { caret = focused && [document.activeElement.selectionStart, document.activeElement.selectionEnd]; } catch { caret = null; }
     ui.refusalShown = false;
-    const page = PAGES[ui.page]();
+    const page = ui.search.trim() ? searchPage() : PAGES[ui.page]();
     // Refused where no row of this page shows it: said at the top.
     const refused = ui.refused && !ui.refusalShown
       ? `<div class="note" role="alert" style="color:var(--err-fg)">${escapeHtml(refusalText())}</div>` : "";
@@ -839,6 +921,7 @@
     app.innerHTML = `<div class="screen settings-screen" data-dir="${code()}" data-mode="${S.mode}" data-motion="${cfg().appearance.animations}">
       <div class="set-win">
         <nav class="set-side" aria-label="${t("setNav")}"><div class="set-brand"><img class="mark" src="mark-${S.mode === "light" ? "light" : "dark"}.svg" alt="">${t("setBrand")}</div>
+          <div class="set-find" role="search">${icon("search")}<input type="search" id="set-search" value="${escapeHtml(ui.search)}" placeholder="${t("setSearch")}" aria-label="${t("setSearch")}" autocomplete="off" spellcheck="false"></div>
           ${navItems.map(([k, ic]) => `<button class="set-nav${ui.page === k ? " on" : ""}" type="button" data-page="${k}" aria-current="${ui.page === k ? "page" : "false"}">${icon(ic)}${t("nav-" + k)}</button>`).join("")}
         </nav>
         <div class="set-main">${problems}${refused}${page}</div>
@@ -849,7 +932,9 @@
       document.documentElement.style.setProperty("--" + k, v);
     }
     app.querySelector(".set-main").scrollTop = scrolled;
+    if (ui.found && ui.found.page === ui.page && !ui.search.trim()) app.querySelector(".set-main").querySelectorAll(FINDABLE)[ui.found.n]?.classList.add("found");
     if (focused) document.getElementById(focused)?.focus({ preventScroll: true });
+    if (caret && caret[0] != null) { try { document.getElementById(focused)?.setSelectionRange(caret[0], caret[1]); } catch { /* not a text field */ } }
     checkRule();
     document.title = t("setBrand");
   }
@@ -858,9 +943,11 @@
   document.addEventListener("click", (e) => {
     const on = (sel) => e.target.closest(sel);
     let el;
+    ui.found = null;
+    if ((el = on("[data-found]"))) { const hit = (ui.hits || [])[Number(el.dataset.found)]; if (hit) goToFound(hit); return; }
     if ((el = on("[data-page]"))) {
       ui.page = el.dataset.page; ui.refused = null; ui.capture = null; capture(false); ui.ruleForm = null; ui.rulePicking = false; ui.dimCustom = null;
-      ui.fileMsg = null; ui.confirmReset = false;
+      ui.fileMsg = null; ui.confirmReset = false; ui.search = "";
       if (ui.page === "about" || ui.page === "wall" || ui.page === "rules") post({ op: "info" });
       render();
       document.querySelector(`[data-page="${ui.page}"]`)?.focus({ preventScroll: true });
@@ -990,6 +1077,8 @@
   });
   document.addEventListener("input", (e) => {
     const el = e.target;
+    // Other words, other settings found: the list from its top.
+    if (el.id === "set-search") { ui.search = el.value; render(); document.querySelector(".set-main").scrollTop = 0; return; }
     if (el.dataset.range) {
       const unit = el.dataset.unit;
       document.querySelector(`[data-v="${el.id}"]`).textContent = unit === undefined ? tv("setPx", el.value) : el.value + unit;
@@ -1033,6 +1122,7 @@
     const m = JSON.parse(e.data);
     switch (m.op) {
       case "state":
+        searchIndex = null;
         // After a change only what it can have changed comes (PLAN M19 P18).
         S = m.partial && S ? { ...S, ...m } : m;
         if (m.theme_imported != null) ui.themeMsg = tv("thImported", m.theme_imported);
