@@ -1129,11 +1129,13 @@ impl Shared {
                         x: o.scale.dips(at.0),
                         y: o.scale.dips(at.1),
                     };
+                    // A press on a badge is the badge's, not an app's to drag.
                     let app = o
                         .page_layout
                         .hit_test(p)
                         .filter(|h| h.module == view::hit::APP)
-                        .map(|h| h.value as usize);
+                        .map(|h| h.value as usize)
+                        .filter(|_| view::badge_at(&o.page_layout, p).is_none());
                     o.press = Some(Press {
                         at,
                         dx: 0.0,
@@ -1278,11 +1280,8 @@ impl Shared {
             .filter(|h| h.module == view::hit::APP)
             .map(|h| h.value as usize);
         let editing = o.editing;
-        let hide = o
-            .page_layout
-            .hit_test(p)
-            .filter(|h| h.module == view::hit::HIDE)
-            .map(|h| h.value as usize);
+        let hide = view::badge_at(&o.page_layout, p);
+        tracing::debug!(?chrome, ?app, ?hide, editing, "app grid click");
         if editing {
             match (chrome, hide, app) {
                 (Some((view::hit::DONE, _)), _, _) => self.app_grid_edit(false),

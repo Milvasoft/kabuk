@@ -130,6 +130,19 @@ pub fn cell(grid: &Grid, local: usize, size: Size) -> Rect {
     Rect::new(style::SIDE + col as f32 * w, style::TOP + row as f32 * h, w, h)
 }
 
+/// The badge drawn at `p` on a page laid out as `layout`, if any: a press there hides its
+/// app, whatever else lies under it. Found by a test: the name of the app beside it, wider
+/// than its cell on a small screen, reached over the badge, so a press on the badge
+/// reached that app and hid nothing.
+pub fn badge_at(layout: &kabuk_ui::node::Layout, p: kabuk_ui::geom::Point) -> Option<usize> {
+    layout
+        .hits
+        .iter()
+        .rev()
+        .find(|(r, h)| h.module == hit::HIDE && r.contains(p))
+        .map(|(_, h)| h.value as usize)
+}
+
 /// The cell of the page on screen under `p` (DIPs on the monitor), counted on the page;
 /// a point outside the cells gives the nearest one.
 pub fn cell_at(grid: &Grid, p: kabuk_ui::geom::Point, size: Size) -> usize {
@@ -506,6 +519,43 @@ mod tests {
             })
             .collect();
         assert_eq!(framed, [hits(&l, hit::APP)[0].0]);
+    }
+
+    #[test]
+    fn a_badge_is_pressed_under_a_long_name_beside_it() {
+        let (i18n, none) = (I18n::new(Lang::En), HashMap::new());
+        let entries = ["A", "A name long enough to be wider than its cell", "C"]
+            .iter()
+            .enumerate()
+            .map(|(i, n)| Entry {
+                name: n.to_string(),
+                open: format!("open {i}"),
+            })
+            .collect();
+        let g = Grid::new(entries, Casing::Default, SHAPE);
+        // Cells narrower than a long name, as on a small screen.
+        let small = Frame {
+            size: Size {
+                w: 2.0 * style::SIDE + 3.0 * style::ICON * 1.25,
+                h: 600.0,
+            },
+            editing: true,
+            ..frame(&i18n, &none, None)
+        };
+        let l = layout(&page(&g, Some(0), &small), Point::default(), &Fake);
+        let (badge, _) = hits(&l, hit::HIDE)[0];
+        let middle = Point {
+            x: badge.x + badge.w / 2.0,
+            y: badge.y + badge.h / 2.0,
+        };
+        let top = l.hit_test(middle).map(|h| (h.module, h.value));
+        assert_eq!(
+            top,
+            Some((hit::APP, 1)),
+            "the long name does not reach over the badge here"
+        );
+        assert_eq!(badge_at(&l, middle), Some(0));
+        assert_eq!(badge_at(&l, Point { x: 1.0, y: 1.0 }), None);
     }
 
     #[test]
