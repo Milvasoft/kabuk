@@ -16,7 +16,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     MsgWaitForMultipleObjectsEx, PeekMessageW, PostMessageW, PostQuitMessage, RegisterClassExW, SetTimer,
     SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage, GWLP_USERDATA, HWND_MESSAGE, HWND_TOPMOST, MSG,
     MWMO_INPUTAVAILABLE, PM_REMOVE, QS_ALLINPUT, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_HIDE, SW_SHOWNOACTIVATE,
-    USER_TIMER_MINIMUM, WINDOW_EX_STYLE, WINDOW_STYLE, WM_HOTKEY, WM_QUIT, WNDCLASSEXW, WS_EX_NOACTIVATE,
+    USER_TIMER_MINIMUM, WINDOW_EX_STYLE, WINDOW_STYLE, WM_GETOBJECT, WM_HOTKEY, WM_QUIT, WNDCLASSEXW, WS_EX_NOACTIVATE,
     WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
@@ -44,10 +44,18 @@ enum Handler {
     Reentrant(Box<dyn Fn(Msg) -> Option<isize>>),
 }
 
+/// What a window's procedure reaches: its handler, and what it tells screen readers.
+struct Slot {
+    handler: Handler,
+    /// Its parts for UI Automation, once given ([`Window::set_accessible`]). Answered
+    /// before the handler, so an owner busy elsewhere still answers a screen reader.
+    access: RefCell<Option<crate::uia::Accessible>>,
+}
+
 /// A window whose messages go to a closure. Lives on the creating thread.
 pub struct Window {
     hwnd: Hwnd,
-    handler: *mut Handler,
+    slot: *mut Slot,
 }
 
 /// The message-only flavour, for windows that only receive messages.
@@ -224,6 +232,26 @@ impl Window {
         self.hwnd
     }
 
+    /// Tells screen readers what the window shows (DECISIONS D97): a `container` named
+    /// `name` holding `parts`, as drawn now. Called again after each drawing; the first
+    /// call makes the window answer UI Automation.
+    pub fn set_accessible(&self, container: crate::uia::Container, name: &str, parts: Vec<crate::uia::Part>) {
+        // SAFETY: the slot lives as long as this Window (it is freed only in Drop).
+        let slot = unsafe { &*self.slot };
+        let focus = {
+            let Ok(mut access) = slot.access.try_borrow_mut() else {
+                return;
+            };
+            access
+                .get_or_insert_with(|| crate::uia::Accessible::new(self.hwnd, container, name))
+                .set(container, name, parts)
+        };
+        // Told once the slot is free: UI Automation may ask the window again meanwhile.
+        if let Some(part) = focus {
+            crate::uia::tell_focus(&part);
+        }
+    }
+
     /// Moves and resizes without activating or changing the z-order.
     pub fn set_rect(&self, r: PxRect) {
         // SAFETY: our own window; flags avoid activation.
@@ -385,12 +413,15 @@ fn create(
         )
     }
     .map_err(io_error)?;
-    let handler = Box::into_raw(Box::new(handler));
+    let slot = Box::into_raw(Box::new(Slot {
+        handler,
+        access: RefCell::new(None),
+    }));
     // SAFETY: the window belongs to this thread; the pointer stays valid until Drop clears it.
-    unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, handler as isize) };
+    unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, slot as isize) };
     Ok(Window {
         hwnd: Hwnd::from_raw(hwnd),
-        handler,
+        slot,
     })
 }
 
@@ -399,10 +430,15 @@ impl Drop for Window {
         let hwnd = self.hwnd.raw();
         // SAFETY: detach the handler first so no message reaches it after it is freed.
         unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0) };
+        // SAFETY: the pointer came from Box::into_raw in `create` and is freed exactly
+        // once, here; the window procedure no longer reaches it.
+        let slot = unsafe { Box::from_raw(self.slot) };
+        if let Some(access) = slot.access.borrow_mut().take() {
+            access.release(hwnd);
+        }
         // SAFETY: the window was created by this object on this thread.
         let _ = unsafe { DestroyWindow(hwnd) };
-        // SAFETY: the pointer came from Box::into_raw in `new` and is freed exactly once.
-        drop(unsafe { Box::from_raw(self.handler) });
+        drop(slot);
     }
 }
 
@@ -437,11 +473,23 @@ fn raise_caught() {
 }
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    // SAFETY: GWLP_USERDATA holds either 0 or the live handler pointer set in `create`.
-    let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *const Handler;
+    // SAFETY: GWLP_USERDATA holds either 0 or the live slot pointer set in `create`.
+    let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *const Slot;
     if !ptr.is_null() {
         // SAFETY: non-null means the Window is alive (Drop clears the pointer first).
-        let handler = unsafe { &*ptr };
+        let slot = unsafe { &*ptr };
+        if msg == WM_GETOBJECT {
+            // The provider is taken out first: answering may ask the window again.
+            let root = slot
+                .access
+                .try_borrow()
+                .ok()
+                .and_then(|a| a.as_ref().map(crate::uia::Accessible::root));
+            if let Some(answer) = root.and_then(|r| crate::uia::answer(&r, hwnd, wparam, lparam)) {
+                return answer;
+            }
+        }
+        let handler = &slot.handler;
         let m = Msg {
             id: msg,
             wparam: wparam.0,

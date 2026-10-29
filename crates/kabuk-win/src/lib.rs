@@ -51,6 +51,7 @@ pub mod thumbnail;
 pub mod ticker;
 pub mod touchpad;
 pub mod tray;
+pub mod uia;
 pub mod wallpaper;
 pub mod watch;
 #[cfg(feature = "webview")]

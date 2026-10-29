@@ -1,0 +1,710 @@
+//! Screen readers (DECISIONS D97): Kabuk draws everything itself, so Narrator saw
+//! nothing of it. A window given parts ([`crate::msgloop::Window::set_accessible`]) answers
+//! UI Automation's `WM_GETOBJECT` with a small provider: the window is the root fragment
+//! and each part (a button, a list item, a menu item) its child, with a name, a control
+//! type, a place on the screen and the Invoke pattern, which posts the window the same
+//! click the mouse would make in the part's middle.
+//!
+//! Nothing runs unless a client asks: the owner hands over its parts after each drawing
+//! (a list swapped under a lock), and the provider reads them when a client calls. The
+//! provider's objects hold only that list and the window's handle, so whichever thread
+//! UI Automation calls them on, they never reach the owner's state.
+//!
+//! [`read`] and [`invoke`] are the client side, as a screen reader sees a window (tests).
+
+use std::io;
+use std::sync::{Arc, Mutex, MutexGuard};
+
+use windows::core::{implement, IUnknownImpl, Interface, BSTR};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
+use windows::Win32::Graphics::Gdi::ClientToScreen;
+use windows::Win32::System::Com::SAFEARRAY;
+use windows::Win32::System::Ole::{SafeArrayCreateVector, SafeArrayPutElement};
+use windows::Win32::System::Variant::{VARIANT, VARIANT_0, VARIANT_0_0, VARIANT_0_0_0, VT_BOOL, VT_I4};
+use windows::Win32::UI::Accessibility::*;
+
+use crate::msgloop::{msg, post_message, Msg, PxRect};
+use crate::window::Hwnd;
+
+/// What a part is to a screen reader (its UI Automation control type).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Role {
+    /// A bar's module, app or tray icon; a panel's entry.
+    Button,
+    /// A launcher result.
+    ListItem,
+    /// A menu's entry.
+    MenuItem,
+}
+
+impl Role {
+    fn control_type(self) -> UIA_CONTROLTYPE_ID {
+        match self {
+            Role::Button => UIA_ButtonControlTypeId,
+            Role::ListItem => UIA_ListItemControlTypeId,
+            Role::MenuItem => UIA_MenuItemControlTypeId,
+        }
+    }
+
+    fn of(control: UIA_CONTROLTYPE_ID) -> Option<Role> {
+        [Role::Button, Role::ListItem, Role::MenuItem]
+            .into_iter()
+            .find(|r| r.control_type() == control)
+    }
+}
+
+/// What the window itself is to a screen reader.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Container {
+    /// A bar: a tool bar of buttons.
+    Bar,
+    /// A menu of menu items.
+    Menu,
+    /// A list of results (the launcher).
+    List,
+    /// A panel of buttons.
+    Panel,
+}
+
+impl Container {
+    fn control_type(self) -> UIA_CONTROLTYPE_ID {
+        match self {
+            Container::Bar => UIA_ToolBarControlTypeId,
+            Container::Menu => UIA_MenuControlTypeId,
+            Container::List => UIA_ListControlTypeId,
+            Container::Panel => UIA_PaneControlTypeId,
+        }
+    }
+}
+
+/// One part of a window for screen readers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Part {
+    /// What a screen reader says, in the user's language.
+    pub name: String,
+    pub role: Role,
+    /// Where it is in the window's client area, in physical pixels.
+    pub rect: PxRect,
+    /// The keyboard is on it (a menu's or the launcher's selection).
+    pub focused: bool,
+}
+
+/// What the provider's objects read: the window (none once it is gone), its name and type,
+/// and its parts as last drawn.
+struct Inner {
+    hwnd: Option<Hwnd>,
+    container: Container,
+    name: String,
+    parts: Vec<Part>,
+}
+
+type Shared = Arc<Mutex<Inner>>;
+
+fn lock(shared: &Shared) -> MutexGuard<'_, Inner> {
+    // A panic while it was held left a whole list; it is still good to read.
+    shared.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn gone() -> windows::core::Error {
+    windows::core::Error::from_hresult(windows::core::HRESULT(UIA_E_ELEMENTNOTAVAILABLE as i32))
+}
+
+/// "Nothing" for an out parameter: success with a null pointer.
+fn nothing<T>() -> windows::core::Result<T> {
+    Err(windows::core::Error::empty())
+}
+
+fn int_variant(v: i32) -> VARIANT {
+    VARIANT {
+        Anonymous: VARIANT_0 {
+            Anonymous: std::mem::ManuallyDrop::new(VARIANT_0_0 {
+                vt: VT_I4,
+                wReserved1: 0,
+                wReserved2: 0,
+                wReserved3: 0,
+                Anonymous: VARIANT_0_0_0 { lVal: v },
+            }),
+        },
+    }
+}
+
+fn bool_variant(v: bool) -> VARIANT {
+    VARIANT {
+        Anonymous: VARIANT_0 {
+            Anonymous: std::mem::ManuallyDrop::new(VARIANT_0_0 {
+                vt: VT_BOOL,
+                wReserved1: 0,
+                wReserved2: 0,
+                wReserved3: 0,
+                Anonymous: VARIANT_0_0_0 {
+                    boolVal: windows::Win32::Foundation::VARIANT_BOOL::from(v),
+                },
+            }),
+        },
+    }
+}
+
+/// The screen place of the window's client origin.
+fn client_origin(hwnd: Hwnd) -> Option<(i32, i32)> {
+    let mut p = POINT::default();
+    // SAFETY: `p` is a valid in/out point; a destroyed window makes the call fail.
+    unsafe { ClientToScreen(hwnd.raw(), &mut p) }
+        .as_bool()
+        .then_some((p.x, p.y))
+}
+
+/// The provider of a window: its root fragment.
+#[implement(
+    IRawElementProviderSimple,
+    IRawElementProviderFragment,
+    IRawElementProviderFragmentRoot
+)]
+struct Root {
+    shared: Shared,
+}
+
+/// Part `index` of a window.
+#[implement(IRawElementProviderSimple, IRawElementProviderFragment, IInvokeProvider)]
+struct Item {
+    shared: Shared,
+    root: IRawElementProviderFragmentRoot,
+    index: usize,
+}
+
+fn item(shared: &Shared, root: &IRawElementProviderFragmentRoot, index: usize) -> IRawElementProviderFragment {
+    Item {
+        shared: shared.clone(),
+        root: root.clone(),
+        index,
+    }
+    .into()
+}
+
+impl IRawElementProviderSimple_Impl for Root_Impl {
+    fn ProviderOptions(&self) -> windows::core::Result<ProviderOptions> {
+        Ok(ProviderOptions_ServerSideProvider)
+    }
+
+    fn GetPatternProvider(&self, _: UIA_PATTERN_ID) -> windows::core::Result<windows::core::IUnknown> {
+        nothing()
+    }
+
+    fn GetPropertyValue(&self, id: UIA_PROPERTY_ID) -> windows::core::Result<VARIANT> {
+        let inner = lock(&self.shared);
+        Ok(if id == UIA_NamePropertyId && !inner.name.is_empty() {
+            VARIANT::from(inner.name.as_str())
+        } else if id == UIA_ControlTypePropertyId {
+            int_variant(inner.container.control_type().0)
+        } else {
+            VARIANT::default()
+        })
+    }
+
+    fn HostRawElementProvider(&self) -> windows::core::Result<IRawElementProviderSimple> {
+        let hwnd = lock(&self.shared).hwnd.ok_or_else(gone)?;
+        // SAFETY: plain call for a window of this process.
+        unsafe { UiaHostProviderFromHwnd(hwnd.raw()) }
+    }
+}
+
+impl IRawElementProviderFragment_Impl for Root_Impl {
+    fn Navigate(&self, direction: NavigateDirection) -> windows::core::Result<IRawElementProviderFragment> {
+        let count = lock(&self.shared).parts.len();
+        let index = if count == 0 {
+            None
+        } else if direction == NavigateDirection_FirstChild {
+            Some(0)
+        } else if direction == NavigateDirection_LastChild {
+            Some(count - 1)
+        } else {
+            // Its parent and siblings are the window's, which UI Automation knows.
+            None
+        };
+        match index {
+            Some(i) => Ok(item(&self.shared, &self.to_interface(), i)),
+            None => nothing(),
+        }
+    }
+
+    fn GetRuntimeId(&self) -> windows::core::Result<*mut SAFEARRAY> {
+        // The window's own, from its host provider.
+        Ok(std::ptr::null_mut())
+    }
+
+    fn BoundingRectangle(&self) -> windows::core::Result<UiaRect> {
+        // The window's own, from its host provider.
+        Ok(UiaRect::default())
+    }
+
+    fn GetEmbeddedFragmentRoots(&self) -> windows::core::Result<*mut SAFEARRAY> {
+        Ok(std::ptr::null_mut())
+    }
+
+    fn SetFocus(&self) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn FragmentRoot(&self) -> windows::core::Result<IRawElementProviderFragmentRoot> {
+        Ok(self.to_interface())
+    }
+}
+
+impl IRawElementProviderFragmentRoot_Impl for Root_Impl {
+    fn ElementProviderFromPoint(&self, x: f64, y: f64) -> windows::core::Result<IRawElementProviderFragment> {
+        let inner = lock(&self.shared);
+        let hwnd = inner.hwnd.ok_or_else(gone)?;
+        let (ox, oy) = client_origin(hwnd).ok_or_else(gone)?;
+        let (px, py) = (x.floor() as i32 - ox, y.floor() as i32 - oy);
+        let found = inner.parts.iter().rposition(|p| {
+            (p.rect.x..p.rect.x + p.rect.w).contains(&px) && (p.rect.y..p.rect.y + p.rect.h).contains(&py)
+        });
+        drop(inner);
+        Ok(match found {
+            Some(i) => item(&self.shared, &self.to_interface(), i),
+            None => self.to_interface(),
+        })
+    }
+
+    fn GetFocus(&self) -> windows::core::Result<IRawElementProviderFragment> {
+        let focused = lock(&self.shared).parts.iter().position(|p| p.focused);
+        match focused {
+            Some(i) => Ok(item(&self.shared, &self.to_interface(), i)),
+            None => nothing(),
+        }
+    }
+}
+
+impl Item_Impl {
+    /// The part as it is now; an error once it is gone (the window closed, the list
+    /// became shorter).
+    fn part(&self) -> windows::core::Result<(Hwnd, Part)> {
+        let inner = lock(&self.shared);
+        let hwnd = inner.hwnd.ok_or_else(gone)?;
+        let part = inner.parts.get(self.index).cloned().ok_or_else(gone)?;
+        Ok((hwnd, part))
+    }
+}
+
+impl IRawElementProviderSimple_Impl for Item_Impl {
+    fn ProviderOptions(&self) -> windows::core::Result<ProviderOptions> {
+        Ok(ProviderOptions_ServerSideProvider)
+    }
+
+    fn GetPatternProvider(&self, id: UIA_PATTERN_ID) -> windows::core::Result<windows::core::IUnknown> {
+        if id == UIA_InvokePatternId {
+            let invoke: IInvokeProvider = self.to_interface();
+            return Ok(invoke.into());
+        }
+        nothing()
+    }
+
+    fn GetPropertyValue(&self, id: UIA_PROPERTY_ID) -> windows::core::Result<VARIANT> {
+        let (_, part) = self.part()?;
+        Ok(if id == UIA_NamePropertyId {
+            VARIANT::from(part.name.as_str())
+        } else if id == UIA_ControlTypePropertyId {
+            int_variant(part.role.control_type().0)
+        } else if id == UIA_HasKeyboardFocusPropertyId || id == UIA_IsKeyboardFocusablePropertyId {
+            bool_variant(part.focused)
+        } else if id == UIA_IsEnabledPropertyId {
+            bool_variant(true)
+        } else {
+            VARIANT::default()
+        })
+    }
+
+    fn HostRawElementProvider(&self) -> windows::core::Result<IRawElementProviderSimple> {
+        nothing()
+    }
+}
+
+impl IRawElementProviderFragment_Impl for Item_Impl {
+    fn Navigate(&self, direction: NavigateDirection) -> windows::core::Result<IRawElementProviderFragment> {
+        if direction == NavigateDirection_Parent {
+            return self.root.cast();
+        }
+        let count = lock(&self.shared).parts.len();
+        let index = if direction == NavigateDirection_NextSibling {
+            Some(self.index + 1).filter(|i| *i < count)
+        } else if direction == NavigateDirection_PreviousSibling {
+            self.index.checked_sub(1).filter(|i| *i < count)
+        } else {
+            None
+        };
+        match index {
+            Some(i) => Ok(item(&self.shared, &self.root, i)),
+            None => nothing(),
+        }
+    }
+
+    fn GetRuntimeId(&self) -> windows::core::Result<*mut SAFEARRAY> {
+        let id = [
+            UiaAppendRuntimeId as i32,
+            i32::try_from(self.index).unwrap_or(i32::MAX).saturating_add(1),
+        ];
+        // SAFETY: a new one-dimensional array of 32-bit integers, filled within its
+        // bounds; UI Automation takes it over.
+        unsafe {
+            let array = SafeArrayCreateVector(VT_I4, 0, id.len() as u32);
+            if array.is_null() {
+                return Err(windows::core::Error::from_hresult(
+                    windows::Win32::Foundation::E_OUTOFMEMORY,
+                ));
+            }
+            for (i, v) in id.iter().enumerate() {
+                let at = i as i32;
+                SafeArrayPutElement(array, &at, (v as *const i32).cast())?;
+            }
+            Ok(array)
+        }
+    }
+
+    fn BoundingRectangle(&self) -> windows::core::Result<UiaRect> {
+        let (hwnd, part) = self.part()?;
+        let (ox, oy) = client_origin(hwnd).ok_or_else(gone)?;
+        Ok(UiaRect {
+            left: f64::from(ox + part.rect.x),
+            top: f64::from(oy + part.rect.y),
+            width: f64::from(part.rect.w),
+            height: f64::from(part.rect.h),
+        })
+    }
+
+    fn GetEmbeddedFragmentRoots(&self) -> windows::core::Result<*mut SAFEARRAY> {
+        Ok(std::ptr::null_mut())
+    }
+
+    fn SetFocus(&self) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn FragmentRoot(&self) -> windows::core::Result<IRawElementProviderFragmentRoot> {
+        Ok(self.root.clone())
+    }
+}
+
+impl IInvokeProvider_Impl for Item_Impl {
+    /// The click the mouse would make in the part's middle, posted (Invoke must not wait
+    /// on what the click does).
+    fn Invoke(&self) -> windows::core::Result<()> {
+        let (hwnd, part) = self.part()?;
+        let (x, y) = (part.rect.x + part.rect.w / 2, part.rect.y + part.rect.h / 2);
+        let lparam = ((y & 0xffff) << 16 | (x & 0xffff)) as isize;
+        for (id, wparam) in [(msg::LBUTTONDOWN, msg::MK_LBUTTON), (msg::LBUTTONUP, 0)] {
+            post_message(hwnd, Msg { id, wparam, lparam }).map_err(|_| gone())?;
+        }
+        Ok(())
+    }
+}
+
+/// A window's provider, kept by its [`crate::msgloop::Window`].
+pub(crate) struct Accessible {
+    shared: Shared,
+    root: IRawElementProviderSimple,
+}
+
+impl Accessible {
+    pub(crate) fn new(hwnd: Hwnd, container: Container, name: &str) -> Accessible {
+        let shared = Arc::new(Mutex::new(Inner {
+            hwnd: Some(hwnd),
+            container,
+            name: name.to_string(),
+            parts: Vec::new(),
+        }));
+        let root: IRawElementProviderSimple = Root { shared: shared.clone() }.into();
+        Accessible { shared, root }
+    }
+
+    /// Takes the window's parts as drawn now. Gives the part the keyboard moved to, when it
+    /// moved and a screen reader listens, for [`tell_focus`] (called once the caller no
+    /// longer holds this, as UI Automation reads the part back meanwhile).
+    pub(crate) fn set(&self, container: Container, name: &str, parts: Vec<Part>) -> Option<IRawElementProviderSimple> {
+        let focused = parts.iter().position(|p| p.focused);
+        let moved = {
+            let mut inner = lock(&self.shared);
+            let was = inner.parts.iter().find(|p| p.focused).map(|p| &p.name);
+            let moved = focused.is_some_and(|i| was != Some(&parts[i].name));
+            inner.container = container;
+            if inner.name != name {
+                inner.name = name.to_string();
+            }
+            inner.parts = parts;
+            moved
+        };
+        // SAFETY: plain query.
+        if !moved || !unsafe { UiaClientsAreListening() }.as_bool() {
+            return None;
+        }
+        let root = self.root.cast::<IRawElementProviderFragmentRoot>().ok()?;
+        item(&self.shared, &root, focused?).cast().ok()
+    }
+
+    /// The window's root provider.
+    pub(crate) fn root(&self) -> IRawElementProviderSimple {
+        self.root.clone()
+    }
+
+    /// The window is going: its parts are gone for every client still holding them.
+    pub(crate) fn release(&self, hwnd: HWND) {
+        lock(&self.shared).hwnd = None;
+        // SAFETY: releases what UI Automation keeps for this window, as its documentation
+        // asks when the window is destroyed; then disconnects our root.
+        unsafe {
+            UiaReturnRawElementProvider(hwnd, WPARAM(0), LPARAM(0), None);
+            let _ = UiaDisconnectProvider(&self.root);
+        }
+    }
+}
+
+/// The answer to a `WM_GETOBJECT` with `root`, when it asks for UI Automation's root.
+pub(crate) fn answer(root: &IRawElementProviderSimple, hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
+    // The object id is a 32-bit value, whether or not it came sign-extended.
+    if lparam.0 as i32 != UiaRootObjectId {
+        return None;
+    }
+    // SAFETY: the arguments of the `WM_GETOBJECT` being handled, and our provider.
+    Some(unsafe { UiaReturnRawElementProvider(hwnd, wparam, lparam, root) })
+}
+
+/// Tells screen readers the keyboard is on `part` now.
+pub(crate) fn tell_focus(part: &IRawElementProviderSimple) {
+    // SAFETY: a provider of one of our windows; UI Automation calls it back for the event.
+    if let Err(e) = unsafe { UiaRaiseAutomationEvent(part, UIA_AutomationFocusChangedEventId) } {
+        tracing::debug!(error = %e, "focus change not told");
+    }
+}
+
+/// A part as a UI Automation client reads it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Seen {
+    pub name: String,
+    /// `None` for a control type Kabuk does not give.
+    pub role: Option<Role>,
+    /// On the screen, in physical pixels.
+    pub rect: kabuk_core::state::Rect,
+}
+
+fn automation() -> io::Result<IUIAutomation> {
+    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
+    crate::system::com_init_mta();
+    // SAFETY: plain creation of the UI Automation client object.
+    unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER) }.map_err(io::Error::other)
+}
+
+fn children(window: Hwnd) -> io::Result<Vec<IUIAutomationElement>> {
+    let uia = automation()?;
+    // SAFETY: plain UI Automation client calls; the window may be of any process.
+    unsafe {
+        let element = uia.ElementFromHandle(window.raw()).map_err(io::Error::other)?;
+        let all = uia.CreateTrueCondition().map_err(io::Error::other)?;
+        let found = element.FindAll(TreeScope_Children, &all).map_err(io::Error::other)?;
+        let n = found.Length().map_err(io::Error::other)?;
+        (0..n).map(|i| found.GetElement(i).map_err(io::Error::other)).collect()
+    }
+}
+
+/// What a screen reader finds in `window`: its children with their names, roles and
+/// places. Not to be called on the thread that owns the window (UI Automation would wait
+/// on that thread for the answer).
+pub fn read(window: Hwnd) -> io::Result<Vec<Seen>> {
+    children(window)?
+        .iter()
+        .map(|e| {
+            // SAFETY: plain UI Automation client calls on an element just found.
+            unsafe {
+                let name: BSTR = e.CurrentName().map_err(io::Error::other)?;
+                let role = Role::of(e.CurrentControlType().map_err(io::Error::other)?);
+                let r = e.CurrentBoundingRectangle().map_err(io::Error::other)?;
+                Ok(Seen {
+                    name: name.to_string(),
+                    role,
+                    rect: kabuk_core::state::Rect {
+                        left: r.left,
+                        top: r.top,
+                        right: r.right,
+                        bottom: r.bottom,
+                    },
+                })
+            }
+        })
+        .collect()
+}
+
+/// Invokes the child of `window` named `name`, as a screen reader's user would.
+pub fn invoke(window: Hwnd, name: &str) -> io::Result<()> {
+    for e in children(window)? {
+        // SAFETY: plain UI Automation client calls on an element just found.
+        unsafe {
+            if e.CurrentName().map_err(io::Error::other)? != name {
+                continue;
+            }
+            let pattern: IUIAutomationInvokePattern =
+                e.GetCurrentPatternAs(UIA_InvokePatternId).map_err(io::Error::other)?;
+            return pattern.Invoke().map_err(io::Error::other);
+        }
+    }
+    Err(io::Error::new(io::ErrorKind::NotFound, name.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    //! Edge cases: a window with parts answers a UI Automation client from another thread
+    //! with their names, roles and screen places; Invoke posts the window a click in the
+    //! part's middle; an unknown name is not invoked; parts handed over again are read as
+    //! they are now (a shorter list, a new name); a window given no parts has no children.
+    use super::*;
+    use crate::msgloop::{post_quit, run_until, Wake, Window};
+    use crate::sync::NamedEvent;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    const CLASS: &str = "Kabuk.UiaTest";
+    const QUIT: u32 = msg::APP + 1;
+    const WAIT: Duration = Duration::from_secs(10);
+    /// A client and a provider in one process take turns: two at once made UI Automation
+    /// fail one of them with `E_FAIL` (a screen reader is another process).
+    static TURN: Mutex<()> = Mutex::new(());
+    /// Far off every monitor, and never shown.
+    const AT: PxRect = PxRect {
+        x: -30000,
+        y: -30000,
+        w: 300,
+        h: 40,
+    };
+
+    fn part(name: &str, role: Role, x: i32) -> Part {
+        Part {
+            name: name.into(),
+            role,
+            rect: PxRect { x, y: 4, w: 40, h: 30 },
+            focused: false,
+        }
+    }
+
+    struct TestWindow {
+        hwnd: Hwnd,
+        clicks: mpsc::Receiver<(u32, i32, i32)>,
+        swap: NamedEvent,
+        swapped: mpsc::Receiver<()>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl TestWindow {
+        /// A hidden window on its own thread with `first` as its parts, which takes `then`
+        /// when [`TestWindow::swap`] asks; clicks it gets come back on a channel.
+        fn new(tag: &str, first: Vec<Part>, then: Vec<Part>) -> TestWindow {
+            let name = format!("Kabuk.UiaTest.{}.{tag}", std::process::id());
+            let swap = NamedEvent::create_or_open(&name).unwrap();
+            let (tx_hwnd, rx_hwnd) = mpsc::channel();
+            let (tx_click, clicks) = mpsc::channel();
+            let (tx_swapped, swapped) = mpsc::channel();
+            let thread = std::thread::spawn(move || {
+                crate::system::com_init();
+                let event = NamedEvent::create_or_open(&name).unwrap();
+                let w = Window::shell_surface(CLASS, "", AT, move |m| {
+                    match m.id {
+                        msg::LBUTTONDOWN | msg::LBUTTONUP => {
+                            let (x, y) = msg::point(m.lparam);
+                            let _ = tx_click.send((m.id, x, y));
+                        }
+                        QUIT => post_quit(0),
+                        _ => return None,
+                    }
+                    Some(0)
+                })
+                .unwrap();
+                w.set_accessible(Container::Bar, "Test bar", first);
+                tx_hwnd.send(w.hwnd()).unwrap();
+                while let Wake::Signalled(_) = run_until(&[&event], Some(WAIT)) {
+                    event.reset().unwrap();
+                    w.set_accessible(Container::Bar, "Test bar", then.clone());
+                    tx_swapped.send(()).unwrap();
+                }
+            });
+            TestWindow {
+                hwnd: rx_hwnd.recv().unwrap(),
+                clicks,
+                swap,
+                swapped,
+                thread: Some(thread),
+            }
+        }
+
+        fn swap(&self) {
+            self.swap.set().unwrap();
+            self.swapped.recv_timeout(WAIT).unwrap();
+        }
+    }
+
+    impl Drop for TestWindow {
+        fn drop(&mut self) {
+            let _ = post_message(
+                self.hwnd,
+                Msg {
+                    id: QUIT,
+                    wparam: 0,
+                    lparam: 0,
+                },
+            );
+            if let Some(t) = self.thread.take() {
+                let _ = t.join();
+            }
+        }
+    }
+
+    fn seen(parts: &[Part]) -> Vec<Seen> {
+        parts
+            .iter()
+            .map(|p| Seen {
+                name: p.name.clone(),
+                role: Some(p.role),
+                rect: kabuk_core::state::Rect {
+                    left: AT.x + p.rect.x,
+                    top: AT.y + p.rect.y,
+                    right: AT.x + p.rect.x + p.rect.w,
+                    bottom: AT.y + p.rect.y + p.rect.h,
+                },
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_client_reads_the_parts_and_invokes_one() {
+        let parts = vec![
+            part("Workspace 1", Role::Button, 10),
+            part("Saat: 20:31", Role::Button, 60),
+            part("Firefox", Role::ListItem, 110),
+            part("Kilitle", Role::MenuItem, 160),
+        ];
+        let then = vec![part("Çalışma alanı 2", Role::Button, 10)];
+        let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let w = TestWindow::new("read", parts.clone(), then.clone());
+        assert_eq!(read(w.hwnd).unwrap(), seen(&parts));
+        invoke(w.hwnd, "Saat: 20:31").unwrap();
+        // The click a mouse would make in its middle: down, then up.
+        assert_eq!(w.clicks.recv_timeout(WAIT).unwrap(), (msg::LBUTTONDOWN, 80, 19));
+        assert_eq!(w.clicks.recv_timeout(WAIT).unwrap(), (msg::LBUTTONUP, 80, 19));
+        assert_eq!(
+            invoke(w.hwnd, "Nothing like it").map_err(|e| e.kind()),
+            Err(io::ErrorKind::NotFound)
+        );
+        // Drawn again with fewer parts: read as they are now.
+        w.swap();
+        assert_eq!(read(w.hwnd).unwrap(), seen(&then));
+    }
+
+    #[test]
+    fn a_window_given_no_parts_has_no_children() {
+        let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let w = TestWindow::new("empty", Vec::new(), Vec::new());
+        assert_eq!(read(w.hwnd).unwrap(), Vec::new());
+    }
+
+    #[test]
+    fn the_roles_round_trip_through_their_control_types() {
+        for r in [Role::Button, Role::ListItem, Role::MenuItem] {
+            assert_eq!(Role::of(r.control_type()), Some(r));
+        }
+        assert_eq!(Role::of(UIA_PaneControlTypeId), None);
+    }
+}
