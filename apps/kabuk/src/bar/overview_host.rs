@@ -1,7 +1,9 @@
 //! The overview on the bar thread (DECISIONS D34): a sheet over each monitor's work area
 //! with a cell per workspace. The workspace on screen shows its windows as live DWM
 //! thumbnails; the others show a box per window with its program's icon and title. A
-//! click on a cell goes to that workspace; Esc or a click outside closes it. With full
+//! click on a cell goes to that workspace; Esc or a click outside closes it. On the
+//! keyboard (PLAN M19 U9) a digit goes to that workspace, the arrow keys ring a cell and
+//! Enter or Space does what a click on it does. With full
 //! motion the windows on screen fly from their places into their cell as it opens, and
 //! back when Esc or a click on that cell closes it (asked for by the user).
 
@@ -57,7 +59,7 @@ fn ease(u: f32) -> f32 {
 /// The overview over one monitor (the thumbnails and the surface go before the window).
 struct Sheet {
     fliers: Vec<Flier>,
-    _surface: Option<WindowSurface>,
+    surface: Option<WindowSurface>,
     window: Window,
     device: String,
     /// The cells in the sheet's pixels, and the number of each one's workspace.
@@ -65,6 +67,15 @@ struct Sheet {
     numbers: Vec<u32>,
     /// The cell of the workspace on screen.
     shown: Option<usize>,
+    /// The cells' columns, for the arrow keys.
+    columns: usize,
+    /// The cell the arrow keys selected (none until one is pressed).
+    selected: Option<usize>,
+    /// What was drawn, to draw it again with another cell selected: the cells (DIPs),
+    /// the sheet's size in DIPs and its scale.
+    drawn: Vec<Cell>,
+    size: Size,
+    scale: Scale,
 }
 
 #[derive(Default)]
@@ -251,6 +262,7 @@ impl Shared {
             let workspaces: Vec<&kabuk_layout::WorkspaceInfo> =
                 mv.workspaces.iter().filter(|w| numbers.contains(&w.number)).collect();
             let cells = overview::cells(workspaces.len(), local, scale.px(STYLE.gap));
+            let (columns, _) = overview::grid(workspaces.len(), local);
             let shown = workspaces.iter().position(|w| w.active);
             let mut thumbs_to: Vec<(u64, kabuk_layout::Rect, kabuk_layout::Rect)> = Vec::new();
             let mut drawn = Vec::new();
@@ -309,7 +321,7 @@ impl Shared {
                 w: scale.dips(area.w),
                 h: scale.dips(area.h),
             };
-            let node = view::scene(size, &drawn, &STYLE, self.look.style.text_scale);
+            let node = view::scene(size, &drawn, None, &STYLE, self.look.style.text_scale);
             let layout = kabuk_ui::node::layout(&node, Point::default(), &self.gpu.text);
             let rect = PxRect {
                 x: area.x,
@@ -361,12 +373,17 @@ impl Shared {
             tracing::info!(device = %m.device, cells = cells.len(), thumbnails = thumbs.len(), "overview shown");
             self.overview.sheets.push(Sheet {
                 fliers: thumbs,
-                _surface: surface,
+                surface,
                 window,
                 device: m.device.clone(),
                 cells,
                 numbers,
                 shown,
+                columns,
+                selected: None,
+                drawn,
+                size,
+                scale,
             });
         }
         if fly && self.overview.sheets.iter().any(|s| !s.fliers.is_empty()) {
@@ -395,30 +412,84 @@ impl Shared {
         Some(key)
     }
 
+    /// Cell `cell` of sheet `index` chosen (a click, Enter, a digit): its workspace comes
+    /// on screen; none (a click between the cells) only closes the overview.
+    fn choose_overview_cell(&mut self, index: usize, cell: Option<usize>) {
+        let Some(sheet) = self.overview.sheets.get(index) else {
+            return;
+        };
+        let device = sheet.device.clone();
+        let number = cell.and_then(|i| sheet.numbers.get(i).copied());
+        // The workspace already on screen: its windows fly back as it closes.
+        if cell.is_some() && cell == sheet.shown {
+            self.close_overview_flying();
+            return;
+        }
+        self.close_overview();
+        if let Some(number) = number {
+            tracing::info!(device = %device, number, "overview cell chosen");
+            if let Some(link) = &self.wm {
+                link.send(wm::Command::SwitchOn { device, number });
+            }
+        }
+    }
+
+    /// An arrow key on sheet `index`: the first one rings the shown cell (else the first),
+    /// the next ones step from the ringed cell.
+    fn step_overview(&mut self, index: usize, toward: kabuk_layout::desk::Toward) {
+        let Some(sheet) = self.overview.sheets.get_mut(index) else {
+            return;
+        };
+        let next = match sheet.selected {
+            None => sheet.shown.or((!sheet.cells.is_empty()).then_some(0)),
+            Some(at) => overview::step(sheet.cells.len(), sheet.columns, at, toward),
+        };
+        if next.is_none() || next == sheet.selected {
+            return;
+        }
+        sheet.selected = next;
+        let node = view::scene(sheet.size, &sheet.drawn, next, &STYLE, self.look.style.text_scale);
+        let layout = kabuk_ui::node::layout(&node, Point::default(), &self.gpu.text);
+        if let Some(s) = sheet.surface.as_mut() {
+            if let Err(e) = s.render(&self.gpu, &layout, &self.look.palette, sheet.scale, (0.0, 0.0), None) {
+                tracing::warn!(error = %e, "overview not drawn");
+            }
+            let _ = self.gpu.commit();
+        }
+    }
+
     fn on_overview(&mut self, index: usize, m: Msg) -> Option<isize> {
+        use kabuk_layout::desk::Toward;
         match m.id {
             msg::LBUTTONUP => {
                 let sheet = self.overview.sheets.get(index)?;
                 let (x, y) = msg::point(m.lparam);
-                let device = sheet.device.clone();
                 let cell = overview::cell_at(&sheet.cells, x, y);
-                let numbers = sheet.numbers.clone();
-                // The workspace already on screen: its windows fly back as it closes.
-                if cell.is_some() && cell == sheet.shown {
-                    self.close_overview_flying();
-                    return Some(0);
-                }
-                self.close_overview();
-                if let Some(number) = cell.and_then(|i| numbers.get(i).copied()) {
-                    tracing::info!(device = %device, number, "overview cell chosen");
-                    if let Some(link) = &self.wm {
-                        link.send(wm::Command::SwitchOn { device, number });
-                    }
-                }
+                self.choose_overview_cell(index, cell);
                 Some(0)
             }
-            msg::KEYDOWN if m.wparam == vk::ESCAPE => {
-                self.close_overview_flying();
+            msg::KEYDOWN => {
+                let sheet = self.overview.sheets.get(index)?;
+                match m.wparam {
+                    vk::LEFT => self.step_overview(index, Toward::Left),
+                    vk::RIGHT => self.step_overview(index, Toward::Right),
+                    vk::UP => self.step_overview(index, Toward::Up),
+                    vk::DOWN => self.step_overview(index, Toward::Down),
+                    vk::ESCAPE => self.close_overview_flying(),
+                    vk::RETURN | vk::SPACE => {
+                        // Nothing ringed yet: the workspace on screen, as a click on it.
+                        let cell = sheet.selected.or(sheet.shown);
+                        self.choose_overview_cell(index, cell);
+                    }
+                    key => {
+                        // A digit: the workspace of that number, as a click on its cell;
+                        // one not shown here is left alone.
+                        let d = vk::digit(key)?;
+                        if let Some(cell) = sheet.numbers.iter().position(|n| *n == d) {
+                            self.choose_overview_cell(index, Some(cell));
+                        }
+                    }
+                }
                 Some(0)
             }
             msg::ACTIVATE => {

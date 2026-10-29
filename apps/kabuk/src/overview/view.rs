@@ -21,6 +21,9 @@ pub struct OverviewStyle {
     pub border: f32,
     /// The shown workspace's frame.
     pub active_border: f32,
+    /// The ring round the cell the keyboard selected, and its distance from the cell.
+    pub focus: f32,
+    pub focus_gap: f32,
     pub icon: f32,
     pub text: f32,
     pub pad: f32,
@@ -33,6 +36,8 @@ pub const STYLE: OverviewStyle = OverviewStyle {
     radius: TIP.radius,
     border: TIP.border,
     active_border: TIP.border * 2.0,
+    focus: TIP.border * 2.0,
+    focus_gap: TIP.gap / 2.0,
     icon: 16.0,
     text: TIP.text,
     pad: TIP.pad_v,
@@ -117,8 +122,9 @@ fn window_box(b: &WindowBox, s: &OverviewStyle, text_scale: f32) -> Node {
         })
 }
 
-/// The overview of a work area of `size` DIPs.
-pub fn scene(size: Size, cells: &[Cell], s: &OverviewStyle, text_scale: f32) -> Node {
+/// The overview of a work area of `size` DIPs; the cell the keyboard selected (by index)
+/// ringed in the text colour, apart from the accent frame of the shown one.
+pub fn scene(size: Size, cells: &[Cell], selected: Option<usize>, s: &OverviewStyle, text_scale: f32) -> Node {
     let mut layers = Vec::new();
     for (i, c) in cells.iter().enumerate() {
         let frame = if c.shown {
@@ -137,6 +143,21 @@ pub fn scene(size: Size, cells: &[Cell], s: &OverviewStyle, text_scale: f32) -> 
         for b in &c.boxes {
             layers.push(at(window_box(b, s, text_scale), b.rect, size));
         }
+        if selected == Some(i) {
+            let out = s.focus_gap + s.focus;
+            let ring = Rect::new(
+                c.rect.x - out,
+                c.rect.y - out,
+                c.rect.w + 2.0 * out,
+                c.rect.h + 2.0 * out,
+            );
+            let paint = Paint {
+                fill: Role::Clear,
+                border: Some((Role::Fg, s.focus)),
+                radius: s.radius + out,
+            };
+            layers.push(at(Node::spacer(0.0, 0.0).paint(paint), ring, size));
+        }
         let under = Rect::new(c.rect.x, c.rect.y + c.rect.h, c.rect.w, s.gap);
         layers.push(at(Node::layer(vec![label(c, s, text_scale)]), under, size));
     }
@@ -150,7 +171,8 @@ pub fn scene(size: Size, cells: &[Cell], s: &OverviewStyle, text_scale: f32) -> 
 #[cfg(test)]
 mod tests {
     //! Edge cases: cells land where they were put and are clickable by index; a box too
-    //! small for its icon or title; the shown cell's frame.
+    //! small for its icon or title; the shown cell's frame; the keyboard's ring on any
+    //! cell, the shown one too, and on none.
     use super::*;
     use kabuk_ui::geom::Point;
     use kabuk_ui::node::{layout, Kind, TextMeasure, TextMetrics};
@@ -193,7 +215,7 @@ mod tests {
 
     #[test]
     fn cells_land_in_their_places_and_are_clickable() {
-        let l = layout(&scene(SIZE, &cells(), &STYLE, 1.0), Point::default(), &Fake);
+        let l = layout(&scene(SIZE, &cells(), None, &STYLE, 1.0), Point::default(), &Fake);
         assert_eq!((l.size.w, l.size.h), (SIZE.w, SIZE.h));
         let at = |x: f32, y: f32| l.hit_test(Point { x, y }).filter(|h| h.module == HIT).map(|h| h.value);
         assert_eq!(at(30.0, 30.0), Some(0));
@@ -223,7 +245,7 @@ mod tests {
             panic!("a row")
         };
         assert!(children.is_empty());
-        let node = scene(SIZE, &cells(), s, 1.0);
+        let node = scene(SIZE, &cells(), None, s, 1.0);
         let Kind::Layer { children } = &node.kind else {
             panic!("a layer")
         };
@@ -232,11 +254,48 @@ mod tests {
         assert_eq!(children[2].paint.unwrap().border, Some((Role::SurfaceLine, s.border)));
     }
 
+    #[test]
+    fn the_cell_the_keyboard_selected_is_ringed() {
+        let rings = |selected| -> Vec<Rect> {
+            layout(&scene(SIZE, &cells(), selected, &STYLE, 1.0), Point::default(), &Fake)
+                .draws
+                .iter()
+                .filter_map(|d| match d {
+                    kabuk_ui::node::Draw::Panel { rect, paint } if paint.border == Some((Role::Fg, STYLE.focus)) => {
+                        Some(*rect)
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        assert!(rings(None).is_empty());
+        let out = STYLE.focus_gap + STYLE.focus;
+        for (i, c) in cells().iter().enumerate() {
+            let r = rings(Some(i));
+            assert_eq!(r.len(), 1, "cell {i}");
+            // Round the cell, outside it, within the gap to the next one.
+            assert_eq!(
+                r[0],
+                Rect::new(
+                    c.rect.x - out,
+                    c.rect.y - out,
+                    c.rect.w + 2.0 * out,
+                    c.rect.h + 2.0 * out
+                )
+            );
+            assert!(out < STYLE.gap / 2.0);
+        }
+        assert!(rings(Some(9)).is_empty(), "a cell that is not there");
+        // The ring takes no clicks from the cell.
+        let l = layout(&scene(SIZE, &cells(), Some(0), &STYLE, 1.0), Point::default(), &Fake);
+        assert_eq!(l.hit_test(Point { x: 30.0, y: 30.0 }).map(|h| h.value), Some(0));
+    }
+
     /// Each cell is numbered under itself with its workspace's number (a cell's place
     /// is not its number: workspaces 1 and 3 here), the shown one in the accent.
     #[test]
     fn every_cell_is_numbered_under_itself() {
-        let l = layout(&scene(SIZE, &cells(), &STYLE, 1.0), Point::default(), &Fake);
+        let l = layout(&scene(SIZE, &cells(), None, &STYLE, 1.0), Point::default(), &Fake);
         let numbers: Vec<(String, Role, f32, f32)> = l
             .draws
             .iter()

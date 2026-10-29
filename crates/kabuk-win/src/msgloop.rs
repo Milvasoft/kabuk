@@ -480,6 +480,17 @@ pub mod vk {
     pub const SPACE: usize = k::VK_SPACE.0 as usize;
     pub const A: usize = b'A' as usize;
     pub const V: usize = b'V' as usize;
+
+    /// The digit of a digit key, on the top row or the number pad.
+    pub fn digit(key: usize) -> Option<u32> {
+        let top = usize::from(b'0');
+        let pad = k::VK_NUMPAD0.0 as usize;
+        match key {
+            _ if (top..top + 10).contains(&key) => u32::try_from(key - top).ok(),
+            _ if (pad..pad + 10).contains(&key) => u32::try_from(key - pad).ok(),
+            _ => None,
+        }
+    }
 }
 
 /// Whether Shift was down when the message being handled was sent (the queue's key state).
@@ -740,6 +751,17 @@ mod tests {
         // Shift, and a key Kabuk's chords do not have (the OEM comma).
         assert_eq!(key_of_virtual(0x10), None);
         assert_eq!(key_of_virtual(0xBC), None);
+    }
+
+    #[test]
+    fn digit_keys_give_their_digits_on_the_top_row_and_the_number_pad() {
+        assert_eq!(vk::digit(usize::from(b'0')), Some(0));
+        assert_eq!(vk::digit(usize::from(b'9')), Some(9));
+        assert_eq!(vk::digit(0x60), Some(0), "number pad 0");
+        assert_eq!(vk::digit(0x69), Some(9), "number pad 9");
+        assert_eq!(vk::digit(usize::from(b'A')), None);
+        assert_eq!(vk::digit(0x6A), None, "number pad *");
+        assert_eq!(vk::digit(usize::from(b'/')), None);
     }
 
     #[test]

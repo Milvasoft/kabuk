@@ -77,6 +77,24 @@ pub fn cell_at(cells: &[Rect], x: i32, y: i32) -> Option<usize> {
         .position(|c| x >= c.x && x < c.right() && y >= c.y && y < c.bottom())
 }
 
+/// The cell an arrow key selects from cell `from` among `n` cells laid `cols` to a row
+/// (as `cells` lays them): Left and Right go in reading order (the workspaces' order, onto
+/// the row before or after), Up and Down a row, Down onto a shorter last row its last
+/// cell. `None` past the ends.
+pub fn step(n: usize, cols: usize, from: usize, toward: crate::desk::Toward) -> Option<usize> {
+    use crate::desk::Toward;
+    if n == 0 || cols == 0 || from >= n {
+        return None;
+    }
+    let last_row = (n - 1) / cols;
+    match toward {
+        Toward::Left => from.checked_sub(1),
+        Toward::Right => (from + 1 < n).then_some(from + 1),
+        Toward::Up => from.checked_sub(cols),
+        Toward::Down => (from / cols < last_row).then(|| (from + cols).min(n - 1)),
+    }
+}
+
 /// Where a window flying from `from` (its place) to `to` (its place in a cell) is when
 /// `u` (0-1, eased by the caller) of the way is done.
 pub fn flying(from: Rect, to: Rect, u: f32) -> Rect {
@@ -95,8 +113,37 @@ mod tests {
     //! Edge cases: no workspaces, one, the common counts on wide and tall areas; cells
     //! never overlap, stay inside the area and keep its shape; a window scaled into a
     //! cell; a point between cells; a window flying into its cell, at the start, half way,
-    //! at the end and past either end.
+    //! at the end and past either end; arrow keys across a full and a ragged grid, past
+    //! its edges, with no cells.
     use super::*;
+    use crate::desk::Toward;
+
+    #[test]
+    fn arrow_keys_step_across_the_grid() {
+        // 3 × 3: 0 1 2 / 3 4 5 / 6 7 8.
+        let at = |from, t| step(9, 3, from, t);
+        assert_eq!(at(4, Toward::Left), Some(3));
+        assert_eq!(at(4, Toward::Right), Some(5));
+        assert_eq!(at(4, Toward::Up), Some(1));
+        assert_eq!(at(4, Toward::Down), Some(7));
+        // Left and Right run on in the workspaces' order, onto the next row.
+        assert_eq!(at(2, Toward::Right), Some(3));
+        assert_eq!(at(3, Toward::Left), Some(2));
+        // Past the edges: nothing.
+        assert_eq!(at(0, Toward::Left), None);
+        assert_eq!(at(8, Toward::Right), None);
+        assert_eq!(at(1, Toward::Up), None);
+        assert_eq!(at(7, Toward::Down), None);
+        // 5 in 3 × 2: 0 1 2 / 3 4. Down from 2 lands on the short row's last cell.
+        assert_eq!(step(5, 3, 2, Toward::Down), Some(4));
+        assert_eq!(step(5, 3, 1, Toward::Down), Some(4));
+        assert_eq!(step(5, 3, 4, Toward::Down), None);
+        assert_eq!(step(5, 3, 4, Toward::Up), Some(1));
+        // One row; no cells; a cell that is not there.
+        assert_eq!(step(4, 4, 2, Toward::Down), None);
+        assert_eq!(step(0, 0, 0, Toward::Right), None);
+        assert_eq!(step(4, 2, 9, Toward::Left), None);
+    }
 
     #[test]
     fn a_window_flies_from_its_place_into_its_cell() {
