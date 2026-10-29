@@ -123,6 +123,9 @@ pub enum Action {
     Focus(Direction),
     Move(Direction),
     ToggleFloat,
+    /// Float the focused window (`true`) or tile it, whatever it was (`kabuk msg float
+    /// on|off`; PLAN M19 U4). No shortcut has it: the shortcut toggles.
+    SetFloat(bool),
     Close,
     CycleLayout,
     /// Show or hide the hidden workspace on the focused monitor.

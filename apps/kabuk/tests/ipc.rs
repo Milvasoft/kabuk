@@ -262,6 +262,40 @@ fn focus_float_and_layout_act_on_the_focused_monitor() {
     assert_eq!(sandbox.restore().0, 0);
 }
 
+/// PLAN M19 U4: `float on|off` float or tile the focused window whatever it was (the
+/// shortcut, and `float toggle`, only flip it); one already that way stays.
+#[test]
+fn float_on_and_off_set_the_focused_window_either_way() {
+    let sandbox = Sandbox::new();
+    let shell = Shell::start(&sandbox);
+    let a = TestWindow::open(&["--title", &title("ipc-float-a")]);
+    let b = TestWindow::open(&["--title", &title("ipc-float-b")]);
+    managed(&sandbox, &a);
+    managed(&sandbox, &b);
+    let floating = |w: &TestWindow| window_entry(&sandbox, w)["floating"].clone();
+    shell.focus(&b);
+    ok(&sandbox, &["float", "off"]);
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("action applied action=SetFloat(false)")
+            == 1)
+        .is_some()
+    );
+    assert_eq!(floating(&b), false, "a tiled window stays tiled");
+    ok(&sandbox, &["float", "on"]);
+    assert!(wait_until(SETTLE, || floating(&b) == true).is_some(), "not floated");
+    ok(&sandbox, &["float", "on"]);
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("action applied action=SetFloat(true)")
+            == 2)
+        .is_some()
+    );
+    assert_eq!(floating(&b), true, "a floating window stays floating");
+    ok(&sandbox, &["float", "off"]);
+    assert!(wait_until(SETTLE, || floating(&b) == false).is_some(), "not tiled");
+    assert_eq!(floating(&a), false, "the other window was touched");
+    assert_eq!(sandbox.restore().0, 0);
+}
+
 /// DECISIONS D65: `query windows` tells each window's program and what opens it again;
 /// a layout profile opened by name moves the program's open window to its workspace and
 /// starts the program again for its second place, whose window goes there as it comes.

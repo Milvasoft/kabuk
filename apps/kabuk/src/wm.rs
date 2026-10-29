@@ -1134,6 +1134,7 @@ impl Wm {
             Action::Focus(d) => self.desk.focus_toward(toward(d)).into_iter().collect(),
             Action::Move(d) => self.desk.swap_toward(toward(d)),
             Action::ToggleFloat => focused.map(|f| self.desk.toggle_floating(f)).unwrap_or_default(),
+            Action::SetFloat(on) => focused.map(|f| self.desk.set_floating(f, on)).unwrap_or_default(),
             Action::Close => {
                 if let Some(f) = focused {
                     Hwnd(f).close_async();
@@ -1160,7 +1161,7 @@ impl Wm {
         self.unmaximizing = None;
         // Float and layout changes say so, as a drag off a tile does (PLAN M19 U7).
         match a {
-            Action::ToggleFloat => {
+            Action::ToggleFloat | Action::SetFloat(_) => {
                 if let (Some(f), Some(before)) = (focused, was_floating) {
                     let now = self.desk.is_floating(f);
                     if now != before {

@@ -26,6 +26,8 @@ pub enum Request {
     Move(Direction),
     /// `float toggle`.
     FloatToggle,
+    /// `float on|off`: float the focused window or tile it, whatever it was (PLAN M19 U4).
+    Float(bool),
     /// `close`: close the focused window.
     Close,
     /// `scratchpad toggle`: show or hide the hidden workspace on the focused monitor.
@@ -78,6 +80,7 @@ impl Request {
             Request::Focus(d) => Action::Focus(d),
             Request::Move(d) => Action::Move(d),
             Request::FloatToggle => Action::ToggleFloat,
+            Request::Float(on) => Action::SetFloat(on),
             Request::Close => Action::Close,
             Request::ScratchpadToggle => Action::ToggleScratchpad,
             Request::ScratchpadSend => Action::ToScratchpad,
@@ -234,10 +237,13 @@ pub fn parse(words: &[String]) -> Result<Request, IpcError> {
             Request::Move(direction(arg).ok_or_else(|| one("left, down, up or right"))?)
         }
         "float" => {
-            takes(1, "toggle")?;
+            const EXPECTED: &str = "toggle, on or off";
+            takes(1, EXPECTED)?;
             match arg {
                 Some("toggle") => Request::FloatToggle,
-                _ => return Err(one("toggle")),
+                Some("on") => Request::Float(true),
+                Some("off") => Request::Float(false),
+                _ => return Err(one(EXPECTED)),
             }
         }
         "close" => {
@@ -480,6 +486,11 @@ mod tests {
         assert_eq!(p("panel network"), Ok(Request::Panel(PanelName::Network)));
         assert_eq!(p("panel calendar"), Ok(Request::Panel(PanelName::Calendar)));
         assert_eq!(p("panel volume"), Ok(Request::Panel(PanelName::Volume)));
+        // The shortcut toggles; the command line also sets it either way.
+        assert_eq!(p("float on"), Ok(Request::Float(true)));
+        assert_eq!(p("float off"), Ok(Request::Float(false)));
+        assert_eq!(p("float on").unwrap().action(), Some(Action::SetFloat(true)));
+        assert_eq!(p("float off").unwrap().action(), Some(Action::SetFloat(false)));
     }
 
     #[test]
@@ -655,7 +666,8 @@ mod tests {
             "focus",
             "focus north",
             "float",
-            "float on",
+            "float maybe",
+            "float on now",
             "scratchpad",
             "scratchpad show",
             "scratchpad toggle now",
@@ -674,6 +686,10 @@ mod tests {
         assert_eq!(
             e.to_string(),
             "`workspace` expects a workspace number 1-9, next or prev"
+        );
+        assert_eq!(
+            p("float up").unwrap_err().to_string(),
+            "`float` expects toggle, on or off"
         );
         let e = p("move-to 12").unwrap_err();
         assert_eq!(e.to_string(), "`move-to` expects a workspace number 1-9");

@@ -897,6 +897,15 @@ impl Desk {
         effects
     }
 
+    /// Floats the window (`on`) or tiles it; nothing when it is that way already (PLAN
+    /// M19 U4: `kabuk msg float on|off`).
+    pub fn set_floating(&mut self, id: WindowId, on: bool) -> Vec<Effect> {
+        if self.entry(id).is_none() || self.is_floating(id) == on {
+            return Vec::new();
+        }
+        self.toggle_floating(id)
+    }
+
     /// The window did not take the size it was given (its minimum is larger).
     pub fn refused(&mut self, id: WindowId, actual: Size) -> Vec<Effect> {
         if !self.settings.float_unfit {

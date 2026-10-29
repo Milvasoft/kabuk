@@ -110,6 +110,7 @@ mod tests {
             for form in [
                 "<1-9|next|prev>",
                 "<left|down|up|right>",
+                "<toggle|on|off>",
                 "<toggle|send>",
                 "<toggle|next>",
                 "<dwindle|master|floating|tiling|cycle>",

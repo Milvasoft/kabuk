@@ -476,7 +476,7 @@ Usability, in this order:
 - U5 Notices and the OSD on the monitor in use (DECISIONS D95). *Done: `a_notice_comes_on_the_monitor_in_use`, `a_notice_comes_on_the_monitor_of_the_bar_it_was_made_on`.*
 - U6 A notice when something asked for does not happen (opening, a Windows command, a settings page, a quick switch, brightness, the sound output, a copy, the drop-down terminal). *Done: `something_that_does_not_open_is_told`.*
 - U7 Win+F, a grab's drop and a layout change say so. *Done: in `swap_float_and_close_act_on_the_focused_window`.*
-- U4 `kabuk msg` covers every shortcut action and the bar's panels. *Done: `every_shortcut_has_a_command_doing_the_same` and more; two integration tests in `ipc.rs`. Not done: `float on|off` (the shortcut is a toggle; `float toggle` exists).*
+- U4 `kabuk msg` covers every shortcut action and the bar's panels. *Done: `every_shortcut_has_a_command_doing_the_same` and more; two integration tests in `ipc.rs`. `float on|off` besides `float toggle` (the shortcut toggles; the command line sets it either way): `every_action_has_a_command`, `a_window_set_floating_or_tiled_changes_only_when_it_was_not`, integration `float_on_and_off_set_the_focused_window_either_way` (written, not run here).*
 - U8 The launcher's query has a caret, word moves, Delete and select all; the list pages, Tab steps. *Done, seven tests.*
 - U9 The overview takes digits, arrows and Enter. *Done, three tests.*
 - U10 The bar's menus and panels take Up/Down/Home/End/Tab/Enter, digits in menus, Left/Right on sliders (`popup_keys`). *Done, eleven tests. Not done: the network panel keeps its own scheme; a tray icon's menu from the keyboard.*

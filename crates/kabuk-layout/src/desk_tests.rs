@@ -218,6 +218,24 @@ fn removing_a_window_reflows_its_workspace() {
     assert_eq!(d.remove(9), vec![]);
 }
 
+/// PLAN M19 U4: `kabuk msg float on|off` floats or tiles a window whatever it was; one
+/// already that way does not move.
+#[test]
+fn a_window_set_floating_or_tiled_changes_only_when_it_was_not() {
+    let mut d = desk(false);
+    d.add(new(1));
+    d.add(new(2));
+    assert_eq!(d.set_floating(2, false), vec![], "tiled already");
+    let e = d.set_floating(2, true);
+    assert!(d.is_floating(2));
+    assert_eq!(placed(&e), vec![1, 2]);
+    assert_eq!(d.set_floating(2, true), vec![], "floating already");
+    let e = d.set_floating(2, false);
+    assert!(!d.is_floating(2));
+    assert_eq!(placed(&e), vec![1, 2]);
+    assert_eq!(d.set_floating(7, true), vec![], "an unknown window");
+}
+
 #[test]
 fn floating_windows_keep_their_place_and_are_not_tiled() {
     let mut d = desk(false);
