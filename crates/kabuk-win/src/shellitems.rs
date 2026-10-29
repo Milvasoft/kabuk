@@ -136,7 +136,8 @@ pub fn refresh_installed_apps() {
         crate::system::com_init();
         if let Ok(apps) = installed_apps() {
             if let Ok(mut c) = INSTALLED.lock() {
-                *c = Some((std::time::Instant::now(), std::sync::Arc::new(apps)));
+                let apps = kept_or_read(c.as_ref().map(|k| &k.1), apps);
+                *c = Some((std::time::Instant::now(), apps));
             }
         }
         INSTALLED_READING.store(false, Ordering::Release);
@@ -146,9 +147,20 @@ pub fn refresh_installed_apps() {
     }
 }
 
+/// The list to keep after reading `read`: the one kept when nothing changed, so its
+/// users tell a changed list by its address (the app grid lists its apps again only then,
+/// PLAN M19 P14), else the new one.
+fn kept_or_read(kept: Option<&std::sync::Arc<Vec<App>>>, read: Vec<App>) -> std::sync::Arc<Vec<App>> {
+    match kept {
+        Some(k) if **k == read => k.clone(),
+        _ => std::sync::Arc::new(read),
+    }
+}
+
 /// The installed apps as last read (reading them takes a few hundred milliseconds, too
 /// long for a click): read here the first time, then again in the background when older
-/// than [`INSTALLED_KEPT`]. COM must be initialised on this thread.
+/// than [`INSTALLED_KEPT`]; the same list until what is read differs. COM must be
+/// initialised on this thread.
 pub fn installed_apps_cached() -> std::sync::Arc<Vec<App>> {
     let kept = INSTALLED.lock().ok().and_then(|c| c.clone());
     match kept {
@@ -159,11 +171,16 @@ pub fn installed_apps_cached() -> std::sync::Arc<Vec<App>> {
             apps
         }
         None => {
-            let apps = std::sync::Arc::new(installed_apps().unwrap_or_default());
-            if let Ok(mut c) = INSTALLED.lock() {
-                *c = Some((std::time::Instant::now(), apps.clone()));
+            let read = installed_apps().unwrap_or_default();
+            match INSTALLED.lock() {
+                // The background read may have finished meanwhile.
+                Ok(mut c) => {
+                    let apps = kept_or_read(c.as_ref().map(|k| &k.1), read);
+                    *c = Some((std::time::Instant::now(), apps.clone()));
+                    apps
+                }
+                Err(_) => std::sync::Arc::new(read),
             }
-            apps
         }
     }
 }
@@ -393,8 +410,26 @@ pub fn open_with(program: &str, file: &str) -> std::io::Result<()> {
 mod tests {
     //! Edge cases: the apps folder lists something with a name and an id, a known folder
     //! exists, a missing shortcut gives nothing, a shortcut made here resolves. Nothing
-    //! is opened (that would start programs on the user's desktop).
+    //! is opened (that would start programs on the user's desktop); a list read again
+    //! unchanged stays the list kept, a changed one or the first is new.
     use super::*;
+
+    /// PLAN M19 P14: the app grid lists its apps again only when Windows' list is another
+    /// one; reading it again every ten minutes made a new list each time.
+    #[test]
+    fn a_list_read_again_unchanged_stays_the_list_kept() {
+        let app = |name: &str| App {
+            name: name.into(),
+            id: format!("{name}.exe"),
+            target: None,
+        };
+        let first = kept_or_read(None, vec![app("Paint")]);
+        let again = kept_or_read(Some(&first), vec![app("Paint")]);
+        assert!(std::sync::Arc::ptr_eq(&first, &again));
+        let changed = kept_or_read(Some(&first), vec![app("Paint"), app("Notepad")]);
+        assert!(!std::sync::Arc::ptr_eq(&first, &changed));
+        assert_eq!(changed.len(), 2);
+    }
 
     #[test]
     fn file_explorer_goes_by_windows_own_app_id() {

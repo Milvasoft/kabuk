@@ -27,7 +27,7 @@ use kabuk_win::window::Hwnd;
 
 use super::motion_host::Shown;
 use super::{timer, Shared};
-use crate::appgrid::model::{self, Dir, Found, Grid, Shape, Wheel};
+use crate::appgrid::model::{self, Dir, Found, Grid, Kept, Listed, Shape, Wheel};
 use crate::appgrid::{backdrop, style, view};
 use crate::bar::pictures::Pictures;
 use crate::launcher::item::Target;
@@ -73,6 +73,8 @@ struct Backdrop {
 pub(super) struct AppGridState {
     hotkeys: Vec<kabuk_win::keyhook::Bound>,
     open: Option<Open>,
+    /// The apps listed, kept between openings (PLAN M19 P14).
+    listed: Kept<Source>,
     pictures: Pictures,
     /// Blurred wallpapers: their picture's key in the renderer's store, and the picture
     /// itself (the store drops pictures not its tray's when the tray changes; found
@@ -180,6 +182,36 @@ fn backdrop_key(file: &str, rect: PxRect) -> BackdropKey {
     (file.to_string(), written, rect.w.max(1) as u32, rect.h.max(1) as u32)
 }
 
+/// What the grid's apps are listed from (PLAN M19 P14): Windows' installed apps (the same
+/// list until it changes), the language's alphabetical order and the user's arrangement
+/// file as last written.
+struct Source {
+    installed: Arc<Vec<kabuk_win::shellitems::App>>,
+    casing: Casing,
+    arrangement: Option<(Option<std::time::SystemTime>, u64)>,
+}
+
+impl PartialEq for Source {
+    fn eq(&self, other: &Source) -> bool {
+        Arc::ptr_eq(&self.installed, &other.installed)
+            && self.casing == other.casing
+            && self.arrangement == other.arrangement
+    }
+}
+
+/// When a file was last written and its size; `None` without the file.
+fn stamp(file: &std::path::Path) -> Option<(Option<std::time::SystemTime>, u64)> {
+    std::fs::metadata(file).ok().map(|m| (m.modified().ok(), m.len()))
+}
+
+/// The user's arrangement of the grid in `file`; none (alphabetical, nothing hidden)
+/// without it.
+fn arrangement_in(file: Option<&std::path::Path>) -> Arrangement {
+    file.and_then(|f| std::fs::read_to_string(f).ok())
+        .and_then(|t| Arrangement::read(&t))
+        .unwrap_or_default()
+}
+
 fn monitor_rect(m: &Monitor) -> PxRect {
     PxRect {
         x: m.rect.left,
@@ -231,12 +263,7 @@ impl Shared {
             };
             let ahead = Shape::fit(size).per_page() * style::PAGES_AHEAD;
             let side = (style::ICON * scale).ceil() as u32;
-            let sources: Vec<String> = self
-                .app_grid_entries()
-                .into_iter()
-                .take(ahead)
-                .map(|e| e.open)
-                .collect();
+            let sources = self.app_grid_apps().first_opens(ahead);
             self.app_grid.pictures.ask(sources, side);
         }
     }
@@ -456,45 +483,64 @@ impl Shared {
     /// The user's arrangement of the grid; none (alphabetical, nothing hidden) without
     /// its file.
     fn app_grid_arrangement(&self) -> Arrangement {
-        self.app_grid_file()
-            .and_then(|f| std::fs::read_to_string(f).ok())
-            .and_then(|t| Arrangement::read(&t))
-            .unwrap_or_default()
+        arrangement_in(self.app_grid_file().as_deref())
     }
 
     fn app_grid_file(&self) -> Option<std::path::PathBuf> {
         Some(self.state.path().parent()?.join(kabuk_core::app_grid::FILE))
     }
 
-    fn save_app_grid_arrangement(&self, a: &Arrangement) {
+    fn save_app_grid_arrangement(&mut self, a: &Arrangement) {
+        // Listed again from the new arrangement, whatever its file's time says.
+        self.app_grid.listed.forget();
         let Some(file) = self.app_grid_file() else { return };
         if let Err(e) = kabuk_core::fsutil::write_atomic(&file, a.to_json().as_bytes()) {
             tracing::error!(error = %e, "app grid arrangement not written");
         }
     }
 
-    /// Windows' apps the grid lists, in the user's order, the hidden ones left out.
-    fn app_grid_entries(&self) -> Vec<model::Entry> {
-        let found = kabuk_win::shellitems::installed_apps_cached()
-            .iter()
-            .map(|a| Found {
-                name: a.name.clone(),
-                id: a.id.clone(),
-                path: a.target.clone(),
-                open: a.target(),
-            })
-            .collect();
-        self.app_grid_arrangement()
-            .apply(model::entries(found, self.app_grid_casing()), |e| e.open.as_str())
+    /// Windows' apps the grid lists, in the user's order, the hidden ones left out: listed
+    /// once and kept while what they are listed from stays the same (PLAN M19 P14: every
+    /// opening listed, sorted and indexed them again). Windows' list is read again in the
+    /// background as the launcher's is (`installed_apps_cached`), and is the same list
+    /// until it changes; the arrangement is looked at by its file's time and size, as
+    /// Settings writes it too.
+    fn app_grid_apps(&mut self) -> Listed {
+        let file = self.app_grid_file();
+        let source = Source {
+            installed: kabuk_win::shellitems::installed_apps_cached(),
+            casing: self.app_grid_casing(),
+            arrangement: file.as_deref().and_then(stamp),
+        };
+        let (installed, casing) = (source.installed.clone(), source.casing);
+        self.app_grid.listed.get(source, || {
+            let started = Instant::now();
+            let found = installed
+                .iter()
+                .map(|a| Found {
+                    name: a.name.clone(),
+                    id: a.id.clone(),
+                    path: a.target.clone(),
+                    open: a.target(),
+                })
+                .collect();
+            let entries = arrangement_in(file.as_deref()).apply(model::entries(found, casing), |e| e.open.as_str());
+            let listed = Listed::new(entries, casing);
+            tracing::info!(
+                apps = listed.len(),
+                us = started.elapsed().as_micros() as u64,
+                "app grid apps listed"
+            );
+            listed
+        })
     }
 
     /// The grid listed again after the arrangement changed, on the same page.
     fn app_grid_rebuild(&mut self) {
-        let entries = self.app_grid_entries();
-        let casing = self.app_grid_casing();
+        let listed = self.app_grid_apps();
         let Some(o) = self.app_grid.open.as_mut() else { return };
         let page = o.grid.page();
-        o.grid = Grid::new(entries, casing, o.grid.shape());
+        o.grid = Grid::of(&listed, o.grid.shape());
         o.grid.go(page);
         o.slots = model::slots(o.grid.page(), o.grid.pages());
     }
@@ -689,7 +735,7 @@ impl Shared {
             w: rect.w as f32 / scale.0,
             h: rect.h as f32 / scale.0,
         };
-        let grid = Grid::new(self.app_grid_entries(), self.app_grid_casing(), Shape::fit(size));
+        let grid = Grid::of(&self.app_grid_apps(), Shape::fit(size));
         let backdrop = self.app_grid_screen(&mon).or_else(|| self.app_grid_backdrop(&mon));
         let title = self.instance_title();
         let chrome = Window::shell_surface(CHROME_CLASS, &title, rect, |_| None);

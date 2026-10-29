@@ -3111,6 +3111,60 @@ fn the_app_grid_keeps_its_pictures_while_the_tray_changes() {
     assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
 }
 
+/// PLAN M19 P14: every opening of the app grid listed, sorted and indexed Windows' apps
+/// again. They are listed once and kept: a second opening lists nothing, and a change of
+/// the arrangement (Settings writes its file) lists them again.
+#[test]
+fn a_second_opening_of_the_app_grid_lists_no_apps() {
+    use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_APP_GRID};
+    use kabuk_win::msgloop::{post_message, Msg};
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    sandbox.wait_started();
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
+    let grid = |wparam: usize| {
+        post_message(
+            control,
+            Msg {
+                id: MSG_TEST_APP_GRID,
+                wparam,
+                lparam: 0,
+            },
+        )
+        .unwrap()
+    };
+    let open_and_close = |n: usize| {
+        grid(1);
+        assert!(wait_until(SETTLE, || sandbox.log_lines("app grid shown") == n).is_some());
+        grid(0);
+        assert!(wait_until(SETTLE, || sandbox.log_lines("app grid closed") == n).is_some());
+    };
+    open_and_close(1);
+    open_and_close(2);
+    assert_eq!(
+        sandbox.log_lines("app grid apps listed"),
+        1,
+        "listed again: {:?}",
+        sandbox.last_log_line(&["app grid apps listed"])
+    );
+    // Settings hides an app: the next opening lists them again, once.
+    let mut hidden = kabuk_core::app_grid::Arrangement::default();
+    hidden.hide("shell:AppsFolder\\kabuk-test-none", "None");
+    std::fs::write(sandbox.state_dir().join(kabuk_core::app_grid::FILE), hidden.to_json()).unwrap();
+    open_and_close(3);
+    open_and_close(4);
+    assert_eq!(sandbox.log_lines("app grid apps listed"), 2);
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
+}
+
 /// DECISIONS D68 (asked for by the user, who will try it on a touchpad): with swipes on,
 /// the bar's control window watches the touchpad, and a swipe does what was chosen for
 /// its way; turned off live, the watch goes. This machine has no touchpad, so the test

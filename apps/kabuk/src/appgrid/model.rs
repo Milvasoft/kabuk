@@ -2,6 +2,8 @@
 //! are shown and in what order, the pages they fill, the search, the keyboard's selection,
 //! and how far a drag or the wheel turns the pages.
 
+use std::sync::Arc;
+
 use kabuk_search::{fold, Casing, Index};
 use kabuk_ui::geom::Size;
 
@@ -107,10 +109,73 @@ pub enum Dir {
     Down,
 }
 
+/// The grid's apps, listed and prepared for searching once and shared by every opening
+/// (PLAN M19 P14: they were listed, sorted and indexed again on every opening).
+#[derive(Clone)]
+pub struct Listed {
+    entries: Arc<Vec<Entry>>,
+    index: Arc<Index>,
+}
+
+impl Listed {
+    pub fn new(entries: Vec<Entry>, casing: Casing) -> Listed {
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        let index = Index::new(&names, casing);
+        Listed {
+            entries: Arc::new(entries),
+            index: Arc::new(index),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// The first `n` apps' openings (their icons are loaded ahead).
+    pub fn first_opens(&self, n: usize) -> Vec<String> {
+        self.entries.iter().take(n).map(|e| e.open.clone()).collect()
+    }
+}
+
+/// The apps listed from a source (what they are listed from: the installed apps, the
+/// language, the user's arrangement), kept until the source changes.
+pub struct Kept<S> {
+    kept: Option<(S, Listed)>,
+}
+
+impl<S> Default for Kept<S> {
+    fn default() -> Kept<S> {
+        Kept { kept: None }
+    }
+}
+
+impl<S: PartialEq> Kept<S> {
+    /// The apps listed from `source`: those kept when it is the same, else `list`'s.
+    pub fn get(&mut self, source: S, list: impl FnOnce() -> Listed) -> Listed {
+        match &self.kept {
+            Some((s, listed)) if *s == source => listed.clone(),
+            _ => {
+                let listed = list();
+                self.kept = Some((source, listed.clone()));
+                listed
+            }
+        }
+    }
+
+    /// The next [`Kept::get`] lists again (the grid changed its own arrangement).
+    pub fn forget(&mut self) {
+        self.kept = None;
+    }
+}
+
 /// The grid's state: the apps, the search and what it shows, the page and the selection.
 pub struct Grid {
-    entries: Vec<Entry>,
-    index: Index,
+    entries: Arc<Vec<Entry>>,
+    index: Arc<Index>,
     query: String,
     /// The entries shown, in order: all of them, or the search's matches best first.
     shown: Vec<usize>,
@@ -124,12 +189,15 @@ pub struct Grid {
 
 impl Grid {
     pub fn new(entries: Vec<Entry>, casing: Casing, shape: Shape) -> Grid {
-        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
-        let index = Index::new(&names, casing);
-        let shown = (0..entries.len()).collect();
+        Grid::of(&Listed::new(entries, casing), shape)
+    }
+
+    /// A grid of apps already listed: nothing is listed or indexed again.
+    pub fn of(listed: &Listed, shape: Shape) -> Grid {
+        let shown = (0..listed.len()).collect();
         Grid {
-            entries,
-            index,
+            entries: listed.entries.clone(),
+            index: listed.index.clone(),
             query: String::new(),
             shown,
             shape,
@@ -400,7 +468,9 @@ mod tests {
     //! style's limits; pages for none, one page exactly and one more; the search (Turkish
     //! letters, no match, Backspace, Ctrl+Backspace, Escape); the arrows at every edge and
     //! across pages; the strip's slots at the ends and for a far page; a drag short of and
-    //! past the share; the wheel's half and whole notches both ways.
+    //! past the share; the wheel's half and whole notches both ways; the apps listed once
+    //! for the same source, again for a changed one or once forgotten, a grid of them
+    //! sharing the list.
     use super::*;
 
     fn found(name: &str, path: Option<&str>) -> Found {
@@ -645,5 +715,36 @@ mod tests {
         assert_eq!(w.turn(-60, 120), 1, "towards the user: the next page");
         assert_eq!(w.turn(240, 120), -2);
         assert_eq!(w.turn(120, 0), 0);
+    }
+
+    /// PLAN M19 P14: every opening of the grid listed, sorted and indexed the apps again.
+    /// They are listed once for a source and kept until it changes.
+    #[test]
+    fn the_apps_are_listed_again_only_when_their_source_changes() {
+        let lists = std::cell::Cell::new(0);
+        let list = |names: &[&str]| {
+            lists.set(lists.get() + 1);
+            let found = names.iter().map(|n| found(n, None)).collect();
+            Listed::new(entries(found, Casing::Default), Casing::Default)
+        };
+        let mut kept = Kept::default();
+        let first = kept.get(("apps", 1), || list(&["Paint", "Notepad"]));
+        for _ in 0..5 {
+            let again = kept.get(("apps", 1), || list(&["Paint", "Notepad"]));
+            assert!(Arc::ptr_eq(&first.entries, &again.entries));
+        }
+        assert_eq!(lists.get(), 1, "opened six times, listed once");
+        // A grid of them shares the list and its index.
+        let g = Grid::of(&first, SHAPE);
+        assert!(Arc::ptr_eq(&g.entries, &first.entries) && Arc::ptr_eq(&g.index, &first.index));
+        assert_eq!(g.entry(0).map(|e| e.name.as_str()), Some("Notepad"));
+        // Another source (an app installed, the arrangement or the language changed).
+        let changed = kept.get(("apps", 2), || list(&["Paint", "Notepad", "Calculator"]));
+        assert_eq!((lists.get(), changed.len()), (2, 3));
+        kept.get(("apps", 2), || list(&[]));
+        assert_eq!(lists.get(), 2);
+        kept.forget();
+        assert!(kept.get(("apps", 2), || list(&[])).is_empty());
+        assert_eq!(lists.get(), 3, "listed again once forgotten");
     }
 }
