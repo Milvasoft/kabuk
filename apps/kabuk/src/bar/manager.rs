@@ -2499,6 +2499,11 @@ impl Shared {
         self.apply_system_colors();
         self.apply_saver();
         self.apply_wallpaper();
+        if after.wallpaper.drift_minutes != before.wallpaper.drift_minutes {
+            // The picture can stay the same while the step changes: the timer still waited
+            // for the old one (PLAN M19 U11, the step set in Settings).
+            self.schedule_drift();
+        }
         self.schedule_idle();
         self.apply_gestures();
         // A figure's module turned on or off.

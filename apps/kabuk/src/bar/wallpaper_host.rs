@@ -448,7 +448,7 @@ impl Shared {
     }
 
     /// Wakes for the next drift step while a monitor shows the user's picture drifting.
-    fn schedule_drift(&self) {
+    pub(super) fn schedule_drift(&self) {
         let w = &self.config().wallpaper;
         let drifting = w.drift
             && kabuk_win::shell::monitors()
