@@ -55,6 +55,50 @@ pub fn palette(tokens: &Tokens, bar: Option<Color>) -> Palette {
     Palette::new(colors).with_gradients(tiles)
 }
 
+/// Share of the text colour in a selected row's fill under high contrast: the contrast
+/// themes' own button face is their window colour, so a selection filled with it did not
+/// show; this much text colour does, with the text still far off it.
+pub const CONTRAST_SELECTION_SHARE: f32 = 0.25;
+
+/// The palette while Windows' high contrast is on (DECISIONS D97): every role takes the
+/// contrast theme's system colour for what it is (text, background, selection, link,
+/// line), and nothing is a gradient.
+pub fn contrast_palette(c: &kabuk_win::system::ContrastColors) -> Palette {
+    let rgb = |[r, g, b]: [u8; 3]| Color { r, g, b, a: 1.0 };
+    let (window, text) = (rgb(c.window), rgb(c.window_text));
+    let (link, gray, face) = (rgb(c.hot_light), rgb(c.gray_text), rgb(c.button_face));
+    let mut colors = vec![
+        (Role::Fg, text),
+        (Role::Dim, text),
+        (Role::Busy, text),
+        (Role::White, text),
+        (Role::Faint, gray),
+        (Role::Accent, link),
+        (Role::Accent2, link),
+        (Role::Warning, link),
+        (Role::AccentFill, rgb(c.highlight)),
+        (Role::OnAccent, rgb(c.highlight_text)),
+        (Role::Surface, window),
+        (Role::SurfaceAlt, window),
+        (Role::SurfaceSel, mix(text, window, CONTRAST_SELECTION_SHARE)),
+        (Role::Glass, window),
+        (Role::Desk, window),
+        (Role::BarFill, window),
+        (Role::Black, window),
+        (Role::SurfaceLine, text),
+        (Role::Line, text),
+        (Role::GlassLine, text),
+        (Role::TraceStrong, text),
+        (Role::Trace, gray),
+        (Role::Clear, Color::TRANSPARENT),
+    ];
+    for share in [crate::notify::style::TINT_ADA, crate::notify::style::TINT_RAY] {
+        colors.push((Role::AccentTint(share), window));
+    }
+    colors.extend(super::dock::tiles().map(|n| (Role::Tile(n), face)));
+    Palette::new(colors)
+}
+
 /// `color-mix(in srgb, a share, b)` for opaque colours.
 fn mix(a: Color, b: Color, share: f32) -> Color {
     let ch = |x: u8, y: u8| (f32::from(x) * share + f32::from(y) * (1.0 - share)).round() as u8;
@@ -120,5 +164,74 @@ mod tests {
         assert_eq!(palette(a, Some(chosen)).get(Role::BarFill), chosen);
         let f = families(theme("a").unwrap().tokens(Mode::Dark));
         assert_eq!((f.ui.as_str(), f.num.as_str()), ("Geist", "Geist Mono"));
+    }
+
+    /// Windows 11's Night sky and Desert contrast themes, as `GetSysColor` gives them.
+    fn night_sky() -> kabuk_win::system::ContrastColors {
+        kabuk_win::system::ContrastColors {
+            window: [0, 0, 0],
+            window_text: [255, 255, 255],
+            highlight: [209, 145, 255],
+            highlight_text: [0, 0, 0],
+            gray_text: [166, 166, 166],
+            button_face: [0, 0, 0],
+            button_text: [255, 255, 255],
+            hot_light: [128, 128, 255],
+        }
+    }
+
+    fn desert() -> kabuk_win::system::ContrastColors {
+        kabuk_win::system::ContrastColors {
+            window: [255, 250, 239],
+            window_text: [61, 61, 61],
+            highlight: [144, 57, 4],
+            highlight_text: [255, 245, 227],
+            gray_text: [103, 103, 103],
+            button_face: [255, 250, 239],
+            button_text: [32, 32, 32],
+            hot_light: [29, 90, 143],
+        }
+    }
+
+    fn rgba(c: Color) -> kabuk_theme::contrast::Rgba {
+        kabuk_theme::contrast::Rgba {
+            r: f64::from(c.r),
+            g: f64::from(c.g),
+            b: f64::from(c.b),
+            a: 1.0,
+        }
+    }
+
+    /// D97: under high contrast every role takes the system's colours: none is left
+    /// transparent (but the clear one) or a gradient, text is the window text on the
+    /// window, a fill and its text are the highlight pair, and a selected row shows while
+    /// its text stays readable on it.
+    #[test]
+    fn high_contrast_takes_the_system_colours() {
+        let rgb = |[r, g, b]: [u8; 3]| Color { r, g, b, a: 1.0 };
+        for c in [night_sky(), desert()] {
+            let p = contrast_palette(&c);
+            let mut roles: Vec<Role> = ROLE_TOKENS.iter().map(|(r, _)| *r).collect();
+            roles.extend([Role::Busy, Role::BarFill, Role::Black, Role::White]);
+            roles.extend(crate::bar::dock::tiles().map(Role::Tile));
+            roles.extend([crate::notify::style::TINT_ADA, crate::notify::style::TINT_RAY].map(Role::AccentTint));
+            for role in roles {
+                assert_eq!(p.get(role).a, 1.0, "{role:?}");
+                assert!(p.gradient(role).is_none(), "{role:?}");
+            }
+            assert_eq!(p.get(Role::Clear), Color::TRANSPARENT);
+            assert_eq!(p.get(Role::Fg), rgb(c.window_text));
+            assert_eq!(p.get(Role::Dim), rgb(c.window_text));
+            assert_eq!(p.get(Role::Surface), rgb(c.window));
+            assert_eq!(p.get(Role::BarFill), rgb(c.window));
+            assert_eq!(p.get(Role::AccentFill), rgb(c.highlight));
+            assert_eq!(p.get(Role::OnAccent), rgb(c.highlight_text));
+            assert_eq!(p.get(Role::Accent), rgb(c.hot_light));
+            assert_eq!(p.get(Role::Line), rgb(c.window_text));
+            let sel = p.get(Role::SurfaceSel);
+            assert_ne!(sel, p.get(Role::Surface));
+            let readable = kabuk_theme::contrast::contrast(rgba(p.get(Role::Fg)), rgba(sel));
+            assert!(readable >= kabuk_theme::contrast::MIN_TEXT, "{readable}");
+        }
     }
 }

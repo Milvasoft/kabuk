@@ -37,6 +37,7 @@ use kabuk_win::msgloop::{self, msg, Msg, PxRect, Window};
 use kabuk_win::process::ExitWatch;
 use kabuk_win::shell::{self, Monitor};
 use kabuk_win::stats::{Sample, Wants};
+use kabuk_win::system::ContrastColors;
 use kabuk_win::taskbar_guard::TaskbarGuard;
 use kabuk_win::tray::{TrayEvent, TrayHost};
 use kabuk_win::window::Hwnd;
@@ -373,6 +374,8 @@ struct Pending {
     /// that came while the start's COM calls let messages through was lost, and game mode
     /// never ended).
     full_screen: bool,
+    /// Windows' high contrast was turned on or off, or its colours changed (D97).
+    contrast: bool,
 }
 
 /// Whether `id` is one of the application messages Kabuk posts to its own control window
@@ -384,10 +387,18 @@ fn is_own_message(id: u32) -> bool {
 /// The first message id `RegisterWindowMessage` gives.
 const REGISTERED_FIRST: u32 = 0xC000;
 
+/// Whether `m` says Windows' high contrast or its colours changed: the setting turned on
+/// or off, or the system colours changed (another contrast theme).
+fn is_contrast_change(m: &Msg) -> bool {
+    (m.id == msg::SETTINGCHANGE && m.wparam == kabuk_win::system::HIGH_CONTRAST_CHANGED) || m.id == msg::SYSCOLORCHANGE
+}
+
 /// Notes `m` in `pending` when it is one of the notifications that must not be lost.
 fn note_pending(pending: &Cell<Pending>, m: &Msg, taskbar_created: u32) -> bool {
     let mut p = pending.get();
-    if m.id == msg::SETTINGCHANGE {
+    if is_contrast_change(m) {
+        p.contrast = true;
+    } else if m.id == msg::SETTINGCHANGE {
         let area = kabuk_win::system::setting_change_area(m.lparam);
         if area.as_deref() != Some(kabuk_win::system::IMMERSIVE_COLOR_SET) {
             return false;
@@ -843,6 +854,8 @@ struct Look {
     palette: Palette,
     /// The bar's sizes: the look's, with the thickness the user set (D29).
     size: BarSize,
+    /// Windows' high-contrast colours the palette took, while high contrast is on (D97).
+    contrast: Option<ContrastColors>,
 }
 
 fn mode_choice(m: config::Mode) -> ModeChoice {
@@ -867,7 +880,9 @@ fn bar_color(cfg: &Config) -> Option<[u8; 3]> {
     kabuk_core::config::parse_hex_color(&cfg.bar.color)
 }
 
-fn resolve_look(cfg: &Config, windows_light: bool, hour: u8) -> Look {
+/// The look `cfg` asks for in `windows_light` app mode at `hour`; while Windows' high
+/// contrast is on (`contrast`), its colours are the system's (D97).
+fn resolve_look(cfg: &Config, windows_light: bool, hour: u8, contrast: Option<ContrastColors>) -> Look {
     let mode = mode_now(mode_choice(cfg.appearance.mode), windows_light, hour);
     let accent = (cfg.appearance.accent != config::THEME_ACCENT).then_some(cfg.appearance.accent.as_str());
     let code = cfg.appearance.look.code();
@@ -898,7 +913,10 @@ fn resolve_look(cfg: &Config, windows_light: bool, hour: u8) -> Look {
     );
     // Etkinlik's bar stays black, so its text keeps the dark tokens in light mode.
     let fill = bar_color.map(|[r, g, b]| kabuk_theme::Color { r, g, b, a: 1.0 });
-    let palette = if style.bar_dark {
+    let palette = if let Some(c) = &contrast {
+        tracing::info!("high contrast: the system's colours");
+        theme::contrast_palette(c)
+    } else if style.bar_dark {
         theme::palette(&resolved(Mode::Dark).tokens, fill)
     } else {
         theme::palette(&r.tokens, fill)
@@ -909,6 +927,7 @@ fn resolve_look(cfg: &Config, windows_light: bool, hour: u8) -> Look {
         size: bar_size(&r.tokens, cfg.bar.height),
         tokens: r.tokens,
         palette,
+        contrast,
     }
 }
 
@@ -979,7 +998,12 @@ impl BarManager {
         kabuk_win::system::com_init();
         let gpu = timed("gpu", || Gpu::with(RASTER))?;
         let windows_light = windows_light(app_mode_file.as_deref());
-        let look = resolve_look(&config, windows_light, kabuk_win::system::local_time().hour);
+        let look = resolve_look(
+            &config,
+            windows_light,
+            kabuk_win::system::local_time().hour,
+            kabuk_win::system::high_contrast(),
+        );
         gpu.text.set_families(theme::families(&look.tokens));
         let i18n = kabuk_win::system::i18n(Some(&config));
         let shared = Rc::new_cyclic(|me| {
@@ -1334,10 +1358,16 @@ impl Shared {
 
     /// Re-resolves the look (mode, accent, text size) and redraws; rebuilds when the size changed.
     fn refresh_look(&mut self) {
-        let next = resolve_look(self.config(), self.windows_light, kabuk_win::system::local_time().hour);
+        let next = resolve_look(
+            self.config(),
+            self.windows_light,
+            kabuk_win::system::local_time().hour,
+            kabuk_win::system::high_contrast(),
+        );
         let resized = next.size != self.look.size;
         let mode_changed = next.mode != self.look.mode;
-        let repainted = next.style != self.look.style || next.tokens != self.look.tokens;
+        let repainted =
+            next.style != self.look.style || next.tokens != self.look.tokens || next.contrast != self.look.contrast;
         self.gpu.text.set_families(theme::families(&next.tokens));
         self.look = next;
         if let Some(link) = &self.wm {
@@ -2453,7 +2483,12 @@ impl Shared {
             || after.bar.autohide != before.bar.autohide
             || after.appearance.look != before.appearance.look;
         if layout_changed {
-            self.look = resolve_look(&after, self.windows_light, kabuk_win::system::local_time().hour);
+            self.look = resolve_look(
+                &after,
+                self.windows_light,
+                kabuk_win::system::local_time().hour,
+                kabuk_win::system::high_contrast(),
+            );
             self.gpu.text.set_families(theme::families(&self.look.tokens));
             self.rebuild();
         } else {
@@ -2621,7 +2656,7 @@ impl Shared {
             self.input_langs = None;
         }
         let shell = m.id == self.taskbar_created || m.id == msg::DISPLAYCHANGE || m.id == msg::DPICHANGED;
-        if m.id != msg::SETTINGCHANGE && !shell {
+        if m.id != msg::SETTINGCHANGE && m.id != msg::SYSCOLORCHANGE && !shell {
             return None;
         }
         if m.id == self.taskbar_created {
@@ -2678,6 +2713,14 @@ impl Shared {
         }
         if p.full_screen {
             self.step_aside_for_fullscreen();
+        }
+        if p.contrast {
+            // One change reaches every bar: the colours are read once and compared.
+            let now = kabuk_win::system::high_contrast();
+            if now != self.look.contrast {
+                tracing::info!(on = now.is_some(), "Windows' high contrast changed");
+                self.refresh_look();
+            }
         }
     }
 
@@ -4876,6 +4919,39 @@ mod tests {
         assert_eq!((set.distance, set.height, set.rail), (14.0, 48.0, 48.0));
     }
 
+    /// DECISIONS D97: while Windows' high contrast is on, the look keeps its shapes and
+    /// sizes but draws in the system's colours, a bar colour of the user's included; off,
+    /// the look's own come back.
+    #[test]
+    fn high_contrast_replaces_the_looks_colours_only() {
+        let mut cfg = Config::default();
+        cfg.bar.color = "#1e1433".into();
+        let c = ContrastColors {
+            window: [0, 0, 0],
+            window_text: [255, 255, 0],
+            highlight: [0, 255, 255],
+            highlight_text: [0, 0, 0],
+            gray_text: [0, 255, 0],
+            button_face: [0, 0, 0],
+            button_text: [255, 255, 0],
+            hot_light: [255, 128, 0],
+        };
+        let own = resolve_look(&cfg, false, 12, None);
+        let hc = resolve_look(&cfg, false, 12, Some(c));
+        assert_eq!(hc.contrast, Some(c));
+        assert_eq!((hc.style, hc.size, &hc.tokens), (own.style, own.size, &own.tokens));
+        let yellow = kabuk_theme::Color {
+            r: 255,
+            g: 255,
+            b: 0,
+            a: 1.0,
+        };
+        assert_eq!(hc.palette.get(kabuk_ui::node::Role::Fg), yellow);
+        assert_eq!(hc.palette.get(kabuk_ui::node::Role::BarFill), kabuk_theme::Color::BLACK);
+        assert_ne!(own.palette.get(kabuk_ui::node::Role::Fg), yellow);
+        assert_eq!(own.contrast, None);
+    }
+
     #[test]
     fn programs_are_asked_again_only_after_a_quiet_time() {
         let t0 = std::time::Instant::now();
@@ -4940,6 +5016,9 @@ mod tests {
             (msg::DISPLAYCHANGE, 0),
             (msg::DPICHANGED, 0),
             (MSG_APPBAR, appbar::notify::FULLSCREEN_APP),
+            // D97: high contrast turned on or off, or another contrast theme's colours.
+            (msg::SETTINGCHANGE, kabuk_win::system::HIGH_CONTRAST_CHANGED),
+            (msg::SYSCOLORCHANGE, 0),
         ] {
             assert!(note_pending(&p, &Msg { id, wparam, lparam: 0 }, TASKBAR_CREATED));
         }
@@ -4960,6 +5039,7 @@ mod tests {
                 shell: true,
                 taskbar_created: true,
                 full_screen: true,
+                contrast: true,
             }
         );
         assert_eq!(p.get(), Pending::default());
