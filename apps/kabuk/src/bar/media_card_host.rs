@@ -134,6 +134,29 @@ impl Shared {
             card,
             selected,
         });
+        self.tell_media_card();
+    }
+
+    /// Tells screen readers its buttons (D97).
+    fn tell_media_card(&self) {
+        let Some(c) = self.media_card.as_ref() else { return };
+        let name_of = |v: u32, _: &str| {
+            let key = match Button::from_value(v)? {
+                Button::Previous => "acc-media-previous",
+                Button::Toggle => "acc-media-toggle",
+                Button::Next => "acc-media-next",
+            };
+            Some(self.i18n.tr(key))
+        };
+        let name = self.i18n.tr("mod-media");
+        super::access_host::tell_panel(
+            &c.shown,
+            &name,
+            (&c.layout, c.scale),
+            media_card::HIT,
+            c.selected,
+            name_of,
+        );
     }
 
     /// The card for `card` laid out with button `selected` drawn selected.
@@ -196,6 +219,7 @@ impl Shared {
                         let _ = self.gpu.commit();
                         c.layout = layout;
                         c.selected = Some(v);
+                        self.tell_media_card();
                     }
                     Step::Activate(v) => self.media_card_click(v),
                     Step::Same | Step::Adjust(..) => {}

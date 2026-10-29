@@ -147,6 +147,7 @@ impl Shared {
                 Shown::enter(&self.gpu, surface, window, (TIP.entrance, scale), self.motion_level())
             }
         };
+        self.tell_tray_panel(&shown, (&layout, scale), selected);
         let _ = self.gpu.commit();
         if activate {
             shown.window().activate();
@@ -162,6 +163,21 @@ impl Shared {
             held_for,
             selected,
         });
+    }
+
+    /// Tells screen readers its icons, each by its program's tip (D97).
+    fn tell_tray_panel(&self, shown: &Shown, drawn: (&Layout, Scale), selected: Option<u32>) {
+        let hidden = self.hidden_tray();
+        let tip = |v: u32, _: &str| {
+            let (at, _) = *hidden.get(usize::try_from(v).ok()?)?;
+            let tip = self.tray.visible().nth(at)?.tip.clone();
+            Some(if tip.trim().is_empty() {
+                self.i18n.tr("mod-tray")
+            } else {
+                tip
+            })
+        };
+        super::access_host::tell_panel(shown, &self.i18n.tr("mod-tray"), drawn, tray_panel::HIT, selected, tip);
     }
 
     /// The panel of icons `images` laid out with icon `selected` drawn selected; `None`
@@ -186,6 +202,9 @@ impl Shared {
                 let Some(p) = self.tray_panel.as_mut() else { return };
                 p.shown.repaint(&self.gpu, &layout, &self.look.palette, p.scale);
                 let _ = self.gpu.commit();
+                let Some(p) = self.tray_panel.as_ref() else { return };
+                self.tell_tray_panel(&p.shown, (&layout, p.scale), Some(i));
+                let Some(p) = self.tray_panel.as_mut() else { return };
                 p.layout = layout;
                 p.selected = Some(i);
             }

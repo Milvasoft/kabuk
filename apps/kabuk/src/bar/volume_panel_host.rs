@@ -255,6 +255,39 @@ impl Shared {
             _sessions: sessions,
             selected,
         });
+        self.tell_volume_panel();
+    }
+
+    /// Tells screen readers its parts (D97): a right click's menu, or the level's panel,
+    /// whose levels are left out (a click in their middle would set them to half).
+    fn tell_volume_panel(&self) {
+        let Some(p) = self.volume_panel.as_ref() else { return };
+        let key = match p.menu {
+            Menu::Volume => "mod-vol",
+            Menu::Clock => "mod-clock",
+            Menu::Notifications => "mod-notif",
+            Menu::Stats => "mod-cpu",
+            Menu::Network => "mod-network",
+            Menu::Battery => "mod-battery",
+            Menu::Bar => "nav-bar",
+        };
+        let name = self.i18n.tr(key);
+        let drawn = (&p.layout, p.scale);
+        if !p.with_track {
+            super::access_host::tell_menu(&p.shown, &name, drawn, volume_panel::HIT, p.selected);
+            return;
+        }
+        let app = |v: u32| {
+            let row = p.mixer.get(usize::try_from(v.checked_sub(FIRST_APP_MUTE)?).ok()?)?;
+            Some(self.program_look(&row.exe, &row.session_name).0)
+        };
+        let name_of = |v: u32, words: &str| match v {
+            _ if is_level(v) => None,
+            MUTE => Some(self.i18n.tr("mod-vol")),
+            _ if v >= FIRST_APP_MUTE => app(v),
+            _ => Some(words.to_string()),
+        };
+        super::access_host::tell_panel(&p.shown, &name, drawn, volume_panel::HIT, p.selected, name_of);
     }
 
     /// Draws the panel again with the output's level now (it changed).
@@ -278,6 +311,7 @@ impl Shared {
         }
         p.layout = layout;
         let _ = self.gpu.commit();
+        self.tell_volume_panel();
     }
 
     /// An app's session changed (Core Audio told): the mixer shows the levels now, and

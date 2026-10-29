@@ -141,6 +141,22 @@ impl Shared {
             scale,
             selected: None,
         });
+        self.tell_privacy_panel();
+    }
+
+    /// Tells screen readers its programs and link by their words (D97).
+    fn tell_privacy_panel(&self) {
+        let Some(p) = self.privacy_panel.as_ref() else { return };
+        let name = self.i18n.tr("mod-privacy");
+        let drawn = (&p.layout, p.scale);
+        super::access_host::tell_panel(
+            &p.shown,
+            &name,
+            drawn,
+            privacy_panel::HIT,
+            p.selected,
+            crate::bar::access::words,
+        );
     }
 
     /// The panel laid out with part `selected` drawn selected.
@@ -187,6 +203,7 @@ impl Shared {
                         let _ = self.gpu.commit();
                         p.layout = layout;
                         p.selected = Some(v);
+                        self.tell_privacy_panel();
                     }
                     Step::Activate(v) => self.privacy_panel_click(v),
                     Step::Same | Step::Adjust(..) => {}

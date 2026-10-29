@@ -190,6 +190,7 @@ impl Shared {
                     p.layout = layout;
                     p.scale = scale;
                     p.quick = quick;
+                    self.tell_quick_panel();
                     return;
                 }
             }
@@ -247,6 +248,17 @@ impl Shared {
             setting,
             selected,
         });
+        self.tell_quick_panel();
+    }
+
+    /// Tells screen readers its switches and links by their words (D97); its levels are
+    /// left out (a click in their middle would set them to half).
+    fn tell_quick_panel(&self) {
+        let Some(p) = self.quick_panel.as_ref() else { return };
+        let name_of = |v: u32, words: &str| (v != VOLUME && p.quick.level_of(v).is_none()).then(|| words.to_string());
+        let name = self.i18n.tr("mod-quick-settings");
+        let drawn = (&p.layout, p.scale);
+        super::access_host::tell_panel(&p.shown, &name, drawn, quick_panel::HIT, p.selected, name_of);
     }
 
     /// The panel laid out for `quick`, with part `selected` drawn selected, and its place

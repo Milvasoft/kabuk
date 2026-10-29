@@ -103,6 +103,7 @@ impl Shared {
             }
         }
         let shown = Shown::enter(&self.gpu, surface, window, (TIP.entrance, scale), self.motion_level());
+        self.tell_power_menu(&shown, &layout, scale, None);
         let _ = self.gpu.commit();
         if activate {
             shown.window().activate();
@@ -123,6 +124,12 @@ impl Shared {
         let node = power_menu::view(&self.i18n, self.look.style.text_scale, &TIP, MARK_KEY);
         let node = popup_keys::marked(node, power_menu::HIT, selected, &TIP);
         kabuk_ui::node::layout(&node, Point::default(), &self.gpu.text)
+    }
+
+    /// Tells screen readers its entries (D97).
+    fn tell_power_menu(&self, shown: &Shown, layout: &Layout, scale: Scale, selected: Option<u32>) {
+        let name = self.i18n.tr("mod-power");
+        super::access_host::tell_menu(shown, &name, (layout, scale), power_menu::HIT, selected);
     }
 
     /// A click on entry `i` (or Enter on it, or its digit).
@@ -174,6 +181,9 @@ impl Shared {
                         let p = self.power_menu.as_mut()?;
                         p.shown.repaint(&self.gpu, &layout, &self.look.palette, p.scale);
                         let _ = self.gpu.commit();
+                        let p = self.power_menu.as_ref()?;
+                        self.tell_power_menu(&p.shown, &layout, p.scale, Some(i));
+                        let p = self.power_menu.as_mut()?;
                         p.layout = layout;
                         p.selected = Some(i);
                     }

@@ -191,6 +191,15 @@ impl Shared {
             languages,
             target,
         });
+        self.tell_keyboard_panel();
+    }
+
+    /// Tells screen readers its languages and link by their words (D97).
+    fn tell_keyboard_panel(&self) {
+        let Some(p) = self.keyboard_panel.as_ref() else { return };
+        let name = self.i18n.tr("mod-keyboard");
+        let drawn = (&p.layout, p.scale);
+        super::access_host::tell_menu(&p.shown, &name, drawn, keyboard_panel::HIT, p.selected);
     }
 
     /// The panel laid out with row `selected` drawn selected.
@@ -247,6 +256,7 @@ impl Shared {
                         let _ = self.gpu.commit();
                         p.layout = layout;
                         p.selected = Some(v);
+                        self.tell_keyboard_panel();
                     }
                     Step::Activate(v) => self.keyboard_panel_click(v),
                     Step::Same | Step::Adjust(..) => {}

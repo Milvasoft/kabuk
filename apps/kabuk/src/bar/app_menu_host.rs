@@ -206,6 +206,7 @@ impl Shared {
             }
         }
         let shown = Shown::enter(&self.gpu, surface, window, (TIP.entrance, scale), self.motion_level());
+        super::access_host::tell_menu(&shown, &subject.name, (&layout, scale), app_menu::HIT, None);
         let _ = self.gpu.commit();
         if activate {
             shown.window().activate();
@@ -424,6 +425,8 @@ impl Shared {
                         let p = self.app_menu.as_mut()?;
                         p.shown.repaint(&self.gpu, &layout, &self.look.palette, p.scale);
                         let _ = self.gpu.commit();
+                        let drawn = (&layout, p.scale);
+                        super::access_host::tell_menu(&p.shown, &p.subject.name, drawn, app_menu::HIT, Some(i));
                         p.layout = layout;
                         p.selected = Some(i);
                     }

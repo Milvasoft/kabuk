@@ -165,6 +165,7 @@ impl Shared {
                     p.layout = layout;
                     p.scale = scale;
                     p.panel = panel;
+                    self.tell_calendar_panel();
                     return;
                 }
             }
@@ -218,6 +219,22 @@ impl Shared {
             panel,
             selected,
         });
+        self.tell_calendar_panel();
+    }
+
+    /// Tells screen readers its parts by their words (D97).
+    fn tell_calendar_panel(&self) {
+        let Some(p) = self.calendar_panel.as_ref() else { return };
+        let name = self.i18n.tr("mod-calendar");
+        let drawn = (&p.layout, p.scale);
+        super::access_host::tell_panel(
+            &p.shown,
+            &name,
+            drawn,
+            calendar_panel::HIT,
+            p.selected,
+            crate::bar::access::words,
+        );
     }
 
     /// The panel laid out for `panel`, with part `selected` drawn selected, and its place

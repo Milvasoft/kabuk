@@ -129,6 +129,7 @@ impl Shared {
                     p.layout = layout;
                     p.scale = scale;
                     p.panel = panel;
+                    self.tell_network_panel();
                     return;
                 }
             }
@@ -188,6 +189,16 @@ impl Shared {
             joining_new,
             surrogate,
         });
+        self.tell_network_panel();
+    }
+
+    /// Tells screen readers its switch, networks and links by their words (D97); the key
+    /// field is left out (it is typed into, not clicked).
+    fn tell_network_panel(&self) {
+        let Some(p) = self.network_panel.as_ref() else { return };
+        let name_of = |v: u32, words: &str| (v != network_panel::KEY_FIELD).then(|| words.to_string());
+        let name = self.i18n.tr("mod-network");
+        super::access_host::tell_panel(&p.shown, &name, (&p.layout, p.scale), network_panel::HIT, None, name_of);
     }
 
     /// The panel laid out for `panel` and its place under the indicator on bar `bar`.
