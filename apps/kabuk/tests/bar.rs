@@ -3922,6 +3922,44 @@ fn a_display_change_under_a_full_screen_game_waits_for_it() {
     assert!(wait_until(SETTLE, || restored(&before)).is_some());
 }
 
+/// M19's perf run: the idle shell was over its 40 MB. The app grid's screen taking (a GPU
+/// device), made ahead a while after the start and let go a minute later, left about
+/// 10 MB with the GPU's driver for good. It is made when the grid opens; the first pages'
+/// icons still come ahead.
+#[test]
+fn the_app_grid_takes_the_screen_only_when_it_opens() {
+    use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_APP_GRID};
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    sandbox.wait_started();
+    assert!(
+        wait_until(SETTLE + SETTLE, || sandbox.log_lines("app grid pictures arrived") > 0).is_some(),
+        "no icons ahead"
+    );
+    assert_eq!(sandbox.log_lines("app grid screen taking made"), 0);
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
+    kabuk_win::msgloop::post_message(
+        control,
+        kabuk_win::msgloop::Msg {
+            id: MSG_TEST_APP_GRID,
+            wparam: 1,
+            lparam: 0,
+        },
+    )
+    .unwrap();
+    assert!(wait_until(SETTLE, || sandbox.log_lines("app grid shown") == 1).is_some());
+    assert_eq!(sandbox.log_lines("app grid screen taking made"), 1);
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}
+
 /// DECISIONS D87, found by the user: a game still stuttered now and then for about a
 /// second. A moment of another window in front of it (a launcher, a notice) ended game
 /// mode and began it again, and Kabuk brought everything back and took it away under the
