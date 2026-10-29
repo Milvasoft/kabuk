@@ -81,10 +81,12 @@ pub fn files() -> Vec<(Rect, Option<String>)> {
         .collect()
 }
 
-/// What Windows shows now, Kabuk's pictures included. COM must be initialised.
+/// What Windows shows now, Kabuk's pictures included, its monitors in the order of their
+/// ids (Windows' own order changes, e.g. while the screens sleep, and a backup compared
+/// with the wallpaper now differed only in it). COM must be initialised.
 pub fn current() -> Option<WallpaperBackup> {
     let dw = wallpapers()?;
-    let monitors = monitor_ids(&dw)
+    let mut monitors: Vec<(String, Option<String>)> = monitor_ids(&dw)
         .into_iter()
         .map(|(id, _)| {
             // SAFETY: COM call on a live object; the string is freed after copying.
@@ -98,6 +100,7 @@ pub fn current() -> Option<WallpaperBackup> {
             (id, path.filter(|p| !p.is_empty()))
         })
         .collect();
+    monitors.sort_by(|a, b| a.0.cmp(&b.0));
     // SAFETY: COM calls on a live object.
     let (position, color) = unsafe {
         (
@@ -171,6 +174,22 @@ mod tests {
         let b = backup().expect("IDesktopWallpaper answers");
         assert_eq!(b.monitors.len(), crate::shell::monitors().len());
         assert!(b.monitors.iter().all(|(id, _)| !id.is_empty()));
+    }
+
+    /// Found by a test: Windows listed the monitors in another order after the screens
+    /// slept, so the wallpaper given back did not equal its backup.
+    #[test]
+    fn the_monitors_come_in_the_order_of_their_ids() {
+        crate::system::com_init_mta();
+        let ids: Vec<String> = current()
+            .expect("IDesktopWallpaper answers")
+            .monitors
+            .into_iter()
+            .map(|m| m.0)
+            .collect();
+        let mut sorted = ids.clone();
+        sorted.sort();
+        assert_eq!(ids, sorted);
     }
 
     /// The app grid finds each monitor's picture by its rectangle, as the shell gives it.
