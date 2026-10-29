@@ -433,6 +433,7 @@ impl Shared {
             height: shape.height,
             columns: shape.columns,
             bottom_up: shape.bottom_up,
+            gathering: l.gathering,
         };
         let node = view::view(&l.model, frame, &self.gpu.text);
         let layout = kabuk_ui::node::layout(&node, Point::default(), &self.gpu.text);

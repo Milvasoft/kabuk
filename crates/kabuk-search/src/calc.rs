@@ -1,9 +1,13 @@
-//! The launcher's calculator (SPEC §2.5): `+ - * / ^`, parentheses and unary minus;
-//! a decimal separator may be `,` (Turkish) or `.`. Only text with a digit and an
-//! operator counts as a calculation, so "12" or "kabuk" never shows a result.
+//! The launcher's calculator (SPEC §2.5): `+ - * / ^`, parentheses and unary minus, a
+//! percent (`15%` is 0.15), square roots (`sqrt(2)`, `√2`) and hexadecimal numbers
+//! (`0xff`; PLAN M19 U20); a decimal separator may be `,` (Turkish) or `.`. Only text
+//! with a digit and an operator (or a hexadecimal number) counts as a calculation, so
+//! "12" or "kabuk" never shows a result.
 
 /// Results are rounded to this many decimal places (as the design page does).
 pub const DECIMALS: i32 = 6;
+/// What a percent divides by.
+const PERCENT: f64 = 100.0;
 
 struct Parser<'a> {
     chars: std::iter::Peekable<std::str::Chars<'a>>,
@@ -65,11 +69,17 @@ impl Parser<'_> {
 
     /// Right-associative: `2^3^2` is 2^9.
     fn power(&mut self) -> Option<f64> {
-        let base = self.atom()?;
+        let base = self.percent()?;
         if self.eat('^') {
             return Some(base.powf(self.unary()?));
         }
         Some(base)
+    }
+
+    /// A value with a percent sign after it is that many hundredths.
+    fn percent(&mut self) -> Option<f64> {
+        let v = self.atom()?;
+        Some(if self.eat('%') { v / PERCENT } else { v })
     }
 
     fn atom(&mut self) -> Option<f64> {
@@ -77,7 +87,40 @@ impl Parser<'_> {
             let v = self.expr()?;
             return self.eat(')').then_some(v);
         }
+        if self.eat('√') {
+            return Some(self.power()?.sqrt());
+        }
+        if self.peek() == Some('s') {
+            for c in "sqrt".chars() {
+                if !self.eat(c) {
+                    return None;
+                }
+            }
+            return Some(self.atom()?.sqrt());
+        }
+        if self.peek() == Some('0') {
+            self.chars.next();
+            if self.chars.peek().is_some_and(|c| *c == 'x' || *c == 'X') {
+                self.chars.next();
+                return self.hex();
+            }
+            return self.decimal(String::from("0"));
+        }
+        self.decimal(String::new())
+    }
+
+    /// The hexadecimal digits after `0x`.
+    fn hex(&mut self) -> Option<f64> {
         let mut text = String::new();
+        while let Some(c) = self.chars.peek().copied().filter(char::is_ascii_hexdigit) {
+            text.push(c);
+            self.chars.next();
+        }
+        u64::from_str_radix(&text, 16).ok().map(|v| v as f64)
+    }
+
+    /// A decimal number, `text` its digits read so far.
+    fn decimal(&mut self, mut text: String) -> Option<f64> {
         let mut separator = false;
         while let Some(c) = self.chars.peek().copied() {
             if c.is_ascii_digit() {
@@ -101,8 +144,13 @@ impl Parser<'_> {
 pub fn evaluate(query: &str) -> Option<f64> {
     let q = query.trim();
     let has_digit = q.chars().any(|c| c.is_ascii_digit());
-    // A leading minus alone ("-5") is a number, not a calculation.
-    let has_operator = q.chars().skip(1).any(|c| "+-*/^×÷".contains(c)) || q.starts_with(['+', '*', '/', '^']);
+    // A leading minus alone ("-5") is a number, not a calculation; a percent, a root or a
+    // hexadecimal number is one by itself ("15%", "sqrt(2)", "0xff").
+    let lower = q.to_ascii_lowercase();
+    let has_operator = q.chars().skip(1).any(|c| "+-*/^×÷%".contains(c))
+        || q.starts_with(['+', '*', '/', '^', '√'])
+        || lower.contains("sqrt")
+        || lower.contains("0x");
     if !has_digit || !has_operator {
         return None;
     }
@@ -171,5 +219,21 @@ mod tests {
         assert_eq!(format(10.8, '.'), "10.8");
         assert_eq!(format(96.0, ','), "96");
         assert_eq!(format(-0.0, ','), "0");
+    }
+
+    /// PLAN M19 U20: percent, square root and hexadecimal.
+    #[test]
+    fn percent_roots_and_hexadecimal() {
+        assert_eq!(evaluate("15%"), Some(0.15));
+        assert_eq!(evaluate("200*15%"), Some(30.0));
+        assert_eq!(evaluate("sqrt(16)"), Some(4.0));
+        assert_eq!(evaluate("√9+1"), Some(4.0));
+        assert_eq!(evaluate("sqrt 2.25"), Some(1.5));
+        assert_eq!(evaluate("0xff"), Some(255.0));
+        assert_eq!(evaluate("0x10+1"), Some(17.0));
+        assert_eq!(evaluate("0,5*4"), Some(2.0));
+        assert_eq!(evaluate("sqr(4)"), None);
+        assert_eq!(evaluate("0x"), None);
+        assert_eq!(evaluate("sqrt(-1)"), None);
     }
 }

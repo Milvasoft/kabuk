@@ -25,6 +25,15 @@ fn main() {
             println!("{}", text::i18n_for(None).tr("cli-usage"));
             exit::OK
         }
+        Ok(KabukCommand::Version) => {
+            kabuk_win::system::attach_parent_console();
+            let i18n = text::i18n_for(None);
+            println!(
+                "{}",
+                i18n.tr_args("cli-version", &[("value", env!("CARGO_PKG_VERSION").into())])
+            );
+            exit::OK
+        }
         Ok(KabukCommand::Install(s)) => install_cmd::install(&s),
         Ok(KabukCommand::Uninstall(s)) => install_cmd::uninstall(&s),
         Ok(KabukCommand::Startup(s)) => install_cmd::startup(&s),

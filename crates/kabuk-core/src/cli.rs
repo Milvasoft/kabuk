@@ -92,6 +92,8 @@ pub enum KabukCommand {
     Startup(Setup),
     /// `--help`: print the usage.
     Help,
+    /// `--version`: print the version (PLAN M19 U20).
+    Version,
     /// `kabuk msg <command…>`: send a command to the running shell (ARCHITECTURE §12).
     Msg {
         common: Common,
@@ -230,6 +232,7 @@ pub fn parse_kabuk(args: impl IntoIterator<Item = OsString>) -> Result<KabukComm
         match flag.as_str() {
             "--restore" => restore = true,
             "--help" | "-h" | "/?" => return Ok(KabukCommand::Help),
+            "--version" | "-V" => return Ok(KabukCommand::Version),
             "--install" | "--uninstall" => {
                 if let Some(m) = setup_mode.replace(flag.clone()) {
                     if m != flag {
@@ -637,6 +640,9 @@ mod tests {
         assert_eq!(setup(&["--install"]), Ok(KabukCommand::Install(Setup::default())));
         for help in ["--help", "-h", "/?"] {
             assert_eq!(setup(&["--no-wm", help]), Ok(KabukCommand::Help));
+        }
+        for version in ["--version", "-V"] {
+            assert_eq!(setup(&[version]), Ok(KabukCommand::Version));
         }
         assert_eq!(
             setup(&["--install", "--startup", "on", "--quiet", "--state-dir", r"D:\s"]),

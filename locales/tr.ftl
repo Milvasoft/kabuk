@@ -9,6 +9,7 @@ cli-usage =
       kabuk --install         Kabuk'u senin için kurar (yönetici izni gerekmez)
       kabuk --uninstall       Her şeyi geri alır ve Kabuk'u kaldırır; ayarların kalır
       kabuk --startup on|off  Kabuk oturum açınca başlasın ya da başlamasın
+      kabuk --version         Bu Kabuk'un sürümünü yazar
       kabuk msg <komut>       Çalışan Kabuk'a komut gönderir:
                                 workspace <1-9|next|prev>, move-to <1-9>,
                                 focus <left|down|up|right>, move <left|down|up|right>,
@@ -20,6 +21,7 @@ cli-usage =
     Seçenekler:
       --state-dir <klasör>    Durum dosyası ve log klasörü
       --config <dosya>        Yapılandırma dosyası
+cli-version = Kabuk { $value }
 cli-error-unknown = Bilinmeyen argüman: { $arg }
 cli-error-missing-value = { $flag } bir değer bekliyor.
 cli-error-bad-value = { $flag } için geçersiz değer: { $value }
@@ -604,3 +606,6 @@ notify-elevated-s = Kabuk onun pencerelerini taşıyamaz, bu yüzden yüzerler. 
 
 # Bar modülünün ipucu (PLAN M19 U15).
 tip-workspace = Çalışma alanı { $value }
+
+# Başlatıcı, girdileri toplanırken (PLAN M19 U20).
+l-searching = Aranıyor…

@@ -9,6 +9,7 @@ cli-usage =
       kabuk --install         Installs Kabuk for you (no administrator rights needed)
       kabuk --uninstall       Undoes everything and removes Kabuk; your settings stay
       kabuk --startup on|off  Starts Kabuk when you sign in, or not
+      kabuk --version         Prints which Kabuk this is
       kabuk msg <command>     Sends a command to the running Kabuk:
                                 workspace <1-9|next|prev>, move-to <1-9>,
                                 focus <left|down|up|right>, move <left|down|up|right>,
@@ -20,6 +21,7 @@ cli-usage =
     Options:
       --state-dir <folder>    Folder for the state file and logs
       --config <file>         Configuration file
+cli-version = Kabuk { $value }
 cli-error-unknown = Unknown argument: { $arg }
 cli-error-missing-value = { $flag } needs a value.
 cli-error-bad-value = Invalid value for { $flag }: { $value }
@@ -605,3 +607,6 @@ notify-elevated-s = Kabuk cannot move its windows, so they float. Start Kabuk as
 
 # A bar module's tooltip (PLAN M19 U15).
 tip-workspace = Workspace { $value }
+
+# The launcher while its entries are still gathered (PLAN M19 U20).
+l-searching = Searching…

@@ -119,6 +119,7 @@ fn main() {
         height: None,
         columns: if look == Look::Cizgi && horizontal { 2 } else { 1 },
         bottom_up,
+        gathering: false,
     };
     let node = view(&model, frame, &gpu.text);
     let l = kabuk_ui::node::layout(&node, Point::default(), &gpu.text);

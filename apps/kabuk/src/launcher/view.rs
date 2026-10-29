@@ -28,6 +28,9 @@ pub struct Frame<'a> {
     pub columns: u8,
     /// Konsol at the bottom edge: the input at the bottom, results growing upwards.
     pub bottom_up: bool,
+    /// The entries are still being gathered: an empty list says it is searching, not that
+    /// nothing was found (PLAN M19 U20).
+    pub gathering: bool,
 }
 
 struct Ctx<'a> {
@@ -223,8 +226,9 @@ fn list(cx: &Ctx, model: &Model, width: f32) -> Node {
     let inner = width - s.list_pad.horizontal();
     let rows = model.rows();
     let mut node = if rows.is_empty() {
+        let words = if cx.f.gathering { "l-searching" } else { "l-empty" };
         cx.text(
-            vec![span(cx.f.i18n.tr("l-empty"), Role::Dim, 400)],
+            vec![span(cx.f.i18n.tr(words), Role::Dim, 400)],
             FontRole::Ui,
             s.title_size,
             Some(inner - 2.0 * s.empty_pad),
@@ -527,6 +531,7 @@ mod tests {
             height: None,
             columns: 1,
             bottom_up: false,
+            gathering: false,
         }
     }
 
@@ -685,5 +690,34 @@ mod tests {
             let want = row.x + style.row_pad.left + border + marker + style.icon_column + style.row_gap;
             assert!((title.x - want).abs() < 0.01, "{look:?}: {} vs {want}", title.x);
         }
+    }
+
+    /// PLAN M19 U20: while the entries are gathered (the first opening takes a moment) an
+    /// empty list says it is searching, not that nothing was found.
+    #[test]
+    fn an_empty_list_while_gathering_says_it_is_searching() {
+        let tr = I18n::new(Lang::Tr);
+        let style = LauncherStyle::of(Look::Ada);
+        let model = Model::new(
+            Vec::new(),
+            Options {
+                casing: Casing::Turkish,
+                decimal: ',',
+                calculator: true,
+                bottom_up: false,
+            },
+        );
+        let words = |gathering| {
+            texts(&view(
+                &model,
+                Frame {
+                    gathering,
+                    ..frame(&style, &tr)
+                },
+                &Fake,
+            ))
+        };
+        assert!(words(true).contains(&tr.tr("l-searching")));
+        assert!(words(false).contains(&tr.tr("l-empty")));
     }
 }
