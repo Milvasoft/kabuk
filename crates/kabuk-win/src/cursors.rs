@@ -3,7 +3,7 @@
 //! with `SPI_SETCURSORS` (the way the Mouse settings do it).
 
 use windows::Win32::UI::WindowsAndMessaging::{
-    SystemParametersInfoW, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE, SPI_SETCURSORS, SYSTEM_PARAMETERS_INFO_ACTION,
+    SystemParametersInfoW, SPIF_UPDATEINIFILE, SPI_SETCURSORS, SYSTEM_PARAMETERS_INFO_ACTION,
     SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
 };
 
@@ -49,11 +49,7 @@ pub fn base_size_in_use() -> Option<u32> {
 
 /// Windows loads cursors at `size` from now on (`keep`: also written to the profile).
 fn set_base_size_now(size: u32, keep: bool) -> std::io::Result<()> {
-    let flags = if keep {
-        SPIF_UPDATEINIFILE.0 | SPIF_SENDCHANGE.0
-    } else {
-        SPIF_SENDCHANGE.0
-    };
+    let flags = if keep { SPIF_UPDATEINIFILE.0 } else { 0 };
     // SAFETY: the set call takes the size itself in the pointer argument.
     unsafe {
         SystemParametersInfoW(
@@ -63,7 +59,9 @@ fn set_base_size_now(size: u32, keep: bool) -> std::io::Result<()> {
             SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(flags),
         )
     }
-    .map_err(io_error)
+    .map_err(io_error)?;
+    crate::system::announce_setting(SPI_SETCURSORBASESIZE);
+    Ok(())
 }
 
 /// The cursor values as they are now: `names` (and the scheme's name, as `""`) with their
@@ -78,14 +76,18 @@ pub fn current(names: &[&str]) -> (Vec<(String, Option<String>)>, Option<u32>) {
 
 /// Windows re-reads the key and every program gets the new cursors.
 fn reload() -> std::io::Result<()> {
-    let flags = SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(SPIF_UPDATEINIFILE.0 | SPIF_SENDCHANGE.0);
+    let flags = SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(SPIF_UPDATEINIFILE.0);
     // SAFETY: SPI_SETCURSORS takes no parameter.
-    match unsafe { SystemParametersInfoW(SPI_SETCURSORS, 0, None, flags) } {
+    let r = match unsafe { SystemParametersInfoW(SPI_SETCURSORS, 0, None, flags) } {
         Ok(()) => Ok(()),
         // It can answer FALSE without an error once the cursors are reloaded.
         Err(e) if e.code().is_ok() => Ok(()),
         Err(e) => Err(io_error(e)),
+    };
+    if r.is_ok() {
+        crate::system::announce_setting(SPI_SETCURSORS.0);
     }
+    r
 }
 
 /// Uses `files` (cursor value name, file path) as the scheme `scheme` (a user scheme),

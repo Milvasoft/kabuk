@@ -7,7 +7,7 @@
 use std::path::Path;
 
 use windows::Win32::UI::WindowsAndMessaging::{
-    SystemParametersInfoW, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE, SPI_SETSCREENSAVEACTIVE, SPI_SETSCREENSAVETIMEOUT,
+    SystemParametersInfoW, SPIF_UPDATEINIFILE, SPI_SETSCREENSAVEACTIVE, SPI_SETSCREENSAVETIMEOUT,
     SYSTEM_PARAMETERS_INFO_ACTION, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
 };
 
@@ -31,13 +31,17 @@ pub fn current() -> (Vec<(String, Option<String>)>, Option<u32>) {
 }
 
 fn spi(action: SYSTEM_PARAMETERS_INFO_ACTION, value: u32) -> std::io::Result<()> {
-    let flags = SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(SPIF_UPDATEINIFILE.0 | SPIF_SENDCHANGE.0);
+    let flags = SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(SPIF_UPDATEINIFILE.0);
     // SAFETY: both actions take their value in `uiParam` and no buffer.
-    match unsafe { SystemParametersInfoW(action, value, None, flags) } {
+    let r = match unsafe { SystemParametersInfoW(action, value, None, flags) } {
         Ok(()) => Ok(()),
         Err(e) if e.code().is_ok() => Ok(()),
         Err(e) => Err(io_error(e)),
+    };
+    if r.is_ok() {
+        crate::system::announce_setting(action.0);
     }
+    r
 }
 
 /// The 8.3 form of `path` where the volume has one (Windows has been picky about spaces

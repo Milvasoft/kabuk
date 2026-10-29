@@ -115,6 +115,17 @@ pub fn broadcast_notify(message: u32) {
     let _ = unsafe { SendNotifyMessageW(HWND_BROADCAST, message, WPARAM(0), LPARAM(0)) };
 }
 
+/// Tells every top-level window that the setting `action` (an `SPI_SET…` value) changed,
+/// as `SPIF_SENDCHANGE` does, without waiting: `SPIF_SENDCHANGE` waits on each window in
+/// turn, seconds for one that does not answer (found by M19 P3: a hung Settings app held
+/// Kabuk's start for five seconds).
+pub fn announce_setting(action: u32) {
+    use windows::Win32::Foundation::{LPARAM, WPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{SendNotifyMessageW, HWND_BROADCAST, WM_SETTINGCHANGE};
+    // SAFETY: plain values; SendNotifyMessage returns at once for windows of other threads.
+    let _ = unsafe { SendNotifyMessageW(HWND_BROADCAST, WM_SETTINGCHANGE, WPARAM(action as usize), LPARAM(0)) };
+}
+
 /// `WM_SETTINGCHANGE` area sent when the light/dark app mode or accent changes.
 pub const IMMERSIVE_COLOR_SET: &str = "ImmersiveColorSet";
 
@@ -247,6 +258,31 @@ mod tests {
     //! Edge cases: the language tag looks like a BCP-47 tag; the process steps back for a
     //! game and comes back.
     use super::*;
+
+    /// M19 P3: a window that does not answer (here one whose thread sleeps) does not hold
+    /// up a setting's announcement.
+    #[test]
+    fn a_setting_is_announced_without_waiting_for_a_window_that_does_not_answer() {
+        use crate::msgloop::{PxRect, Window};
+        const ASLEEP: std::time::Duration = std::time::Duration::from_secs(3);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let sleeper = std::thread::spawn(move || {
+            let w = Window::shell_surface("Kabuk.Test.Asleep", "asleep", PxRect::default(), |_| None).unwrap();
+            tx.send(()).unwrap();
+            std::thread::sleep(ASLEEP);
+            drop(w);
+        });
+        rx.recv().unwrap();
+        let started = std::time::Instant::now();
+        // SPI_SETSCREENSAVETIMEOUT: an announcement only, nothing is changed.
+        announce_setting(0x000F);
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(500),
+            "waited {:?}",
+            started.elapsed()
+        );
+        sleeper.join().unwrap();
+    }
 
     /// D85: the process steps back for a game and comes back after.
     #[test]
