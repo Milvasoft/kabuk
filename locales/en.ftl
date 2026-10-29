@@ -121,8 +121,8 @@ app-tasks = Tasks
 grid-search = Search
 grid-empty = No app matches
 grid-done = Done
-lp-grid = All apps grid
-lp-grid-title = All apps (Launchpad)
+lp-grid = All apps
+lp-grid-title = All apps
 media-nothing = Nothing plays
 k-profile = Layout profile
 k-profile-open = Open the { $value } layout
@@ -384,7 +384,7 @@ keys-move = Move the window
 keys-workspace = Go to a workspace
 keys-move-to = Send the window to a workspace
 keys-emergency = Emergency exit (always works)
-set-key-app-grid = Every app on a grid
+set-key-app-grid = Show all apps
 set-bar-color = Bar colour
 set-bar-color-h = Fills the bar when its background is solid or blurred
 set-bar-color-own = The theme's own
@@ -523,7 +523,7 @@ store-listing-description =
 
     Your windows tile themselves side by side, or float where you put them, on nine workspaces that span all your monitors. Move, resize and switch them from the keyboard, or hold Alt and grab them anywhere. Minimised windows pour into their icon on the bar.
 
-    The bar shows your workspaces, your apps, the system tray, notifications, media, volume, network, battery, the clock and the computer's load, with panels of its own for Wi-Fi, quick settings, the calendar and your notifications. The launcher finds apps, open windows, files and bookmarks as you type, and counts too; the app grid lists everything you have installed.
+    The bar shows your workspaces, your apps, the system tray, notifications, media, volume, network, battery, the clock and the computer's load, with panels of its own for Wi-Fi, quick settings, the calendar and your notifications. The launcher finds apps, open windows, files and bookmarks as you type, and counts too; All apps lists everything you have installed.
 
     Each theme changes the bar, its panels and the wallpaper together, in dark or light. Animated wallpapers are drawn for OLED screens: true black, nothing bright that stays put. You can even describe a wallpaper and let an AI model of your choice draw it.
 
@@ -532,7 +532,7 @@ store-listing-description =
     Kabuk is free and open source (Apache 2.0). It collects nothing about you.
 store-listing-feature-1 = A bar on every monitor: workspaces, apps, tray, network, battery, notifications, calendar, media, quick settings
 store-listing-feature-2 = Windows that tile themselves, or float, on nine workspaces across your monitors
-store-listing-feature-3 = A launcher for apps, windows, files and bookmarks, and an app grid
+store-listing-feature-3 = A launcher for apps, windows, files and bookmarks, and All apps for everything installed
 store-listing-feature-4 = Ten themes, dark and light: bar, panels and wallpaper together
 store-listing-feature-5 = Animated wallpapers made for OLED screens
 store-listing-feature-6 = The genie: windows pour into their icon as they minimise

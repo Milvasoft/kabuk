@@ -115,13 +115,13 @@ app-pinned = Sabitlenmiş
 app-frequent = Sık kullanılanlar
 app-tasks = Görevler
 
-## Uygulama ızgarası (macOS'un Launchpad'i gibi sayfa sayfa her uygulama)
+## Tüm uygulamalar (macOS'un Launchpad'i gibi sayfa sayfa her uygulama)
 
 grid-search = Ara
 grid-empty = Eşleşen uygulama yok
 grid-done = Bitti
-lp-grid = Tüm uygulamalar ızgarası
-lp-grid-title = Tüm uygulamalar (Launchpad)
+lp-grid = Tüm uygulamalar
+lp-grid-title = Tüm uygulamalar
 media-nothing = Çalan bir şey yok
 k-profile = Düzen profili
 k-profile-open = { $value } düzenini aç
@@ -383,7 +383,7 @@ keys-move = Pencereyi taşı
 keys-workspace = Çalışma alanına geç
 keys-move-to = Pencereyi çalışma alanına gönder
 keys-emergency = Acil çıkış (her zaman çalışır)
-set-key-app-grid = Tüm uygulamalar ızgarası
+set-key-app-grid = Tüm uygulamaları göster
 set-bar-color = Bar rengi
 set-bar-color-h = Arka plan düz ya da bulanıkken barı boyar
 set-bar-color-own = Temanın kendi rengi
@@ -522,7 +522,7 @@ store-listing-description =
 
     Pencerelerin yan yana döşenir ya da bıraktığın yerde yüzer; tüm monitörlerine yayılan dokuz çalışma alanı vardır. Onları klavyeden taşı, boyutlandır ve değiştir ya da Alt'a basılı tutup herhangi bir yerinden tut. Küçültülen pencereler bardaki simgelerine akar.
 
-    Bar çalışma alanlarını, uygulamalarını, sistem tepsisini, bildirimleri, medyayı, sesi, ağı, pili, saati ve bilgisayarın yükünü gösterir; Wi-Fi, hızlı ayarlar, takvim ve bildirimler için kendi panelleri vardır. Başlatıcı yazdıkça uygulamaları, açık pencereleri, dosyaları ve yer imlerini bulur, hesap da yapar; uygulama ızgarası kurulu her şeyi listeler.
+    Bar çalışma alanlarını, uygulamalarını, sistem tepsisini, bildirimleri, medyayı, sesi, ağı, pili, saati ve bilgisayarın yükünü gösterir; Wi-Fi, hızlı ayarlar, takvim ve bildirimler için kendi panelleri vardır. Başlatıcı yazdıkça uygulamaları, açık pencereleri, dosyaları ve yer imlerini bulur, hesap da yapar; Tüm uygulamalar kurulu her şeyi listeler.
 
     Her tema barı, panellerini ve duvar kâğıdını birlikte değiştirir; koyu ya da açık. Hareketli duvar kâğıtları OLED ekranlar için çizilir: gerçek siyah, yerinde duran parlak hiçbir şey yok. İstersen bir duvar kâğıdını anlat, seçtiğin bir yapay zekâ modeli çizsin.
 
@@ -531,7 +531,7 @@ store-listing-description =
     Kabuk ücretsiz ve açık kaynaktır (Apache 2.0). Senin hakkında hiçbir şey toplamaz.
 store-listing-feature-1 = Her monitörde bir bar: çalışma alanları, uygulamalar, tepsi, ağ, pil, bildirimler, takvim, medya, hızlı ayarlar
 store-listing-feature-2 = Monitörlerine yayılan dokuz çalışma alanında kendiliğinden döşenen ya da yüzen pencereler
-store-listing-feature-3 = Uygulamalar, pencereler, dosyalar ve yer imleri için bir başlatıcı ve uygulama ızgarası
+store-listing-feature-3 = Uygulamalar, pencereler, dosyalar ve yer imleri için bir başlatıcı ve kurulu her şey için Tüm uygulamalar
 store-listing-feature-4 = Koyu ve açık on tema: bar, paneller ve duvar kâğıdı birlikte
 store-listing-feature-5 = OLED ekranlar için yapılmış hareketli duvar kâğıtları
 store-listing-feature-6 = Cin efekti: pencereler küçülürken simgelerine akar

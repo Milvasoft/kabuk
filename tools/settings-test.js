@@ -409,7 +409,7 @@ async function main() {
   await fromRust({ op: "chord", chord: "Win+Q" });
   check(!/Win\+Q/.test(toml()), "a chord with no recorder waiting changes nothing");
   // DECISIONS D56: the app grid's shortcut is on the page, with its default, and records.
-  check((await page.locator(".set-main").innerText()).includes("Tüm uygulamalar ızgarası"), "app grid shortcut listed");
+  check((await page.locator(".set-main").innerText()).includes("Tüm uygulamaları göster"), "app grid shortcut listed");
   await page.click(`[data-chord="shortcuts.app_grid"][data-index="0"]`); await settled();
   await fromRust({ op: "chord", chord: "Win+Shift+G" });
   check(/app_grid = \["Win\+Shift\+G"\]/.test(toml()), "app grid shortcut recorded as Win+Shift+G");
