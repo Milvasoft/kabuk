@@ -4269,3 +4269,37 @@ fn a_right_click_on_an_empty_part_of_the_bar_opens_the_taskbar_menu() {
     assert_eq!(sandbox.restore().0, 0);
     assert!(wait_until(SETTLE, || restored(&before)).is_some());
 }
+
+/// PLAN M19 U1: a kabuk.toml with a mistake was only logged; the user saw the defaults
+/// and did not know why. Now a notice says so and where, at the start and on a change.
+#[test]
+fn a_mistake_in_the_settings_file_is_told() {
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n[bar]\nheight = 9999\n").unwrap();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let told = || sandbox.last_log_line(&["notice shown"]).unwrap_or_default();
+    assert!(
+        wait_until(STARTUP_TIMEOUT, || told().contains("kabuk.toml")).is_some(),
+        "no notice for the refused file: {}",
+        told()
+    );
+    assert!(told().contains("efault") || told().contains("arsayılan"), "{}", told());
+    // Fixed, then broken again while it runs: the last working settings stay.
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    std::thread::sleep(Duration::from_secs(1));
+    let shown = sandbox.log_lines("notice shown");
+    std::fs::write(sandbox.config_file(), "schema = 1\n[bar\n").unwrap();
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("notice shown") > shown).is_some(),
+        "no notice for the refused change"
+    );
+    assert!(
+        told().contains("ast working") || told().contains("Son çalışan"),
+        "{}",
+        told()
+    );
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}

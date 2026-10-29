@@ -37,6 +37,29 @@ impl Shared {
         }
     }
 
+    /// What `kabuk.toml`'s reading found, told to the user (PLAN M19 U1: it was only
+    /// logged): refused (`kept`: the last working settings stay, else the defaults), or
+    /// a key Kabuk does not know.
+    pub(super) fn config_read(
+        &mut self,
+        errors: &[kabuk_core::config::ConfigError],
+        warnings: &[kabuk_core::config::ConfigWarning],
+        kept: bool,
+    ) {
+        let line = |at: Option<kabuk_core::config::Location>| at.map_or(0, |l| u32::try_from(l.line).unwrap_or(0));
+        if let Some(first) = errors.first() {
+            self.notify(Notice::ConfigRejected {
+                kept,
+                line: line(first.location),
+            });
+        } else if let Some(w) = warnings
+            .iter()
+            .find(|w| w.kind == kabuk_core::config::WarningKind::UnknownKey)
+        {
+            self.notify(Notice::ConfigUnknown { line: line(w.location) });
+        }
+    }
+
     /// Game mode started or ended on some monitor (SPEC §2.4).
     pub(super) fn notices_game_mode(&mut self, on: bool) {
         let mute = self.config().game.silence_notifications;

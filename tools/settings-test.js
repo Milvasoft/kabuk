@@ -393,6 +393,8 @@ async function main() {
   // Ctrl+Alt is AltGr on a Turkish keyboard: refused, said so, the file unchanged.
   await press("Control+Alt+K");
   check(!/launcher =/.test(toml()) && (await page.locator("[role=alert]").count()) === 1, "Ctrl+Alt+K refused and said so");
+  // PLAN M19 U2: under its row, and why.
+  check((await page.locator("[data-refusal]").count()) === 1 && (await page.locator("[data-refusal]").innerText()).includes("AltGr"), "the refusal says why, under the shortcut");
   await press("Control+Shift+K");
   check(/launcher = \["Ctrl\+Shift\+K"\]/.test(toml()) && (await page.locator("[role=alert]").count()) === 0, "launcher shortcut recorded as Ctrl+Shift+K");
   // A Win chord never reaches the page: Rust takes it while the recorder waits and sends
@@ -499,6 +501,14 @@ async function main() {
   await go("lang");
   await page.click(`[data-set="language.language"][data-val='"en"']`); await settled();
   check((await page.locator(".set-nav").first().innerText()).includes("Appearance"), "English after switching");
+
+  // PLAN M19 U1: a mistake in kabuk.toml is shown, with where, and a way to the file.
+  const good = toml();
+  fs.writeFileSync(config, good + "\nbroken = [\n");
+  await page.reload(); await settled();
+  const banner = await page.locator(".set-main .note[role=alert]").first().innerText().catch(() => "");
+  check(banner.includes("kabuk.toml") && (await page.locator("[data-open-config]").count()) === 1, `the file's mistake is shown: ${banner}`);
+  fs.writeFileSync(config, good);
 
   check(errors.length === 0, `no script errors${errors.length ? ": " + errors.join(" | ") : ""}`);
   await browser.close();

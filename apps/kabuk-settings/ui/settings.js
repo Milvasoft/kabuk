@@ -56,7 +56,7 @@
   /* ---------- building blocks (the design page's helpers) ---------- */
   const head = (title, desc) => `<div><h3>${title}</h3><p>${desc}</p></div>`;
   const row = (label, hint, control, extra = "") => `<div class="set-row${extra}"><span><b>${label}</b><span class="h">${hint}</span></span>${control}</div>`;
-  const tgl = (path, label, hint) => row(label, hint + resetIfChanged(path), `<button class="tgl" type="button" role="switch" aria-checked="${!!get(path)}" aria-label="${escapeHtml(label)}" data-tgl="${path}"></button>`);
+  const tgl = (path, label, hint) => row(label, hint + resetIfChanged(path) + refusalFor(path),`<button class="tgl" type="button" role="switch" aria-checked="${!!get(path)}" aria-label="${escapeHtml(label)}" data-tgl="${path}"></button>`);
   const seg = (aria, buttons) => `<span class="seg" role="group" aria-label="${escapeHtml(aria)}">${buttons}</span>`;
   const choice = (path, now, options) => options.map(([v, n]) => {
     const on = now === v;
@@ -66,10 +66,17 @@
   const range = (id, path, [min, max, step = 1], value, label) => `<span class="rng"><input type="range" id="${id}" data-range="${path}" min="${min}" max="${max}" step="${step}" value="${value}" aria-label="${escapeHtml(label)}"><span class="v" data-v="${id}">${tv("setPx", value)}</span></span>`;
   const resetLink = (path) => ` · <button type="button" class="linkish" data-reset="${path}">${t("posReset")}</button>`;
   const resetIfChanged = (path) => (changed(path) ? resetLink(path) : "");
+  /* Why a change of `path` was refused, under its row (PLAN M19 U2: the page said only that
+     it was refused, at its top). Noted so the top says it when no row of the page has it. */
+  function refusalFor(path) {
+    if (!ui.refused || ui.refused.path !== path) return "";
+    ui.refusalShown = true;
+    return `<span class="h" role="alert" data-refusal style="display:block;color:var(--err-fg)">${escapeHtml(ui.refused.reason || t("setRefused"))}</span>`;
+  }
   // A row for setting `path`: its "Use default" sits at the end of its hint, as a switch's
   // does, never between the label and the control (found by the user).
   const rowFor = (path, label, hint, control) =>
-    row(label, hint + (changed(path) ? (hint ? resetLink(path) : resetLink(path).replace(" · ", "")) : ""), control);
+    row(label, hint + (changed(path) ? (hint ? resetLink(path) : resetLink(path).replace(" · ", "")) : "") + refusalFor(path), control);
 
   /* ---------- shortcuts ---------- */
   const MODS = [["ctrlKey", "Ctrl"], ["altKey", "Alt"], ["shiftKey", "Shift"], ["metaKey", "Win"]];
@@ -81,6 +88,8 @@
     return NAMED[e.code] || null;
   }
   const modsOf = (e) => MODS.filter(([k]) => e[k]).map(([, n]) => n);
+  /* Windows' own Win chords (as Kabuk writes them): one chosen loses its Windows meaning. */
+  const WINDOWS_CHORDS = ["Win+A", "Win+B", "Win+D", "Win+E", "Win+G", "Win+H", "Win+I", "Win+K", "Win+M", "Win+N", "Win+P", "Win+Q", "Win+R", "Win+S", "Win+T", "Win+U", "Win+V", "Win+W", "Win+X", "Win+Z", "Win+Tab", "Win+Space", "Win+Shift+S", "Win+Ctrl+D", "Win+Ctrl+Left", "Win+Ctrl+Right", "Win+Up", "Win+Down", "Win+Left", "Win+Right", "Win+Home", "Win+Enter"];
   const kbds = (chord) => chord.split("+").map((x) => `<kbd>${escapeHtml(x)}</kbd>`).join(" ");
   function chordEditor(path) {
     const value = get(path);
@@ -94,7 +103,11 @@
       if (list.length > 1) chips.push(`<button type="button" class="linkish" data-chord-drop="${path}">${t("setRemove")}</button>`);
     }
     if (changed(path)) chips.push(`<button type="button" class="linkish" data-reset="${path}">${t("posReset")}</button>`);
-    return `<span class="keys" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">${chips.join(" ")}</span>`;
+    // A chord Windows has too: it does Kabuk's action while Kabuk runs (SPEC §6; PLAN M19 U3).
+    // Only for a chord the user chose: Kabuk's own defaults are SPEC §6's choice.
+    const defaults = [].concat(at(S.defaults, path) ?? []);
+    const windows = list.filter((c) => WINDOWS_CHORDS.includes(c) && !defaults.includes(c)).map((c) => `<span class="h" style="display:block">${escapeHtml(tv("setKeyWindowsHint", c))}</span>`);
+    return `<span class="keys" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">${chips.join(" ")}${windows.join("")}${refusalFor(path)}</span>`;
   }
   function onKey(e) {
     const c = ui.capture;
@@ -626,13 +639,20 @@
     const app = document.getElementById("app");
     const scrolled = app.querySelector(".set-main")?.scrollTop || 0;
     const focused = document.activeElement?.id;
-    const refused = ui.refused ? `<div class="note" role="alert" style="color:var(--err-fg)">${t("setRefused")}</div>` : "";
+    ui.refusalShown = false;
+    const page = PAGES[ui.page]();
+    // Refused where no row of this page shows it: said at the top.
+    const refused = ui.refused && !ui.refusalShown
+      ? `<div class="note" role="alert" style="color:var(--err-fg)">${escapeHtml(ui.refused.reason || t("setRefused"))}</div>` : "";
+    // kabuk.toml has a mistake: what and where, and a way to it (PLAN M19 U1).
+    const problems = (S.problems || []).length
+      ? `<div class="note" role="alert" style="color:var(--err-fg)">${t("setProblems")}<ul>${S.problems.map((p) => `<li>${escapeHtml(p)}</li>`).join("")}</ul><button class="set-btn ghost" type="button" data-open-config>${t("setOpenConfig")}</button></div>` : "";
     app.innerHTML = `<div class="screen settings-screen" data-dir="${code()}" data-mode="${S.mode}">
       <div class="set-win">
         <nav class="set-side" aria-label="${t("setNav")}"><div class="set-brand"><img class="mark" src="mark-${S.mode === "light" ? "light" : "dark"}.svg" alt="">${t("setBrand")}</div>
           ${navItems.map(([k, ic]) => `<button class="set-nav${ui.page === k ? " on" : ""}" type="button" data-page="${k}" aria-current="${ui.page === k ? "page" : "false"}">${icon(ic)}${t("nav-" + k)}</button>`).join("")}
         </nav>
-        <div class="set-main">${refused}${PAGES[ui.page]()}</div>
+        <div class="set-main">${problems}${refused}${page}</div>
       </div></div>`;
     const screen = app.querySelector(".screen");
     for (const [k, v] of Object.entries(S.tokens)) {
@@ -709,6 +729,7 @@
     if (on("[data-update-check]")) { post({ op: "update-check" }); return; }
     if (on("[data-update-open]")) { if (ui.update && ui.update.page) post({ op: "update-open", page: ui.update.page }); return; }
     if (on("[data-touchpad-settings]")) { post({ op: "touchpad-settings" }); return; }
+    if (on("[data-open-config]")) { post({ op: "open-config" }); return; }
     if ((el = on("[data-folder-drop]"))) { set("launcher.indexed_folders", cfg().launcher.indexed_folders.filter((_, i) => i !== Number(el.dataset.folderDrop))); return; }
     if ((el = on("[data-dim]"))) {
       if (el.dataset.dim === "custom") { ui.dimCustom = true; render(); document.getElementById("dim-value")?.focus(); return; }
@@ -823,7 +844,7 @@
         render();
         break;
       case "refused":
-        ui.refused = m.path;
+        ui.refused = { path: m.path, reason: m.reason };
         if (String(m.path).startsWith("gen-") && ui.gen.phase === "running") ui.gen = { ...ui.gen, phase: "idle" };
         render();
         break;

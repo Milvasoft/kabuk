@@ -171,3 +171,201 @@ impl fmt::Display for ConfigWarning {
         }
     }
 }
+
+/// A shortcut path's words: `shortcuts.focus_left[0]` is the setting "Focus left".
+fn setting_name(path: &KeyPath, i18n: &kabuk_i18n::I18n) -> String {
+    let key = match path.0.as_slice() {
+        [Segment::Key(group), Segment::Key(name), ..] if group == "shortcuts" => {
+            format!("set-key-{}", name.replace('_', "-"))
+        }
+        _ => return path.to_string(),
+    };
+    let words = i18n.tr(&key);
+    if words == key {
+        path.to_string()
+    } else {
+        words
+    }
+}
+
+impl ShortcutError {
+    /// What is wrong with the chord, in the user's language.
+    pub fn describe(&self, i18n: &kabuk_i18n::I18n) -> String {
+        use kabuk_i18n::Arg;
+        let key = |k: &String| [("key", Arg::Str(k.clone()))];
+        match self {
+            ShortcutError::Empty | ShortcutError::EmptyPart => i18n.tr("cfg-key-empty"),
+            ShortcutError::UnknownKey(k) => i18n.tr_args("cfg-key-unknown", &key(k)),
+            ShortcutError::NotAModifier(k) => i18n.tr_args("cfg-key-not-modifier", &key(k)),
+            ShortcutError::DuplicateModifier(k) => i18n.tr_args("cfg-key-twice", &key(k)),
+            ShortcutError::ModifierAfterKey(k) => i18n.tr_args("cfg-key-order", &key(k)),
+            ShortcutError::MoreThanOneKey => i18n.tr("cfg-key-two-keys"),
+            ShortcutError::MissingKey => i18n.tr("cfg-key-no-key"),
+            ShortcutError::NeedsCommandModifier => i18n.tr("cfg-key-needs-modifier"),
+            ShortcutError::Reserved => i18n.tr("cfg-key-reserved"),
+            ShortcutError::AltGrConflict => i18n.tr("cfg-key-altgr"),
+        }
+    }
+}
+
+impl Problem {
+    /// What is wrong, in the user's language (PLAN M19 U1, U2: the notices and Settings
+    /// said only that something was refused).
+    pub fn describe(&self, i18n: &kabuk_i18n::I18n) -> String {
+        use kabuk_i18n::Arg;
+        let s = |v: &str| Arg::Str(v.to_string());
+        let n = |v: i64| Arg::Num(v as f64);
+        match self {
+            Problem::Syntax(d) => i18n.tr_args("cfg-syntax", &[("detail", s(d))]),
+            Problem::Invalid(d) => i18n.tr_args("cfg-invalid", &[("detail", s(d))]),
+            Problem::UnsupportedSchema { found, supported } => i18n.tr_args(
+                "cfg-schema",
+                &[("found", n(*found)), ("supported", n(i64::from(*supported)))],
+            ),
+            Problem::OutOfRange { min, max } => i18n.tr_args("cfg-range", &[("min", n(*min)), ("max", n(*max))]),
+            Problem::NotOneOf(v) => {
+                let list: Vec<String> = v.iter().map(i64::to_string).collect();
+                i18n.tr_args("cfg-one-of", &[("list", s(&list.join(", ")))])
+            }
+            Problem::InvalidColor(c) => i18n.tr_args("cfg-color", &[("value", s(c))]),
+            Problem::InvalidShortcut(e) => e.describe(i18n),
+            Problem::ShortcutConflict { other, chord } => i18n.tr_args(
+                "cfg-shortcut-taken",
+                &[("chord", s(chord)), ("other", s(&setting_name(other, i18n)))],
+            ),
+            Problem::InvalidRegex(d) => i18n.tr_args("cfg-regex", &[("detail", s(d))]),
+            Problem::InvalidUrl(u) => i18n.tr_args("cfg-url", &[("value", s(u))]),
+            Problem::RuleWithoutMatch => i18n.tr("cfg-rule-match"),
+            Problem::RuleWithoutAction => i18n.tr("cfg-rule-action"),
+            Problem::Missing => i18n.tr("cfg-missing"),
+            Problem::Empty => i18n.tr("cfg-empty"),
+            Problem::Duplicate => i18n.tr("cfg-duplicate"),
+        }
+    }
+}
+
+/// `what`, said to be on `line` of the file when it is known.
+fn at_line(location: Option<Location>, what: String, i18n: &kabuk_i18n::I18n) -> String {
+    match location {
+        Some(at) => i18n.tr_args(
+            "cfg-at-line",
+            &[
+                ("line", kabuk_i18n::Arg::Num(at.line as f64)),
+                ("what", kabuk_i18n::Arg::Str(what)),
+            ],
+        ),
+        None => what,
+    }
+}
+
+impl ConfigError {
+    /// What is wrong and where, in the user's language.
+    pub fn describe(&self, i18n: &kabuk_i18n::I18n) -> String {
+        at_line(self.location, self.problem.describe(i18n), i18n)
+    }
+}
+
+impl ConfigWarning {
+    /// What was ignored and where, in the user's language.
+    pub fn describe(&self, i18n: &kabuk_i18n::I18n) -> String {
+        let what = match self.kind {
+            WarningKind::UnknownKey => i18n.tr_args(
+                "cfg-unknown-key",
+                &[("key", kabuk_i18n::Arg::Str(self.path.to_string()))],
+            ),
+            WarningKind::MissingSchema => i18n.tr("cfg-no-schema"),
+        };
+        at_line(self.location, what, i18n)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Every problem and warning has words in both languages, with its values in them;
+    //! a shortcut taken is named by the setting that has it.
+    use super::*;
+    use kabuk_i18n::{I18n, Lang};
+
+    fn all() -> Vec<Problem> {
+        let mut v = vec![
+            Problem::Syntax("x".into()),
+            Problem::Invalid("x".into()),
+            Problem::UnsupportedSchema { found: 9, supported: 1 },
+            Problem::OutOfRange { min: 1, max: 9 },
+            Problem::NotOneOf(vec![1, 2]),
+            Problem::InvalidColor("#zz".into()),
+            Problem::ShortcutConflict {
+                other: KeyPath::of(&["shortcuts", "focus_left"]).index(0),
+                chord: "Win+H".into(),
+            },
+            Problem::InvalidRegex("x".into()),
+            Problem::InvalidUrl("ftp://x".into()),
+            Problem::RuleWithoutMatch,
+            Problem::RuleWithoutAction,
+            Problem::Missing,
+            Problem::Empty,
+            Problem::Duplicate,
+        ];
+        for e in [
+            ShortcutError::Empty,
+            ShortcutError::EmptyPart,
+            ShortcutError::UnknownKey("Q2".into()),
+            ShortcutError::NotAModifier("Q".into()),
+            ShortcutError::DuplicateModifier("Ctrl".into()),
+            ShortcutError::ModifierAfterKey("Ctrl".into()),
+            ShortcutError::MoreThanOneKey,
+            ShortcutError::MissingKey,
+            ShortcutError::NeedsCommandModifier,
+            ShortcutError::Reserved,
+            ShortcutError::AltGrConflict,
+        ] {
+            v.push(Problem::InvalidShortcut(e));
+        }
+        v
+    }
+
+    #[test]
+    fn every_problem_has_words_in_both_languages() {
+        for lang in [Lang::Tr, Lang::En] {
+            let i18n = I18n::new(lang);
+            for p in all() {
+                let words = p.describe(&i18n);
+                assert!(
+                    !words.is_empty() && !words.starts_with("cfg-"),
+                    "{p:?} {lang:?}: {words}"
+                );
+            }
+            let w = ConfigWarning {
+                path: KeyPath::of(&["bar", "colour"]),
+                location: Some(Location { line: 4, column: 1 }),
+                kind: WarningKind::UnknownKey,
+            };
+            let words = w.describe(&i18n);
+            assert!(words.contains("bar.colour") && words.contains('4'), "{words}");
+        }
+    }
+
+    #[test]
+    fn a_taken_shortcut_names_the_setting_that_has_it_and_the_line() {
+        let en = I18n::new(Lang::En);
+        let e = ConfigError {
+            path: None,
+            location: Some(Location { line: 12, column: 3 }),
+            problem: Problem::ShortcutConflict {
+                other: KeyPath::of(&["shortcuts", "focus_left"]).index(0),
+                chord: "Win+H".into(),
+            },
+        };
+        let words = e.describe(&en);
+        assert!(
+            words.contains("Focus left") && words.contains("Win+H") && words.contains("12"),
+            "{words}"
+        );
+        // A path that is no shortcut is named as it is written.
+        let other = Problem::ShortcutConflict {
+            other: KeyPath::of(&["bar", "x"]),
+            chord: "Win+H".into(),
+        };
+        assert!(other.describe(&en).contains("bar.x"));
+    }
+}

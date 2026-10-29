@@ -1939,6 +1939,12 @@ impl Shared {
         // The app menus' names and ids, read ahead (it takes a few hundred ms).
         timed("refresh_installed_apps", kabuk_win::shellitems::refresh_installed_apps);
         timed("create_app_grid", || self.create_app_grid());
+        // What the start read in kabuk.toml, said once the bars are there to say it.
+        match kabuk_core::config::load_file(&self.config_file) {
+            Ok(loaded) => self.config_read(&[], &loaded.warnings, false),
+            Err(kabuk_core::config::LoadError::Invalid(errors)) => self.config_read(&errors, &[], false),
+            Err(_) => {}
+        }
         self.render_all(false);
         tracing::info!(ms = started.elapsed().as_millis() as u64, "late start done");
     }
@@ -2265,16 +2271,18 @@ impl Shared {
         let before = self.config().clone();
         match self.config.reload(&text) {
             Reload::Applied { warnings } => {
-                for w in warnings {
+                for w in &warnings {
                     tracing::warn!("{w}");
                 }
                 tracing::info!("configuration reloaded");
+                self.config_read(&[], &warnings, true);
             }
             Reload::Rejected { errors } => {
-                for e in errors {
+                for e in &errors {
                     tracing::error!("{e}");
                 }
                 tracing::error!("configuration rejected; keeping the last valid one");
+                self.config_read(&errors, &[], true);
                 return;
             }
         }

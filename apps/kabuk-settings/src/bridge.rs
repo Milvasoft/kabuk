@@ -109,6 +109,16 @@ impl Bridge {
         config::parse(&self.read()).map(|l| l.config).unwrap_or_default()
     }
 
+    /// What is wrong with the file, in the user's language: empty while it reads (PLAN
+    /// M19 U1: with a mistake in it the page showed the defaults as the user's and
+    /// refused every change without a word).
+    fn problems(&self, i18n: &kabuk_i18n::I18n) -> Vec<String> {
+        match config::parse(&self.read()) {
+            Ok(_) => Vec::new(),
+            Err(errors) => errors.iter().map(|e| e.describe(i18n)).collect(),
+        }
+    }
+
     /// The configuration as it is now (the window's title is in its language).
     pub fn state_config(&self) -> Config {
         self.config()
@@ -131,6 +141,7 @@ impl Bridge {
             "preview-saver" => self.preview_saver(),
             "quit" => self.quit(),
             "update-check" => self.check_update(),
+            "open-config" => self.open_config(),
             "gallery-previews" => {
                 crate::gallery::send_previews(
                     &self.state_dir,
@@ -186,23 +197,36 @@ impl Bridge {
 
     fn set(&self, path: &str, value: &Value) -> Value {
         let source = self.read();
-        let written = config::edit::set(&source, path, value)
-            .map_err(|e| e.to_string())
-            .and_then(|text| {
-                kabuk_core::fsutil::write_atomic(&self.config_file, text.as_bytes()).map_err(|e| e.to_string())
-            });
-        match written {
-            Ok(()) => {
-                tracing::info!(path, value = %value, "setting saved");
-                let mut state = self.state();
-                state["saved"] = json!(path);
-                state
-            }
+        let refused = |why: String| {
+            tracing::warn!(path, value = %value, why, "setting refused");
+            json!({ "op": "refused", "path": path, "reason": why })
+        };
+        let text = match config::edit::set(&source, path, value) {
+            Ok(text) => text,
             Err(e) => {
-                tracing::warn!(path, value = %value, error = %e, "setting refused");
-                json!({ "op": "refused", "path": path })
+                let i18n = kabuk_win::system::i18n(Some(&self.config()));
+                return refused(refusal(&e, path, &i18n));
             }
+        };
+        if let Err(e) = kabuk_core::fsutil::write_atomic(&self.config_file, text.as_bytes()) {
+            tracing::error!(error = %e, "kabuk.toml not written");
+            let i18n = kabuk_win::system::i18n(Some(&self.config()));
+            return refused(i18n.tr("set-refused"));
         }
+        tracing::info!(path, value = %value, "setting saved");
+        let mut state = self.state();
+        state["saved"] = json!(path);
+        state
+    }
+
+    /// Opens `kabuk.toml` in the program Windows opens it with, or Notepad.
+    fn open_config(&self) -> Value {
+        let path = self.config_file.display().to_string();
+        let opened = kabuk_win::shellitems::open(&path)
+            .or_else(|_| kabuk_win::shellitems::open_with(NOTEPAD, &path))
+            .map_err(|e| tracing::error!(error = %e, "kabuk.toml not opened"))
+            .is_ok();
+        json!({ "op": "open-config", "opened": opened })
     }
 
     /// The look's settings into a theme file (DECISIONS D64), at `path` or where the user
@@ -389,6 +413,7 @@ impl Bridge {
             "gallery": crate::gallery::list(),
             "app_grid": { "hidden": grid.hidden, "ordered": !grid.order.is_empty() },
             "version": env!("CARGO_PKG_VERSION"),
+            "problems": self.problems(&i18n),
             // Installed from the Microsoft Store, which updates it (DECISIONS D84).
             "store": kabuk_win::package::is_packaged(),
             // Each language's own name, as the language choice shows them.
@@ -535,6 +560,26 @@ fn latest_release() -> Value {
 /// Opens a release page of Kabuk's repository in the browser; anything else is refused.
 /// Windows' touchpad settings, where its own three- and four-finger gestures are set.
 const TOUCHPAD_SETTINGS: &str = "ms-settings:devices-touchpad";
+/// What opens `kabuk.toml` when no program is set for `.toml` files.
+const NOTEPAD: &str = "notepad.exe";
+
+/// Why a change was refused, in the user's language (PLAN M19 U2): the mistakes about
+/// `path` first (a mistake elsewhere in the file refuses every change too).
+fn refusal(e: &config::edit::EditError, path: &str, i18n: &kabuk_i18n::I18n) -> String {
+    use config::edit::EditError;
+    match e {
+        EditError::Invalid(errors) => {
+            let about = |c: &&config::ConfigError| c.path.as_ref().is_some_and(|p| p.to_string().starts_with(path));
+            errors
+                .iter()
+                .find(about)
+                .or_else(|| errors.first())
+                .map_or_else(|| i18n.tr("set-refused"), |c| c.describe(i18n))
+        }
+        EditError::Syntax(d) => config::Problem::Syntax(d.clone()).describe(i18n),
+        EditError::BadPath(_) | EditError::BadValue(_) => i18n.tr("set-refused"),
+    }
+}
 
 fn open_release_page(page: &str) -> Option<Value> {
     if !page.starts_with(&format!("{}/releases/", kabuk_core::update::REPOSITORY)) {
@@ -704,6 +749,47 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&b.config_file).unwrap(), before);
         let ok = reply(&b, json!({"op": "set", "path": "oled.dim_after_secs", "value": 600}));
         assert_eq!(ok["config"]["oled"]["dim_after_secs"], 600);
+    }
+
+    /// PLAN M19 U2: a refused value says why, in the user's language; a shortcut that is
+    /// taken names what has it (U3).
+    #[test]
+    fn a_refused_value_says_why() {
+        let dir = tempfile::tempdir().unwrap();
+        let b = bridge(&dir, Some("schema = 1\n[language]\nlanguage = \"en\"\n"));
+        let r = reply(&b, json!({"op": "set", "path": "oled.dim_after_secs", "value": 3601}));
+        let why = r["reason"].as_str().unwrap_or_default();
+        assert!(why.contains("10") && why.contains("3600"), "{why}");
+        let taken = b.config().shortcuts.focus_left[0].clone();
+        let r = reply(
+            &b,
+            json!({"op": "set", "path": "shortcuts.launcher", "value": [taken.clone()]}),
+        );
+        let why = r["reason"].as_str().unwrap_or_default();
+        assert!(why.contains(&taken) && why.contains("Focus left"), "{why}");
+        let r = reply(
+            &b,
+            json!({"op": "set", "path": "shortcuts.launcher", "value": ["Win+L"]}),
+        );
+        assert!(
+            r["reason"].as_str().unwrap_or_default().contains("keeps this shortcut"),
+            "{r}"
+        );
+    }
+
+    /// PLAN M19 U1: with a mistake in the file the page is told what is wrong and where,
+    /// instead of showing the defaults as the user's.
+    #[test]
+    fn a_file_with_a_mistake_is_shown_as_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let b = bridge(&dir, Some("schema = 1\n[bar]\nheight = 9999\n"));
+        let s = reply(&b, json!({"op": "load"}));
+        let problems = s["problems"].as_array().cloned().unwrap_or_default();
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(problems[0].as_str().unwrap_or_default().contains('3'), "{problems:?}");
+        let fine_dir = tempfile::tempdir().unwrap();
+        let fine = bridge(&fine_dir, Some("schema = 1\n"));
+        assert_eq!(reply(&fine, json!({"op": "load"}))["problems"], json!([]));
     }
 
     #[test]

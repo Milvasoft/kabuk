@@ -23,6 +23,17 @@ pub enum Notice {
     GameOff {
         missed: u32,
     },
+    /// `kabuk.toml` was refused (PLAN M19 U1): at the start the defaults are used, on a
+    /// change the last working settings stay (`kept`); `line` is where the first mistake
+    /// is (0: not known).
+    ConfigRejected {
+        kept: bool,
+        line: u32,
+    },
+    /// `kabuk.toml` has a key Kabuk does not know, on `line` (0: not known); it is ignored.
+    ConfigUnknown {
+        line: u32,
+    },
 }
 
 impl Notice {
@@ -38,6 +49,8 @@ impl Notice {
             Notice::GameOn => ("t-game-on", Some("t-game-on-s")),
             Notice::GameOff { missed: 0 } => ("t-game-off", Some("t-game-off-s")),
             Notice::GameOff { .. } => ("t-game-off", None),
+            Notice::ConfigRejected { .. } => ("notify-config-rejected", None),
+            Notice::ConfigUnknown { .. } => ("notify-config-unknown", None),
         }
     }
 
@@ -47,6 +60,7 @@ impl Notice {
             Notice::FloatingLayout | Notice::TilingLayout | Notice::Floated | Notice::Tiled => "tile",
             Notice::GameOn | Notice::GameOff { .. } => "pad",
             Notice::Copied => "check",
+            Notice::ConfigRejected { .. } | Notice::ConfigUnknown { .. } => "app",
         }
     }
 
@@ -58,9 +72,33 @@ impl Notice {
             (Notice::GameOff { missed }, None) => {
                 i18n.tr_args("notify-missed", &[("value", kabuk_i18n::Arg::Num(f64::from(missed)))])
             }
+            (Notice::ConfigRejected { kept, line }, None) => {
+                let key = if kept {
+                    "notify-config-kept"
+                } else {
+                    "notify-config-defaults"
+                };
+                i18n.tr_args(key, &[("where", kabuk_i18n::Arg::Str(where_in_file(line, i18n)))])
+            }
+            (Notice::ConfigUnknown { line }, None) => i18n.tr_args(
+                "notify-config-unknown-s",
+                &[("where", kabuk_i18n::Arg::Str(where_in_file(line, i18n)))],
+            ),
             _ => String::new(),
         };
         (i18n.tr(title), sub)
+    }
+}
+
+/// "Line n." for a place in `kabuk.toml` (nothing when it is not known).
+fn where_in_file(line: u32, i18n: &kabuk_i18n::I18n) -> String {
+    if line == 0 {
+        String::new()
+    } else {
+        i18n.tr_args(
+            "notify-config-line",
+            &[("value", kabuk_i18n::Arg::Num(f64::from(line)))],
+        )
     }
 }
 
@@ -115,6 +153,9 @@ mod tests {
                 Notice::GameOn,
                 Notice::GameOff { missed: 0 },
                 Notice::GameOff { missed: 3 },
+                Notice::ConfigRejected { kept: false, line: 7 },
+                Notice::ConfigRejected { kept: true, line: 0 },
+                Notice::ConfigUnknown { line: 2 },
             ] {
                 let (title, _) = n.words(&i18n);
                 assert!(!title.is_empty() && !title.contains('-'), "{n:?} {lang:?}: {title}");
@@ -123,6 +164,11 @@ mod tests {
         let tr = I18n::new(Lang::Tr);
         assert!(Notice::GameOff { missed: 3 }.words(&tr).1.contains('3'));
         assert_eq!(Notice::Copied.words(&I18n::new(Lang::En)).0, "Copied to clipboard");
+        // PLAN M19 U1: a refused file says what is used now and where to look.
+        let (_, sub) = Notice::ConfigRejected { kept: false, line: 7 }.words(&tr);
+        assert!(sub.contains("Varsayılan") && sub.contains('7'), "{sub}");
+        let (_, sub) = Notice::ConfigRejected { kept: true, line: 0 }.words(&tr);
+        assert!(sub.contains("Son çalışan") && !sub.contains("Satır"), "{sub}");
     }
 
     #[test]
