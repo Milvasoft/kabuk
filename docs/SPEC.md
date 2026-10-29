@@ -61,6 +61,7 @@ Target platform: Windows 11 22H2 and later. Windows 10 22H2 is supported on a be
 - Background: solid (default, the desk colour over the bar's whole edge, as on the design's black desk), blur (the wallpaper blurred and tinted, as Windows' taskbar) or off (requested by the user on 2026-10-13; DECISIONS D28).
 - Height: the bar's thickness can be set (24-72 px; default the look's own; DECISIONS D29).
 - The bar's menus and panels take the keyboard (PLAN M19 U10): Up/Down select what can be clicked (from nothing, Down the first and Up the last), Home/End the ends, Tab/Shift+Tab round them, Enter or Space does what a click does, a digit 1-9 picks a menu's entry (power, app, keyboard language), Left/Right move a selected volume or brightness level a wheel notch's step (the tray's icons: Left/Right and Up/Down across their grid; the media card's buttons: Left/Right; the calendar keeps Left/Right for the month). The selection is drawn as the network panel's row (a tile keeps its colour and is ringed); Esc and a click outside still close them.
+- Screen readers (DECISIONS D97): Narrator and other UI Automation clients find each bar's modules, apps and tray icons (and Rıhtım's dock's apps) as buttons, the launcher's results as list items and the entries of the bar's menus (menu items) and panels (buttons), each named in the user's language (a module by its Settings name and its value, e.g. "Clock: 20:31 Mon 12 Oct", "Volume: 40%"; a workspace, an app or a tray icon by its own name), with its place on the screen; invoking one does what a click on it does. A menu's or the launcher's selection holds the keyboard and is announced as it moves. A level (volume, brightness) is not offered: invoked, it would be set to half. The app grid, the overview and the other surfaces may follow later. Nothing runs for it unless a screen reader asks.
 
 ### 2.2 Window manager
 
@@ -201,6 +202,7 @@ Default look: Rıhtım (`DECISIONS.md` D2).
 - The working reference for the algorithm is the `fitContrast`, `fillPair`, `adaptAccent` functions on the design page; the native version must produce exactly the same result (unit tests are written with expected values taken from the design page).
 - In every release all look × mode × accent combinations are measured automatically; if a theme fails the limit it is not loaded, the last valid theme stays and the user is notified.
 - Disabled elements and the idle-dimmed state are exempt from this rule.
+- While Windows' high contrast is on (Settings → Accessibility → Contrast themes; DECISIONS D97), the looks keep their shapes and sizes but draw in the contrast theme's system colours: text in its window text colour on its window colour, a fill and its text in its highlight pair, the accent in its link colour, lines in its text colour, disabled text in its grey text colour; a selected row is a quarter of the text colour over the window colour, so it shows while its text stays readable. A bar colour of the user's and gradients give way. Turning high contrast on or off, or picking another contrast theme, takes effect at once.
 
 ## 5. OLED rules
 
