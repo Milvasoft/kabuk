@@ -794,6 +794,59 @@ pub fn windows_of_class(class: &str) -> Vec<Hwnd> {
         .collect()
 }
 
+/// As [`windows_of_class`], found by Windows without Kabuk reading every window's class
+/// (the watchdog asks every few seconds), front first. Windows finds more than
+/// [`top_level_windows`] lists (found here: Explorer's `WorkerW`s `EnumWindows` leaves
+/// out), so this is for Kabuk's own classes, of which both find the same. A search cut
+/// short by a window going away meanwhile is made again by reading them all.
+pub fn find_windows_of_class(class: &str) -> Vec<Hwnd> {
+    children_of_class(None, class).unwrap_or_else(|_| windows_of_class(class))
+}
+
+/// What [`next_of_class`] found.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Next {
+    Found(HWND),
+    /// No more windows of the class.
+    End,
+    /// The window to go on from is gone: the search cannot go on.
+    Lost,
+}
+
+/// The next window of `class` among `parent`'s children (`None`: the top-level windows)
+/// behind `after` (`None`: from the front).
+fn next_of_class(parent: Option<HWND>, after: Option<HWND>, class: &HSTRING) -> Next {
+    use windows::Win32::Foundation::{SetLastError, WIN32_ERROR};
+    // SAFETY: plain call; FindWindowExW sets the error only when it fails, so a stale
+    // one must not be read as its.
+    unsafe { SetLastError(WIN32_ERROR(0)) };
+    // SAFETY: the class string outlives the call; `after` is a window found before.
+    match unsafe { FindWindowExW(parent, after, PCWSTR(class.as_ptr()), PCWSTR::null()) } {
+        Ok(h) if !h.is_invalid() => Next::Found(h),
+        Ok(_) => Next::End,
+        Err(e) if e.code().is_ok() => Next::End,
+        Err(_) => Next::Lost,
+    }
+}
+
+/// Every window of `class` among `parent`'s children, front first; `Err` with those
+/// found when the search was cut short ([`Next::Lost`]).
+fn children_of_class(parent: Option<HWND>, class: &str) -> Result<Vec<Hwnd>, Vec<Hwnd>> {
+    let class = HSTRING::from(class);
+    let mut out = Vec::new();
+    let mut after = None;
+    loop {
+        match next_of_class(parent, after, &class) {
+            Next::Found(h) => {
+                out.push(Hwnd::from_raw(h));
+                after = Some(h);
+            }
+            Next::End => return Ok(out),
+            Next::Lost => return Err(out),
+        }
+    }
+}
+
 /// A popup menu is on screen (any program's: a tray icon's menu, a window's menu; Windows
 /// draws them as top-level windows of the class `#32768`).
 pub fn popup_menu_open() -> bool {
@@ -853,27 +906,15 @@ fn front_candidates(skip_pid: u32) -> Vec<Hwnd> {
 
 /// Every message-only window of a class, of any process (a test picks its shell's by pid).
 pub fn message_windows_of_class(class: &str) -> Vec<Hwnd> {
-    let class = HSTRING::from(class);
-    let mut out = Vec::new();
-    let mut after: Option<HWND> = None;
-    loop {
-        // SAFETY: the class string outlives the call; `after` is a window found before.
-        let found = unsafe { FindWindowExW(Some(HWND_MESSAGE), after, PCWSTR(class.as_ptr()), PCWSTR::null()) };
-        match found.ok().filter(|h| !h.is_invalid()) {
-            Some(h) => {
-                out.push(Hwnd::from_raw(h));
-                after = Some(h);
-            }
-            None => return out,
-        }
-    }
+    children_of_class(Some(HWND_MESSAGE), class).unwrap_or_else(|found| found)
 }
 
 #[cfg(test)]
 mod tests {
     //! Edge cases: a bogus handle is reported as gone everywhere; enumeration sees at
     //! least the shell's windows; an unknown class matches nothing; message-only windows
-    //! are found by class.
+    //! are found by class; top-level windows are found by class, a search going on from a
+    //! window gone included.
     use super::*;
 
     #[test]
@@ -1030,6 +1071,41 @@ mod tests {
         assert!(all.iter().any(|w| w.exists()));
         assert!(windows_of_class("Kabuk.NoSuchClass.42").is_empty());
         assert_eq!(find_message_window("Kabuk.NoSuchClass.42", "x"), None);
+    }
+
+    /// M19: top-level windows of a class of Kabuk's are found by Windows, front first, as
+    /// reading every window's class finds them (Explorer's, and more of them); a search
+    /// going on from a window gone says so (and is made again by reading them all); an
+    /// unknown class has none.
+    #[test]
+    fn top_level_windows_are_found_by_class() {
+        let class = "Kabuk.Test.FindTopLevel";
+        let rect = crate::msgloop::PxRect {
+            x: -30_000,
+            y: -30_000,
+            w: 10,
+            h: 10,
+        };
+        let a = crate::msgloop::Window::shell_surface(class, "", rect, |_| None).unwrap();
+        let b = crate::msgloop::Window::shell_surface(class, "", rect, |_| None).unwrap();
+        let found = find_windows_of_class(class);
+        assert_eq!(found.len(), 2);
+        assert!(found.contains(&a.hwnd()) && found.contains(&b.hwnd()));
+        assert_eq!(found, windows_of_class(class), "front first");
+        for shell in SHELL_CLASSES {
+            let found = find_windows_of_class(shell);
+            let listed = windows_of_class(shell);
+            assert!(listed.iter().all(|w| found.contains(w)), "{shell}");
+        }
+        assert!(find_windows_of_class("Kabuk.NoSuchClass.42").is_empty());
+        assert_eq!(
+            next_of_class(None, None, &HSTRING::from("Kabuk.NoSuchClass.42")),
+            Next::End
+        );
+        let gone = a.hwnd().raw();
+        drop(a);
+        assert_eq!(next_of_class(None, Some(gone), &HSTRING::from(class)), Next::Lost);
+        assert_eq!(find_windows_of_class(class), vec![b.hwnd()]);
     }
 
     #[test]

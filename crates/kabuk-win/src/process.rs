@@ -155,9 +155,10 @@ impl Process {
     pub fn answers(&self, classes: &[&str], wait: Duration) -> kabuk_core::hang::Probe {
         use kabuk_core::hang::Probe;
         use windows::Win32::UI::WindowsAndMessaging::WM_NULL;
-        let asked: Vec<_> = crate::window::top_level_windows()
-            .into_iter()
-            .filter(|w| w.pid() == Some(self.pid) && classes.contains(&w.class_name().as_str()))
+        let asked: Vec<_> = classes
+            .iter()
+            .flat_map(|class| crate::window::find_windows_of_class(class))
+            .filter(|w| w.pid() == Some(self.pid))
             .collect();
         if asked.is_empty() {
             return Probe::NoWindows;
@@ -329,7 +330,8 @@ impl Waitable for Process {
 mod tests {
     //! Edge cases: a running child has no exit code, terminate sets the requested code,
     //! a process that exits by itself reports its code, a bogus pid fails to open, a
-    //! process Kabuk may not end can still be asked its file.
+    //! process Kabuk may not end can still be asked its file; only a process's own windows
+    //! of the classes asked are asked whether they answer.
     use super::*;
     use std::process::{Command, Stdio};
 
@@ -451,6 +453,31 @@ mod tests {
         let hz = cycles_per_second(Duration::from_millis(50));
         assert!(hz > 1e8 && hz < 1e11, "{hz}");
         assert!(me.cycles().unwrap() > c0);
+    }
+
+    /// D55, M19: a process's windows of the classes asked are found and answer; a class
+    /// with no window of the process gives none to ask, another process's included.
+    #[test]
+    fn a_process_answers_for_its_windows_of_the_classes_asked() {
+        use kabuk_core::hang::Probe;
+        const PROBED: &str = "Kabuk.Test.Probed";
+        const NONE: &str = "Kabuk.Test.NoSuchClass";
+        let rect = crate::msgloop::PxRect {
+            x: -30_000,
+            y: -30_000,
+            w: 10,
+            h: 10,
+        };
+        let _window = crate::msgloop::Window::shell_surface(PROBED, "", rect, |_| None).unwrap();
+        let wait = Duration::from_secs(1);
+        let me = Process::open(std::process::id()).unwrap();
+        assert_eq!(me.answers(&[PROBED, NONE], wait), Probe::Answered);
+        assert_eq!(me.answers(&[NONE], wait), Probe::NoWindows);
+        let mut child = sleeper();
+        let other = Process::open(child.id()).unwrap();
+        assert_eq!(other.answers(&[PROBED], wait), Probe::NoWindows, "not its window");
+        let _ = child.kill();
+        let _ = child.wait();
     }
 
     #[test]
