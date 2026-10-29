@@ -4474,3 +4474,51 @@ fn the_clock_has_a_tooltip_with_the_whole_date() {
     assert_eq!(sandbox.restore().0, 0);
     assert!(wait_until(SETTLE, || restored(&before)).is_some());
 }
+
+/// DECISIONS D97: Narrator saw nothing of the bar. A screen reader finds its modules as
+/// buttons named in the user's language, where they are drawn, and invoking the clock
+/// does what a click on it does (its calendar opens).
+#[test]
+fn a_screen_reader_finds_the_bars_modules_and_clicks_the_clock() {
+    use kabuk_win::uia::{self, Role};
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let bar = primary_window_of(kabuk_core::hang::BAR_CLASS, pid);
+    let i18n = kabuk_win::system::i18n(None);
+    let clock = i18n.tr("mod-clock");
+    let workspace = i18n.tr_args("tip-workspace", &[("value", "1".into())]);
+    let has_clock = || uia::read(bar).is_ok_and(|s| s.iter().any(|p| p.name.starts_with(&clock)));
+    assert!(
+        wait_until(SETTLE, has_clock).is_some(),
+        "no clock among {:?}",
+        uia::read(bar)
+    );
+    let seen = uia::read(bar).unwrap();
+    let r = bar.window_rect().unwrap();
+    let inside = |p: &uia::Seen| {
+        p.rect.left >= r.left && p.rect.right <= r.right && p.rect.top >= r.top && p.rect.bottom <= r.bottom
+    };
+    let found = seen.iter().find(|p| p.name.starts_with(&clock)).unwrap();
+    assert_eq!(found.role, Some(Role::Button), "{found:?}");
+    assert!(
+        inside(found) && found.rect.right > found.rect.left,
+        "{found:?} outside {r:?}"
+    );
+    assert!(
+        seen.iter().any(|p| p.name == workspace && inside(p)),
+        "no {workspace:?} in {seen:?}"
+    );
+    assert!(seen.iter().all(|p| !p.name.trim().is_empty()), "{seen:?}");
+    // Invoked, the clock is clicked: its calendar opens.
+    uia::invoke(bar, &found.name).unwrap();
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("calendar panel opened") > 0).is_some(),
+        "the clock's calendar did not open"
+    );
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}
