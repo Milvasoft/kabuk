@@ -719,6 +719,20 @@ acc-part = { $label }: { $value }
 acc-media-previous = Previous track
 acc-media-toggle = Play or pause
 acc-media-next = Next track
+# A level a screen reader can set (PLAN M19 U17): a brightness, the volume's mute buttons.
+acc-brightness = Brightness
+acc-brightness-main = Brightness, Monitor { $value } (main)
+acc-brightness-of = Brightness, Monitor { $value }
+acc-mute = Mute
+acc-unmute = Unmute
+acc-mute-app = Mute { $value }
+acc-unmute-app = Unmute { $value }
+# The badge that hides an app while the app grid is edited.
+acc-grid-hide = Hide { $value }
+# An overview cell without windows.
+acc-empty = empty
+# What a screen reader calls Kabuk's notices.
+acc-notice = Kabuk notice
 
 # The launcher while its entries are still gathered (PLAN M19 U20).
 l-searching = Searching…

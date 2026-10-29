@@ -16,6 +16,7 @@ use super::motion_host::Shown;
 use super::tooltip::{self, TIP};
 use super::view::hit;
 use super::Shared;
+use crate::bar::access;
 use crate::bar::popup_keys::{self, Step};
 use crate::bar::volume_panel::{
     self, Menu, MixerRow, MixerView, FIRST_APP, FIRST_APP_MUTE, FIRST_ENTRY, FIRST_OUTPUT, MUTE, TRACK,
@@ -259,7 +260,8 @@ impl Shared {
     }
 
     /// Tells screen readers its parts (D97): a right click's menu, or the level's panel,
-    /// whose levels are left out (a click in their middle would set them to half).
+    /// whose levels are sliders they set (PLAN M19 U17) and whose mute buttons say what
+    /// they do.
     fn tell_volume_panel(&self) {
         let Some(p) = self.volume_panel.as_ref() else { return };
         let key = match p.menu {
@@ -277,17 +279,28 @@ impl Shared {
             super::access_host::tell_menu(&p.shown, &name, drawn, volume_panel::HIT, p.selected);
             return;
         }
-        let app = |v: u32| {
-            let row = p.mixer.get(usize::try_from(v.checked_sub(FIRST_APP_MUTE)?).ok()?)?;
-            Some(self.program_look(&row.exe, &row.session_name).0)
+        // The mixer's app `i` and its name.
+        let app = |i: u32| {
+            let row = p.mixer.get(usize::try_from(i).ok()?)?;
+            Some((row, self.program_look(&row.exe, &row.session_name).0))
         };
+        let output = self.live.volume.map_or((0, false), |v| (v.percent, v.muted));
         let name_of = |v: u32, words: &str| match v {
-            _ if is_level(v) => None,
-            MUTE => Some(self.i18n.tr("mod-vol")),
-            _ if v >= FIRST_APP_MUTE => app(v),
+            TRACK => Some(self.i18n.tr("mod-vol")),
+            MUTE => Some(access::mute_name(&self.i18n, None, output.1)),
+            _ if v >= FIRST_APP_MUTE => {
+                app(v - FIRST_APP_MUTE).map(|(row, name)| access::mute_name(&self.i18n, Some(&name), row.muted))
+            }
+            _ if is_level(v) => app(v - FIRST_APP).map(|(_, name)| name),
             _ => Some(words.to_string()),
         };
-        super::access_host::tell_panel(&p.shown, &name, drawn, volume_panel::HIT, p.selected, name_of);
+        // Each level as drawn: 0 when muted.
+        let level = |v: u32| match v {
+            TRACK => Some(if output.1 { 0 } else { output.0 }),
+            _ if is_level(v) => app(v - FIRST_APP).map(|(row, _)| if row.muted { 0 } else { row.percent }),
+            _ => None,
+        };
+        super::access_host::tell_levels(&p.shown, &name, drawn, volume_panel::HIT, p.selected, (name_of, level));
     }
 
     /// Draws the panel again with the output's level now (it changed).
@@ -355,6 +368,12 @@ impl Shared {
             return;
         };
         let percent = volume_panel::percent_at(p.scale.dips(x), *track);
+        self.set_volume_level(which, percent);
+    }
+
+    /// Sets level `which` (the output's [`TRACK`] or an app's) to `percent`, as a press
+    /// or a drag there does.
+    fn set_volume_level(&mut self, which: u32, percent: u32) {
         if which == TRACK {
             if let Some(a) = &self.audio {
                 a.set_percent(percent);
@@ -537,7 +556,17 @@ impl Shared {
                 }
                 None
             }
-            _ => None,
+            _ => {
+                // A screen reader sets a level (PLAN M19 U17), as a drag to it would.
+                let p = self.volume_panel.as_ref()?;
+                let (h, percent) = super::access_host::level_asked(m, &p.layout, volume_panel::HIT)?;
+                if !is_level(h) {
+                    return None;
+                }
+                tracing::info!(level = h, percent, "volume panel level set by a screen reader");
+                self.set_volume_level(h, percent.min(popup_keys::FULL));
+                Some(0)
+            }
         }
     }
 }

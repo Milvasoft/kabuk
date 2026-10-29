@@ -19,6 +19,7 @@ use kabuk_win::msgloop::{self, msg, vk, Msg, PxRect, Window};
 use super::motion_host::Shown;
 use super::tooltip::{self, TIP};
 use super::{Shared, MSG_QUICK_READ};
+use crate::bar::access;
 use crate::bar::popup_keys::{self, Step};
 use crate::bar::quick_panel::{self, Action, Quick, Screen, Tile, VOLUME};
 use crate::notify::style::NotifyStyle;
@@ -251,14 +252,32 @@ impl Shared {
         self.tell_quick_panel();
     }
 
-    /// Tells screen readers its switches and links by their words (D97); its levels are
-    /// left out (a click in their middle would set them to half).
+    /// Tells screen readers its switches and links by their words (D97), and its levels as
+    /// sliders they set (PLAN M19 U17): the volume, and each monitor's brightness by its
+    /// monitor.
     fn tell_quick_panel(&self) {
         let Some(p) = self.quick_panel.as_ref() else { return };
-        let name_of = |v: u32, words: &str| (v != VOLUME && p.quick.level_of(v).is_none()).then(|| words.to_string());
+        let screens = &p.quick.screens;
+        let screen = |v: u32| p.quick.level_of(v).and_then(|i| screens.get(i));
+        let name_of = |v: u32, words: &str| match (v, screen(v)) {
+            (VOLUME, _) => Some(self.i18n.tr("mod-vol")),
+            (_, Some(s)) => Some(access::brightness_name(
+                &self.i18n,
+                s.number,
+                s.main,
+                screens.len() == 1,
+            )),
+            _ => Some(words.to_string()),
+        };
+        // Each level as drawn: the volume 0 when muted.
+        let level = |v: u32| match (v, screen(v)) {
+            (VOLUME, _) => p.quick.volume.map(|(percent, muted)| if muted { 0 } else { percent }),
+            (_, Some(s)) => Some(u32::from(s.percent)),
+            _ => None,
+        };
         let name = self.i18n.tr("mod-quick-settings");
         let drawn = (&p.layout, p.scale);
-        super::access_host::tell_panel(&p.shown, &name, drawn, quick_panel::HIT, p.selected, name_of);
+        super::access_host::tell_levels(&p.shown, &name, drawn, quick_panel::HIT, p.selected, (name_of, level));
     }
 
     /// The panel laid out for `quick`, with part `selected` drawn selected, and its place
@@ -594,7 +613,17 @@ impl Shared {
                 }
                 None
             }
-            _ => None,
+            _ => {
+                // A screen reader sets a level (PLAN M19 U17), as a drag to it would.
+                let p = self.quick_panel.as_ref()?;
+                let (v, percent) = super::access_host::level_asked(m, &p.layout, quick_panel::HIT)?;
+                if !is_level(p, v) {
+                    return None;
+                }
+                tracing::info!(level = v, percent, "quick settings level set by a screen reader");
+                self.set_quick_level(v, percent.min(popup_keys::FULL));
+                Some(0)
+            }
         }
     }
 

@@ -112,6 +112,38 @@ pub(super) fn tell_menu(
     );
 }
 
+/// [`tell_panel`] for a panel with levels (the volume's, the quick settings'): `level`
+/// gives the percent drawn on the level valued `v` (a slider a key moves a wheel notch's
+/// step, PLAN M19 U17), `None` for the other entries.
+pub(super) fn tell_levels(
+    shown: &super::motion_host::Shown,
+    name: &str,
+    (layout, scale): (&Layout, Scale),
+    module: &str,
+    selected: Option<u32>,
+    (name_of, level): (impl Fn(u32, &str) -> Option<String>, impl Fn(u32) -> Option<u32>),
+) {
+    let parts = access::popup_levels(
+        layout,
+        scale,
+        (module, kabuk_win::uia::Role::Button),
+        selected,
+        name_of,
+        |v| level(v).map(|p| access::level_range(p, super::VOLUME_STEP)),
+    );
+    shown.window().set_accessible(Container::Panel, name, parts);
+}
+
+/// The level a screen reader's SetValue `m` asks of `module`'s level in `layout` (its
+/// value there, and the percent), when `m` is one ([`kabuk_win::uia::set_value_message`]).
+pub(super) fn level_asked(m: kabuk_win::msgloop::Msg, layout: &Layout, module: &str) -> Option<(u32, u32)> {
+    if m.id != kabuk_win::uia::set_value_message() {
+        return None;
+    }
+    let v = access::region_of(layout, module, m.wparam as u64)?;
+    Some((v, u32::try_from(m.lparam).ok()?))
+}
+
 /// [`tell_popup`] for a panel named `name`: its entries of `module` are buttons named by
 /// `name_of`.
 pub(super) fn tell_panel(

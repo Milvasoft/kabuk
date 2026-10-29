@@ -128,7 +128,7 @@ pub fn stepped(percent: u32, way: i32, step: i32) -> u32 {
 }
 
 /// A full slider, in percent.
-const FULL: u32 = 100;
+pub const FULL: u32 = 100;
 
 /// The click values of `module`'s regions in `layout`, in their order, each once.
 pub fn entries(layout: &Layout, module: &str) -> Vec<u32> {

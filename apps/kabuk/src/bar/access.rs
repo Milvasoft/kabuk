@@ -8,8 +8,9 @@ use kabuk_ui::access::Part as Drawn;
 use kabuk_ui::geom::{Point, Rect, Scale};
 use kabuk_ui::node::Layout;
 use kabuk_win::msgloop::PxRect;
-use kabuk_win::uia::{Part, Role};
+use kabuk_win::uia::{Part, Range, Role};
 
+use super::popup_keys::FULL;
 use super::view::hit;
 
 /// What the bar knows of a module besides the words it draws.
@@ -104,6 +105,19 @@ pub fn popup_parts(
     selected: Option<u32>,
     name: impl Fn(u32, &str) -> Option<String>,
 ) -> Vec<Part> {
+    popup_levels(layout, scale, (module, role), selected, name, |_| None)
+}
+
+/// [`popup_parts`] where some regions are levels (PLAN M19 U17): `level` gives the range
+/// of the one valued `v`, which becomes a slider; the others (`None`) are `role`s.
+pub fn popup_levels(
+    layout: &Layout,
+    scale: Scale,
+    (module, role): (&str, Role),
+    selected: Option<u32>,
+    name: impl Fn(u32, &str) -> Option<String>,
+    level: impl Fn(u32) -> Option<Range>,
+) -> Vec<Part> {
     let mut out: Vec<Part> = Vec::new();
     for d in kabuk_ui::access::parts(layout) {
         if d.hit.module != module {
@@ -112,17 +126,62 @@ pub fn popup_parts(
         let Some(said) = name(d.hit.value, &d.text).filter(|n| !n.trim().is_empty()) else {
             continue;
         };
+        let range = level(d.hit.value);
         out.push(Part {
             id: kabuk_win::uia::part_id(d.hit.module, d.hit.value),
             name: said,
-            role,
+            role: if range.is_some() { Role::Slider } else { role },
             rect: client_rect(d.rect, Point::default(), scale),
             click: client_point(d.reach, Point::default(), scale),
             focused: selected == Some(d.hit.value),
-            range: None,
+            range,
         });
     }
     out
+}
+
+/// A level as a screen reader is offered it: `percent` as drawn (0 when muted), between
+/// none and full, a key moving it `step` points.
+pub fn level_range(percent: u32, step: i32) -> Range {
+    let full = i32::try_from(FULL).unwrap_or(i32::MAX);
+    Range {
+        value: i32::try_from(percent).unwrap_or(full).min(full),
+        min: 0,
+        max: full,
+        step,
+    }
+}
+
+/// The region of `module` in `layout` a screen reader's part `id` stands for: a SetValue
+/// names the level it sets so ([`kabuk_win::uia::set_value_message`]).
+pub fn region_of(layout: &Layout, module: &str, id: u64) -> Option<u32> {
+    layout
+        .hits
+        .iter()
+        .find(|(_, h)| h.module == module && kabuk_win::uia::part_id(h.module, h.value) == id)
+        .map(|(_, h)| h.value)
+}
+
+/// What a screen reader calls a brightness level: "Brightness" when it is the only one
+/// (`alone`), else its monitor's, as the user knows it ("Monitor 1 (main)", D91).
+pub fn brightness_name(i18n: &I18n, number: u32, main: bool, alone: bool) -> String {
+    let key = match (alone, main) {
+        (true, _) => return i18n.tr("acc-brightness"),
+        (false, true) => "acc-brightness-main",
+        (false, false) => "acc-brightness-of",
+    };
+    i18n.tr_args(key, &[("value", number.into())])
+}
+
+/// What a screen reader calls a mute button (`app`: an app's in the mixer, else the
+/// output's), by what pressing it does now.
+pub fn mute_name(i18n: &I18n, app: Option<&str>, muted: bool) -> String {
+    match (app, muted) {
+        (None, false) => i18n.tr("acc-mute"),
+        (None, true) => i18n.tr("acc-unmute"),
+        (Some(a), false) => i18n.tr_args("acc-mute-app", &[("value", a.into())]),
+        (Some(a), true) => i18n.tr_args("acc-unmute-app", &[("value", a.into())]),
+    }
 }
 
 /// The words drawn in a part, as its name.
@@ -162,7 +221,11 @@ mod tests {
     //! icon-only module with no value said by its label; a tray icon without a tip falls
     //! back to the tray's label; nothing to say; both languages; DIPs to pixels at 150 %;
     //! a popup's parts of another module, without words or skipped are left out, and the
-    //! selected one holds the keyboard.
+    //! selected one holds the keyboard. Levels: a popup's levels are sliders with their
+    //! range and the rest keep their role; a level past full or at none; a SetValue's part
+    //! found back among its regions (not another module's, not one gone); a brightness
+    //! alone, of the main monitor and of another; the mute buttons by what they do, in
+    //! both languages.
     use super::*;
     use kabuk_i18n::Lang;
     use kabuk_ui::node::{layout, FontRole, Node, Role as Colour, Span, TextMeasure, TextMetrics, TextSpec};
@@ -307,5 +370,78 @@ mod tests {
         assert_eq!(parts[0].name, "Clock: 20:31");
         assert_eq!(parts[0].role, Role::Button);
         assert_eq!(parts[0].rect, client_rect(l.hits[1].0, origin, Scale(1.0)));
+    }
+
+    /// PLAN M19 U17: the levels were left out (Invoke would have set them to half). They
+    /// are sliders now, with the level drawn, set by a screen reader within 0-100.
+    #[test]
+    fn a_popups_levels_are_sliders_with_their_range() {
+        let panel = Node::column(vec![
+            text("Mute").hit("p", 0),
+            text("track").hit("p", 1),
+            text("Sound settings").hit("p", 2),
+        ]);
+        let l = layout(&panel, Point::default(), &Fake);
+        let parts = popup_levels(
+            &l,
+            Scale(1.0),
+            ("p", Role::Button),
+            Some(1),
+            |v, t| Some(if v == 1 { "Volume".into() } else { t.to_string() }),
+            |v| (v == 1).then(|| level_range(40, 2)),
+        );
+        let got: Vec<(&str, Role, Option<Range>, bool)> = parts
+            .iter()
+            .map(|p| (p.name.as_str(), p.role, p.range, p.focused))
+            .collect();
+        let range = Range {
+            value: 40,
+            min: 0,
+            max: 100,
+            step: 2,
+        };
+        assert_eq!(
+            got,
+            vec![
+                ("Mute", Role::Button, None, false),
+                ("Volume", Role::Slider, Some(range), true),
+                ("Sound settings", Role::Button, None, false),
+            ]
+        );
+        // Without levels, as before.
+        assert!(popup_parts(&l, Scale(1.0), ("p", Role::Button), None, words)
+            .iter()
+            .all(|p| p.role == Role::Button && p.range.is_none()));
+        // A SetValue names its part: found back among the regions.
+        assert_eq!(region_of(&l, "p", parts[1].id), Some(1));
+        assert_eq!(region_of(&l, "other", parts[1].id), None, "another module's");
+        assert_eq!(region_of(&l, "p", kabuk_win::uia::part_id("p", 9)), None, "gone");
+    }
+
+    #[test]
+    fn a_level_is_offered_within_none_and_full() {
+        assert_eq!(level_range(0, 2).value, 0);
+        assert_eq!(level_range(100, 2).value, 100);
+        assert_eq!(level_range(250, 2).value, 100, "past full is full");
+        assert_eq!(
+            (level_range(40, 5).min, level_range(40, 5).max, level_range(40, 5).step),
+            (0, 100, 5)
+        );
+    }
+
+    #[test]
+    fn levels_and_mute_buttons_are_named_by_what_they_are() {
+        let en = I18n::new(Lang::En);
+        let tr = I18n::new(Lang::Tr);
+        assert_eq!(brightness_name(&en, 1, true, true), "Brightness");
+        assert_eq!(brightness_name(&en, 1, true, false), "Brightness, Monitor 1 (main)");
+        assert_eq!(brightness_name(&en, 2, false, false), "Brightness, Monitor 2");
+        assert_eq!(brightness_name(&tr, 1, true, false), "Parlaklık, Monitör 1 (ana)");
+        assert_eq!(brightness_name(&tr, 2, false, false), "Parlaklık, Monitör 2");
+        assert_eq!(mute_name(&en, None, false), "Mute");
+        assert_eq!(mute_name(&en, None, true), "Unmute");
+        assert_eq!(mute_name(&en, Some("Firefox"), false), "Mute Firefox");
+        assert_eq!(mute_name(&tr, Some("Firefox"), true), "Firefox sesini aç");
+        assert_eq!(mute_name(&tr, None, false), "Sesi kapat");
     }
 }

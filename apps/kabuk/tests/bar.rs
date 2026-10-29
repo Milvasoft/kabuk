@@ -4838,3 +4838,81 @@ fn a_screen_reader_finds_the_bars_modules_and_clicks_the_clock() {
     assert_eq!(sandbox.restore().0, 0);
     assert!(wait_until(SETTLE, || restored(&before)).is_some());
 }
+
+/// PLAN M19 U17: a level was not offered to screen readers (an Invoke would have set it to
+/// half). The volume panel's level is a slider holding the volume as drawn, from none to
+/// full a wheel notch's step at a time, which is not invoked; set by a screen reader, the
+/// panel sets it as a drag would. No test changes the user's volume: it is set to what it
+/// is, and only read while muted (drawn 0).
+#[test]
+fn a_screen_reader_reads_and_sets_the_volume_as_a_slider() {
+    use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_VOLUME_PANEL, VOLUME_STEP};
+    use kabuk_win::msgloop::{post_message, Msg};
+    use kabuk_win::uia::{self, Role};
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
+    let post = |wparam: usize| {
+        post_message(
+            control,
+            Msg {
+                id: MSG_TEST_VOLUME_PANEL,
+                wparam,
+                lparam: 0,
+            },
+        )
+        .unwrap()
+    };
+    post(1);
+    let panel = || {
+        kabuk_win::window::windows_of_class("Kabuk.VolumePanel")
+            .into_iter()
+            .find(|h| h.pid() == Some(pid) && h.is_visible())
+    };
+    assert!(wait_until(SETTLE, || panel().is_some()).is_some(), "no volume panel");
+    let panel = panel().unwrap();
+    let i18n = kabuk_win::system::i18n(None);
+    let volume = i18n.tr("mod-vol");
+    assert!(
+        wait_until(SETTLE, || uia::read(panel)
+            .is_ok_and(|s| s.iter().any(|p| p.name == volume)))
+        .is_some(),
+        "no level among {:?}",
+        uia::read(panel)
+    );
+    let seen = uia::read(panel).unwrap();
+    let level = seen.iter().find(|p| p.name == volume).unwrap();
+    assert_eq!(level.role, Some(Role::Slider), "{level:?}");
+    let r = uia::range(panel, &volume).unwrap();
+    assert_eq!((r.min, r.max, r.step), (0, 100, VOLUME_STEP), "{r:?}");
+    assert!((0..=100).contains(&r.value), "{r:?}");
+    assert!(uia::invoke(panel, &volume).is_err(), "a level was invoked");
+    // The speaker says what pressing it does.
+    let muted = seen.iter().any(|p| p.name == i18n.tr("acc-unmute"));
+    assert!(muted || seen.iter().any(|p| p.name == i18n.tr("acc-mute")), "{seen:?}");
+    if !muted {
+        uia::set_range(panel, &volume, f64::from(r.value)).unwrap();
+        let line = format!("percent={}", r.value);
+        assert!(
+            wait_until(SETTLE, || sandbox
+                .last_log_line(&["volume panel level set by a screen reader"])
+                .is_some_and(|l| l.contains(&line)))
+            .is_some(),
+            "the level was not set: {:?}",
+            sandbox.last_log_line(&["screen reader"])
+        );
+        assert_eq!(uia::range(panel, &volume).unwrap().value, r.value);
+    }
+    // Past its ends: refused.
+    assert!(uia::set_range(panel, &volume, 101.0).is_err());
+    post(0);
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}

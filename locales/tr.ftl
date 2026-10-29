@@ -718,6 +718,20 @@ acc-part = { $label }: { $value }
 acc-media-previous = Önceki parça
 acc-media-toggle = Oynat veya duraklat
 acc-media-next = Sonraki parça
+# Ekran okuyucunun ayarlayabildiği düzey (PLAN M19 U17): parlaklık, sesin kapatma düğmeleri.
+acc-brightness = Parlaklık
+acc-brightness-main = Parlaklık, Monitör { $value } (ana)
+acc-brightness-of = Parlaklık, Monitör { $value }
+acc-mute = Sesi kapat
+acc-unmute = Sesi aç
+acc-mute-app = { $value } sesini kapat
+acc-unmute-app = { $value } sesini aç
+# Tüm uygulamalar düzenlenirken bir uygulamayı gizleyen rozet.
+acc-grid-hide = Gizle: { $value }
+# Penceresi olmayan bir genel bakış hücresi.
+acc-empty = boş
+# Ekran okuyucunun Kabuk'un bildirimlerine verdiği ad.
+acc-notice = Kabuk bildirimi
 
 # Başlatıcı, girdileri toplanırken (PLAN M19 U20).
 l-searching = Aranıyor…
