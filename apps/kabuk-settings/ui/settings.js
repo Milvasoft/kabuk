@@ -506,7 +506,8 @@
         ${row(t("setRuleWhat"), "", `<span class="num"><select id="rule-what" aria-label="${t("setRuleWhat")}">${[["float", t("setRuleFloat")], ["ignore", t("setRuleIgnore")], ["nograb", t("setRuleNoGrab")], ...workspaces].map(([v, n]) => `<option value="${v}"${f.what === v ? " selected" : ""}>${n}</option>`).join("")}</select></span>`)}
         <div><button class="set-btn" type="button" data-rule-save ${f.exe.trim() ? "" : "disabled"}>${t("setAdd")}</button> <button class="set-btn ghost" type="button" data-rule-cancel>${t("setCancel")}</button></div></div>` : `<div><button class="set-btn" type="button" data-rule-new>${t("addRule")}</button> <button class="set-btn ghost" type="button" data-rule-new="apps">${t("pickWin")}</button></div>`;
     return head(t("navRules"), t("rulesDesc")) + `
-      <div class="set-grp">${tgl("rules.float_unfit", t("autofloat"), t("autofloatH"))}</div>
+      <div class="set-grp">${tgl("rules.float_unfit", t("autofloat"), t("autofloatH"))}
+      ${tgl("rules.defaults", t("setRuleDefaults"), t("setRuleDefaultsH"))}</div>
       <div class="rules-t"><div class="h">${t("colApp")}</div><div class="h">${t("colRule")}</div><div class="h src">${t("colSrc")}</div>${defaults}${mine}</div>
       ${rules.length ? "" : `<div class="note">${t("setRuleNone")}</div>`}
       ${form}`;

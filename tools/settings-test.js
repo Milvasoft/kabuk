@@ -450,6 +450,16 @@ async function main() {
   await page.click(`[data-reset="windows.minimize_effect"]`); await settled();
   check(!/minimize_effect/.test(toml()), "reset: a choice back to its default");
 
+  // PLAN M19 U11 (SPEC §2.3): the default rules can be turned off; the table then lists
+  // none of them.
+  await go("rules");
+  const defaultRows = () => page.locator(".rules-t .src:not(.mine):not(.h)").count();
+  check((await defaultRows()) > 0, "default rules: listed while on");
+  await page.click(`[data-tgl="rules.defaults"]`); await settled();
+  check(/\[rules\][^[]*defaults = false/.test(toml()) && (await defaultRows()) === 0, "default rules: off, none listed");
+  await page.click(`[data-tgl="rules.defaults"]`); await settled();
+  check(/defaults = true/.test(toml()) && (await defaultRows()) > 0, "default rules: on again");
+
   // A window rule added and removed.
   await go("rules");
   await page.click(`[data-rule-new]`); await settled();
