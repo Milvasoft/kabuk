@@ -526,9 +526,9 @@ Performance runs (`cargo test --release -p kabuk --features perf --test perf`, 6
 Failing on this machine while the screens sleep (Windows shows a "WinDisc" monitor with no number): `kabuk-win`'s `screen::`, `shell::monitor_details`, `wallpaper::` (two), `window_motion::` (three), `screen_picture::`, `ticker::`; `a_still_picture_drifts_a_step_at_a_time`; `a_layout_profile_moves_open_windows_and_starts_the_rest` (the main monitor's number is 0, so its profile is refused); `a_notice_fades_in_and_out_letting_the_mouse_through` (the screen cannot be taken).
 
 **Done criteria**
-- [ ] Each item above done or stated as not done with its reason.
-- [ ] Before/after measurements written here for every performance item.
-- [ ] `tools/check.ps1` clean; the perf suite run.
+- [x] Each item above done or stated as not done with its reason.
+- [x] Before/after measurements written here for every performance item.
+- [ ] `tools/check.ps1` clean; the perf suite run. *fmt, clippy and every unit test clean but for the tests that read the screen while it sleeps; the integration tests run on the desktop (failures above, all of the sleeping screens). The perf suite ran once validly and was over its limits (above); memory's cause is fixed, the CPU's is not found: left for a run with the machine alone. A lead to measure then: the window manager hears every object's name change in every program (`EVENT_OBJECT_NAMECHANGE`, for titles), which programs writing text as it streams send many times a second.*
 
 ---
 
