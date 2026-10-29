@@ -3,7 +3,8 @@
 //! thumbnails; the others show a box per window with its program's icon and title. A
 //! click on a cell goes to that workspace; Esc or a click outside closes it. On the
 //! keyboard (PLAN M19 U9) a digit goes to that workspace, the arrow keys ring a cell and
-//! Enter or Space does what a click on it does. With full
+//! Enter or Space does what a click on it does. Screen readers find the cells as list
+//! items, each named by its workspace and its windows' titles (PLAN M19 U17). With full
 //! motion the windows on screen fly from their places into their cell as it opens, and
 //! back when Esc or a click on that cell closes it (asked for by the user).
 
@@ -71,6 +72,8 @@ struct Sheet {
     columns: usize,
     /// The cell the arrow keys selected (none until one is pressed).
     selected: Option<usize>,
+    /// What a screen reader calls each cell: its workspace and its windows.
+    said: Vec<String>,
     /// What was drawn, to draw it again with another cell selected: the cells (DIPs),
     /// the sheet's size in DIPs and its scale.
     drawn: Vec<Cell>,
@@ -266,8 +269,10 @@ impl Shared {
             let shown = workspaces.iter().position(|w| w.active);
             let mut thumbs_to: Vec<(u64, kabuk_layout::Rect, kabuk_layout::Rect)> = Vec::new();
             let mut drawn = Vec::new();
+            let mut said = Vec::new();
             for (i, (ws, cell)) in workspaces.iter().zip(&cells).enumerate() {
                 let mut boxes = Vec::new();
+                let mut titles = Vec::new();
                 let windows = view
                     .windows
                     .iter()
@@ -294,6 +299,8 @@ impl Shared {
                         *cell
                     };
                     let place = overview::place_in(r, area, inside);
+                    let title = Hwnd(w.hwnd).title();
+                    titles.push(title.clone());
                     if Some(i) == shown {
                         // Its place on the monitor, in the sheet's pixels.
                         let from = kabuk_layout::Rect {
@@ -306,7 +313,7 @@ impl Shared {
                         boxes.push(WindowBox {
                             rect: dips(place, scale),
                             image: self.window_picture(w.hwnd, scale),
-                            title: Hwnd(w.hwnd).title(),
+                            title,
                         });
                     }
                 }
@@ -317,6 +324,7 @@ impl Shared {
                     shown: Some(i) == shown,
                     boxes,
                 });
+                said.push(crate::bar::access::workspace_cell(&self.i18n, ws.number, &titles));
             }
             let size = Size {
                 w: scale.dips(area.w),
@@ -382,10 +390,12 @@ impl Shared {
                 shown,
                 columns,
                 selected: None,
+                said,
                 drawn,
                 size,
                 scale,
             });
+            self.tell_overview(index);
         }
         if fly && self.overview.sheets.iter().any(|s| !s.fliers.is_empty()) {
             tracing::info!("overview windows fly in");
@@ -457,6 +467,28 @@ impl Shared {
             }
             let _ = self.gpu.commit();
         }
+        self.tell_overview(index);
+    }
+
+    /// Tells screen readers sheet `index`'s cells (PLAN M19 U17), the ringed one holding
+    /// the keyboard.
+    fn tell_overview(&self, index: usize) {
+        let Some(sheet) = self.overview.sheets.get(index) else {
+            return;
+        };
+        let cells: Vec<(u32, PxRect, String)> = sheet
+            .numbers
+            .iter()
+            .zip(&sheet.cells)
+            .zip(&sheet.said)
+            .map(|((n, c), said)| (*n, px(*c), said.clone()))
+            .collect();
+        let parts = crate::bar::access::cell_parts(&cells, sheet.selected);
+        sheet.window.set_accessible(
+            kabuk_win::uia::Container::List,
+            &self.i18n.tr("set-key-overview"),
+            parts,
+        );
     }
 
     fn on_overview(&mut self, index: usize, m: Msg) -> Option<isize> {

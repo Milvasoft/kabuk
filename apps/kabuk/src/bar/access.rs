@@ -173,6 +173,44 @@ pub fn brightness_name(i18n: &I18n, number: u32, main: bool, alone: bool) -> Str
     i18n.tr_args(key, &[("value", number.into())])
 }
 
+/// What a screen reader says of an overview cell: its workspace, then the titles of the
+/// windows in it ("Workspace 2: Firefox, Terminal"), or that it is empty.
+pub fn workspace_cell(i18n: &I18n, number: u32, titles: &[String]) -> String {
+    let label = i18n.tr_args("tip-workspace", &[("value", number.into())]);
+    let titles: Vec<&str> = titles.iter().map(|t| t.trim()).filter(|t| !t.is_empty()).collect();
+    let value = if titles.is_empty() {
+        i18n.tr("acc-empty")
+    } else {
+        titles.join(TITLES_APART)
+    };
+    i18n.tr_args("acc-part", &[("label", label.into()), ("value", value.into())])
+}
+
+/// Between two window titles of an overview cell.
+const TITLES_APART: &str = ", ";
+
+/// The overview's cells for screen readers: each workspace's (its number, its place in
+/// the sheet's pixels and its words) a list item clicked in its middle, the one the
+/// arrows ringed (`selected`) holding the keyboard.
+pub fn cell_parts(cells: &[(u32, PxRect, String)], selected: Option<usize>) -> Vec<Part> {
+    cells
+        .iter()
+        .enumerate()
+        .map(|(i, (number, rect, said))| Part {
+            id: kabuk_win::uia::part_id(CELL, *number),
+            name: said.clone(),
+            role: Role::ListItem,
+            rect: *rect,
+            click: (rect.x + rect.w / 2, rect.y + rect.h / 2),
+            focused: selected == Some(i),
+            range: None,
+        })
+        .collect()
+}
+
+/// The kind of an overview cell's part (its value: the workspace's number).
+const CELL: &str = "overview-cell";
+
 /// What a screen reader calls a mute button (`app`: an app's in the mixer, else the
 /// output's), by what pressing it does now.
 pub fn mute_name(i18n: &I18n, app: Option<&str>, muted: bool) -> String {
@@ -443,5 +481,32 @@ mod tests {
         assert_eq!(mute_name(&en, Some("Firefox"), false), "Mute Firefox");
         assert_eq!(mute_name(&tr, Some("Firefox"), true), "Firefox sesini aç");
         assert_eq!(mute_name(&tr, None, false), "Sesi kapat");
+    }
+
+    #[test]
+    fn an_overview_cell_is_said_by_its_workspace_and_windows() {
+        let en = I18n::new(Lang::En);
+        let tr = I18n::new(Lang::Tr);
+        let titles = vec!["Firefox".to_string(), "  ".to_string(), "Terminal".to_string()];
+        assert_eq!(workspace_cell(&en, 2, &titles), "Workspace 2: Firefox, Terminal");
+        assert_eq!(workspace_cell(&en, 3, &[]), "Workspace 3: empty");
+        assert_eq!(workspace_cell(&tr, 3, &["  ".to_string()]), "Çalışma alanı 3: boş");
+        let r = |x: i32| PxRect {
+            x,
+            y: 10,
+            w: 100,
+            h: 60,
+        };
+        let cells = vec![(1, r(0), "a".to_string()), (4, r(110), "b".to_string())];
+        let parts = cell_parts(&cells, Some(1));
+        assert_eq!(parts.len(), 2);
+        assert_eq!(
+            (parts[1].click, parts[1].focused, parts[0].focused),
+            ((160, 40), true, false)
+        );
+        assert_eq!(parts[0].role, Role::ListItem);
+        // Who a cell is follows its workspace, not its place.
+        assert_eq!(parts[1].id, cell_parts(&cells[1..], None)[0].id);
+        assert!(cell_parts(&cells, None).iter().all(|p| !p.focused));
     }
 }

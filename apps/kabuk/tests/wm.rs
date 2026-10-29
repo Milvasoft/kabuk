@@ -1607,6 +1607,101 @@ fn the_overview_shows_every_workspace_and_a_click_goes_there() {
     assert!(wait_until(Duration::from_secs(5), restored).is_some());
 }
 
+/// PLAN M19 U17: the overview was drawn only. A screen reader finds each workspace's cell
+/// as a list item named by its workspace and its windows' titles; invoked, it goes there
+/// as a click on the cell does.
+#[test]
+fn a_screen_reader_finds_the_overviews_workspaces_and_goes_to_one() {
+    use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_OVERVIEW};
+    use kabuk_win::uia::{self, Role};
+    let before: Vec<Rect> = kabuk_win::shell::monitors().iter().map(|m| m.work_area).collect();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), config("")).unwrap();
+    let _shell = sandbox.shell_with_bar_and_wm();
+    let window = wait_for_wm(&sandbox);
+    let act = |code, arg| {
+        send_message(
+            window,
+            Msg {
+                id: MSG_TEST_ACTION,
+                wparam: code,
+                lparam: arg,
+            },
+            Duration::from_secs(2),
+        )
+        .unwrap()
+    };
+    let a = open("reader-a", &[]);
+    let b = open("reader-b", &[]);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("managing window") == 2).is_some());
+    act(test_action::FOCUSED, b.hwnd.0 as isize);
+    act(test_action::MOVE_TO_WORKSPACE, 2);
+    assert!(wait_until(SETTLE, || !b.hwnd.is_visible()).is_some());
+    let pid = sandbox.state().kabuk_pid.unwrap();
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
+    kabuk_win::msgloop::post_message(
+        control,
+        Msg {
+            id: MSG_TEST_OVERVIEW,
+            wparam: 1,
+            lparam: 0,
+        },
+    )
+    .unwrap();
+    let m = monitor_of(&a);
+    let sheet = || {
+        kabuk_win::window::windows_of_class("Kabuk.Overview")
+            .into_iter()
+            .filter(|w| w.pid() == Some(pid) && w.is_visible())
+            .find(|s| {
+                kabuk_win::dpi::physical(|| s.window_rect())
+                    .is_some_and(|r| r.left == m.work_area.left && r.top == m.work_area.top)
+            })
+    };
+    assert!(wait_until(SETTLE, || sheet().is_some()).is_some(), "no overview");
+    let sheet = sheet().unwrap();
+    let i18n = kabuk_win::system::i18n(None);
+    let cell = |n: u32, titles: &[String]| {
+        let label = i18n.tr_args("tip-workspace", &[("value", n.into())]);
+        let value = if titles.is_empty() {
+            i18n.tr("acc-empty")
+        } else {
+            titles.join(", ")
+        };
+        i18n.tr_args("acc-part", &[("label", label.into()), ("value", value.into())])
+    };
+    let second = cell(2, &[b.hwnd.title()]);
+    assert!(
+        wait_until(SETTLE, || uia::read(sheet)
+            .is_ok_and(|s| s.iter().any(|p| p.name == second)))
+        .is_some(),
+        "no {second:?} among {:?}",
+        uia::read(sheet)
+    );
+    let seen = uia::read(sheet).unwrap();
+    assert_eq!(seen.len(), 4, "the workspaces the bar shows: {seen:?}");
+    assert!(seen.iter().all(|p| p.role == Some(Role::ListItem)), "{seen:?}");
+    assert!(seen.iter().any(|p| p.name == cell(1, &[a.hwnd.title()])), "{seen:?}");
+    assert!(seen.iter().any(|p| p.name == cell(3, &[])), "{seen:?}");
+    uia::invoke(sheet, &second).unwrap();
+    assert!(
+        wait_until(SETTLE, || b.hwnd.is_visible() && !a.hwnd.is_visible()).is_some(),
+        "not on workspace 2"
+    );
+    assert_eq!(sandbox.restore().0, 0);
+    let restored = || {
+        kabuk_win::shell::monitors()
+            .iter()
+            .map(|m| m.work_area)
+            .collect::<Vec<_>>()
+            == before
+    };
+    assert!(wait_until(Duration::from_secs(5), restored).is_some());
+}
+
 /// DECISIONS D72, found on another computer: with Kabuk running a game kept dropping to
 /// the desktop. A window that goes full screen after the window manager took it in (a
 /// game switching to full screen) is never moved again: placing it in its tile or under
