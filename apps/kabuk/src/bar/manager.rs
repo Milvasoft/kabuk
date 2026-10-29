@@ -2660,6 +2660,10 @@ impl Shared {
             kabuk_win::system::settings_changed();
             self.input_langs = None;
         }
+        if m.id == msg::SETTINGCHANGE || m.id == msg::DISPLAYCHANGE || m.id == msg::DPICHANGED {
+            // The window motion asks Windows for its wallpapers again (PLAN M19 P18).
+            kabuk_win::wallpaper::changed();
+        }
         let shell = m.id == self.taskbar_created || m.id == msg::DISPLAYCHANGE || m.id == msg::DPICHANGED;
         if m.id != msg::SETTINGCHANGE && m.id != msg::SYSCOLORCHANGE && !shell {
             return None;

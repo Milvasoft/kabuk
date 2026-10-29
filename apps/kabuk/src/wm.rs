@@ -905,6 +905,9 @@ impl Wm {
                 Some(0)
             }
             msg::DISPLAYCHANGE => {
+                // The window motion asks for the monitors' wallpapers again (also without
+                // a bar to hear of it; PLAN M19 P18).
+                kabuk_win::wallpaper::changed();
                 self.schedule(timer::MONITORS, MONITOR_DEBOUNCE);
                 None
             }

@@ -9,8 +9,9 @@
 //! Lives on the window moves' thread: the pictures are decoded once per monitor and file,
 //! kept while that thread keeps its renderer, and let go with it.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::time::{Duration, Instant, SystemTime};
 
 use kabuk_core::state::Rect;
 use windows::Win32::Foundation::HWND;
@@ -19,10 +20,12 @@ use windows::Win32::Graphics::Gdi::{
     BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP, HGDIOBJ, PAINTSTRUCT, SRCCOPY,
 };
 
-/// A monitor's wallpaper, decoded: its rectangle, the file and the bitmap.
+/// A monitor's wallpaper, decoded: its rectangle, the file (and when it was written: a
+/// picture written again under the same name, as Kabuk's drift may, is decoded again)
+/// and the bitmap.
 struct Picture {
     monitor: Rect,
-    file: String,
+    file: (String, Option<SystemTime>),
     bitmap: HBITMAP,
 }
 
@@ -31,18 +34,50 @@ thread_local! {
     static PICTURES: RefCell<Vec<Picture>> = const { RefCell::new(Vec::new()) };
     /// Each overlay's area, for its paint.
     static OVERLAYS: RefCell<HashMap<isize, Rect>> = RefCell::new(HashMap::new());
+    /// When Windows was last asked for its wallpapers ([`ask_again`]).
+    static ASKED: Cell<Option<(u64, Instant)>> = const { Cell::new(None) };
+    /// How many times Windows was asked for its wallpapers.
+    #[cfg(test)]
+    static ASKED_COUNT: Cell<usize> = const { Cell::new(0) };
+}
+
+/// How long what Windows said its wallpapers are is trusted without a change heard of
+/// (a slideshow's next picture may come unannounced); the pictures are let go after as
+/// long idle anyway.
+const TRUSTED: Duration = Duration::from_secs(60);
+
+/// Whether to ask Windows for its wallpapers again, having asked at `asked` (the count
+/// of changes then, and when; `None`: not since the pictures were let go), with `changes`
+/// heard of by `now`.
+fn ask_again(asked: Option<(u64, Instant)>, changes: u64, now: Instant) -> bool {
+    asked.is_none_or(|(seen, at)| seen != changes || now.saturating_duration_since(at) >= TRUSTED)
 }
 
 /// Makes sure each monitor's wallpaper is decoded (a changed one again, a gone one let
-/// go). COM must be initialised on this thread.
+/// go). Windows is asked only when [`ask_again`] says so (PLAN M19 P18: every window
+/// move asked it). COM must be initialised on this thread.
 pub(super) fn refresh() {
-    let files = crate::wallpaper::files();
+    // Read before asking: a change while Windows answers is asked about next time.
+    let changes = crate::wallpaper::changes();
+    let now = Instant::now();
+    if !ask_again(ASKED.get(), changes, now) {
+        return;
+    }
+    ASKED.set(Some((changes, now)));
+    #[cfg(test)]
+    ASKED_COUNT.with(|c| c.set(c.get() + 1));
+    let files: Vec<(Rect, (String, Option<SystemTime>))> = crate::wallpaper::files()
+        .into_iter()
+        .filter_map(|(monitor, file)| {
+            let file = file?;
+            let written = std::fs::metadata(&file).and_then(|m| m.modified()).ok();
+            Some((monitor, (file, written)))
+        })
+        .collect();
     PICTURES.with(|p| {
         let mut p = p.borrow_mut();
         p.retain(|pic| {
-            let keep = files
-                .iter()
-                .any(|(r, f)| *r == pic.monitor && f.as_deref() == Some(pic.file.as_str()));
+            let keep = files.iter().any(|(r, f)| *r == pic.monitor && *f == pic.file);
             if !keep {
                 // SAFETY: our own bitmap, selected into no DC.
                 let _ = unsafe { DeleteObject(pic.bitmap.into()) };
@@ -50,20 +85,21 @@ pub(super) fn refresh() {
             keep
         });
         for (monitor, file) in files {
-            let Some(file) = file else { continue };
             if p.iter().any(|pic| pic.monitor == monitor && pic.file == file) {
                 continue;
             }
-            match decode(&file, monitor) {
+            match decode(&file.0, monitor) {
                 Some(bitmap) => p.push(Picture { monitor, file, bitmap }),
-                None => tracing::debug!(file, "wallpaper not decoded for the window motion"),
+                None => tracing::debug!(file = file.0, "wallpaper not decoded for the window motion"),
             }
         }
     });
 }
 
-/// Lets every decoded picture go (the window moves' thread is idle).
+/// Lets every decoded picture go (the window moves' thread is idle); Windows is asked
+/// again next time.
 pub(super) fn release() {
+    ASKED.set(None);
     PICTURES.with(|p| {
         for pic in p.borrow_mut().drain(..) {
             // SAFETY: our own bitmap, selected into no DC.
@@ -158,8 +194,10 @@ pub(super) fn paint(hwnd: HWND) -> bool {
 #[cfg(test)]
 mod tests {
     //! Edge cases: each monitor showing a picture file gets one decoded picture, decoded
-    //! once (a second look keeps the same bitmaps); letting go leaves none; an overlay
-    //! with no backdrop is left to the default paint. Reads Windows' wallpapers as they are.
+    //! once (a second look keeps the same bitmaps); letting go leaves none; Windows asked
+    //! once for many looks, again after a change, after letting go and after a while; an
+    //! overlay with no backdrop is left to the default paint. Reads Windows' wallpapers
+    //! as they are.
     use super::*;
 
     fn bitmaps() -> Vec<isize> {
@@ -180,6 +218,37 @@ mod tests {
         assert_eq!(bitmaps(), first, "decoded again though nothing changed");
         release();
         assert!(bitmaps().is_empty());
+    }
+
+    /// PLAN M19 P18: every window move, and every warm-up while the mouse was on the bar's
+    /// apps, asked Windows for each monitor's wallpaper. It is asked again only after a
+    /// change was heard of, once the pictures were let go, or a while after.
+    #[test]
+    fn windows_is_asked_for_the_wallpapers_again_only_after_a_change() {
+        crate::system::com_init();
+        let asked = || ASKED_COUNT.with(Cell::get);
+        let first = bitmaps();
+        for _ in 0..10 {
+            refresh();
+        }
+        assert_eq!(asked(), 1, "ten window moves asked Windows {} times", asked());
+        crate::wallpaper::changed();
+        refresh();
+        refresh();
+        assert_eq!(asked(), 2, "a change asks again, once");
+        release();
+        refresh();
+        assert_eq!(asked(), 3, "the pictures let go are asked for again");
+        release();
+        assert!(first.is_empty());
+        // A while after, Windows is asked again without a change heard of (a slideshow
+        // may not say).
+        let now = Instant::now();
+        let at = (crate::wallpaper::changes(), now);
+        assert!(!ask_again(Some(at), at.0, now + TRUSTED / 2));
+        assert!(ask_again(Some(at), at.0, now + TRUSTED));
+        assert!(ask_again(Some(at), at.0 + 1, now));
+        assert!(ask_again(None, at.0, now));
     }
 
     #[test]
