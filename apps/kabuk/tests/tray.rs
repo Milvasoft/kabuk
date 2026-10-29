@@ -89,6 +89,13 @@ fn taskbars_visible() -> bool {
 
 /// Hidden, and see-through for the moments Explorer shows them anyway (found by the
 /// user: they flashed at every work area change; D77).
+fn taskbar_states() -> Vec<(u64, bool, bool)> {
+    kabuk_win::shell::taskbars()
+        .iter()
+        .map(|b| (b.0, b.is_visible(), b.is_see_through()))
+        .collect()
+}
+
 fn taskbars_hidden() -> bool {
     kabuk_win::shell::taskbars()
         .iter()
@@ -102,7 +109,11 @@ fn a_programs_tray_icon_appears_on_the_bar_and_clicks_reach_it() {
     std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
     let _shell = sandbox.kabuk_with(&[TAKE_EXPLORER, "--no-wm"]);
     assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("tray window up") == 1).is_some());
-    assert!(wait_until(SETTLE, taskbars_hidden).is_some(), "taskbar not hidden");
+    assert!(
+        wait_until(SETTLE, taskbars_hidden).is_some(),
+        "taskbar not hidden: {:?}",
+        taskbar_states()
+    );
 
     let log = sandbox.dir.path().join("tray-clicks.txt");
     let tip = title("tray-icon");
@@ -217,7 +228,11 @@ fn a_forced_kill_brings_the_taskbar_back_within_two_seconds() {
     std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
     let _watchdog = sandbox.watchdog_taking_explorer();
     assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("Windows taskbar hidden") == 1).is_some());
-    assert!(wait_until(SETTLE, taskbars_hidden).is_some());
+    assert!(
+        wait_until(SETTLE, taskbars_hidden).is_some(),
+        "taskbar not hidden: {:?}",
+        taskbar_states()
+    );
     assert!(sandbox.state().taskbar.is_some(), "taskbar not recorded");
 
     let pid = sandbox.state().kabuk_pid.unwrap();
