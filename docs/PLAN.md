@@ -488,7 +488,7 @@ Usability, in this order:
 - U16 The wheel steps the workspaces, the track and the brightness, besides the volume. *Done: `the_wheel_does_what_suits_each_module`.*
 - U17 Accessibility, the basics (DECISIONS D97; in progress).
 - U18 *Not done: a brightness OSD and the brightness keys. On laptops those keys are not keyboard events (the firmware hands them to Windows), so Kabuk cannot take them as it takes the volume keys; seeing the change needs WMI events on the laptop's own panel, which cannot be tried on the user's desktop.*
-- U19 One word for each idea (DECISIONS D96; in progress).
+- U19 One word for each idea (DECISIONS D96): Turkish "çalışma alanı" and "bar", English "theme", "All apps" / "Tüm uygulamalar" for the app grid, game mode's summary named, in `locales/` and the design page's strings. *Done; the tests that matched old words follow. Left: the design page's always-Turkish theme descriptions and spec text, and "Tiling" in some Turkish design strings.*
 - U20 `--version`; the calculator's percent, roots and hexadecimal; "Searching…" while the launcher gathers; three chords on the shortcut card. *Done, with tests. Not done: a notice when a theme cannot be resolved (every look is embedded: it cannot happen); a "reloaded" notice after an edit by hand (Settings writes the same file, so every change in Settings would show it); the settings app's search, reset-all and export of every setting; the gallery's skeleton cards; the screen saver hot corner's hint; the theme file's I/O message; a notice for a second `kabuk` start; workspace names, a do-not-disturb for Kabuk's notices, the workspace on preview cards.*
 
 Asked for by the user on 2026-10-29, during the review:
