@@ -484,7 +484,7 @@ mod tests {
         ];
         let items = window_items(&w, &tr);
         assert_eq!(items.len(), 1);
-        assert_eq!(items[0].subtitle, "Workspace 2, Monitör 1");
+        assert_eq!(items[0].subtitle, "Çalışma alanı 2, Monitör 1");
         assert_eq!(items[0].target, Target::Window(7));
         let c = commands(&tr);
         assert_eq!(c.len(), SystemCommand::ALL.len());
