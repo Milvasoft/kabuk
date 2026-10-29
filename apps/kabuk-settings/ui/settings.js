@@ -108,15 +108,18 @@
   /* Windows' own Win chords (as Kabuk writes them): one chosen loses its Windows meaning. */
   const WINDOWS_CHORDS = ["Win+A", "Win+B", "Win+D", "Win+E", "Win+G", "Win+H", "Win+I", "Win+K", "Win+M", "Win+N", "Win+P", "Win+Q", "Win+R", "Win+S", "Win+T", "Win+U", "Win+V", "Win+W", "Win+X", "Win+Z", "Win+Tab", "Win+Space", "Win+Shift+S", "Win+Ctrl+D", "Win+Ctrl+Left", "Win+Ctrl+Right", "Win+Up", "Win+Down", "Win+Left", "Win+Right", "Win+Home", "Win+Enter"];
   const kbds = (chord) => chord.split("+").map((x) => `<kbd>${escapeHtml(x)}</kbd>`).join(" ");
-  function chordEditor(path) {
+  /* A shortcut's chords and buttons, a group named `label` (its row's words) for screen
+     readers; the recorder's wait is told as it comes (PLAN M19 U17). */
+  function chordEditor(path, label) {
     const value = get(path);
     const list = Array.isArray(value) ? value : [value];
     const capturing = (i) => ui.capture && ui.capture.path === path && ui.capture.index === i;
+    const waiting = (words) => `<kbd role="status" aria-live="polite">${words}</kbd>`;
     const chips = list.map((c, i) => capturing(i)
-      ? `<kbd>${Array.isArray(value) ? t("setKeyPress") : t("setKeyMods")}</kbd>`
+      ? waiting(Array.isArray(value) ? t("setKeyPress") : t("setKeyMods"))
       : `<button type="button" class="linkish" data-chord="${path}" data-index="${i}">${kbds(c)}</button>`);
     if (Array.isArray(value)) {
-      chips.push(capturing(list.length) ? `<kbd>${t("setKeyPress")}</kbd>` : `<button type="button" class="linkish" data-chord="${path}" data-index="${list.length}">${t("setAdd")}</button>`);
+      chips.push(capturing(list.length) ? waiting(t("setKeyPress")) : `<button type="button" class="linkish" data-chord="${path}" data-index="${list.length}">${t("setAdd")}</button>`);
       if (list.length > 1) chips.push(`<button type="button" class="linkish" data-chord-drop="${path}">${t("setRemove")}</button>`);
     }
     if (changed(path)) chips.push(`<button type="button" class="linkish" data-reset="${path}">${t("posReset")}</button>`);
@@ -124,7 +127,7 @@
     // Only for a chord the user chose: Kabuk's own defaults are SPEC §6's choice.
     const defaults = [].concat(at(S.defaults, path) ?? []);
     const windows = list.filter((c) => WINDOWS_CHORDS.includes(c) && !defaults.includes(c)).map((c) => `<span class="h" style="display:block">${escapeHtml(tv("setKeyWindowsHint", c))}</span>`);
-    return `<span class="keys" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">${chips.join(" ")}${windows.join("")}${refusalFor(path)}</span>`;
+    return `<span class="keys" role="group" aria-label="${escapeHtml(label)}" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">${chips.join(" ")}${windows.join("")}${refusalFor(path)}</span>`;
   }
   function onKey(e) {
     const c = ui.capture;
@@ -529,7 +532,7 @@
     return `<div class="set-grp"><span class="gl">${t("dd")}. ${t("ddH")}</span>
       ${row(t("ddCommand"), t("ddCommandH"), command)}
       ${row(t("ddHeight"), "", height)}
-      ${rowFor("shortcuts.dropdown", t("setKeyDropdown"), "", chordEditor("shortcuts.dropdown"))}</div>`;
+      ${rowFor("shortcuts.dropdown", t("setKeyDropdown"), "", chordEditor("shortcuts.dropdown", t("setKeyDropdown")))}</div>`;
   }
 
   // Hot corners (asked for by the user, off by default): what the mouse pushed into each
@@ -718,7 +721,7 @@
     const chips = SOURCES.map((k) => `<button type="button" class="chip${l.sources[k] ? " on" : ""}" data-tgl="launcher.sources.${k}" aria-pressed="${l.sources[k]}">${icon("check")}${t("setSrc-" + k)}</button>`).join("");
     const folders = l.indexed_folders.map((f, i) => `<div class="set-row"><span><b style="font-family:var(--num);font-weight:400">${escapeHtml(f)}</b></span><button type="button" class="linkish" data-folder-drop="${i}">${t("setRemove")}</button></div>`).join("");
     return head(t("navLauncher"), t("lpDesc")) + `
-      <div class="set-grp">${row(t("lpKey"), t("lpKeyH"), chordEditor("shortcuts.launcher"))}</div>
+      <div class="set-grp">${row(t("lpKey"), t("lpKeyH"), chordEditor("shortcuts.launcher", t("lpKey")))}</div>
       <div class="set-grp"><span class="gl">${t("lpSrc")}. ${t("lpSrcH")}</span><div class="chips" role="group" aria-label="${t("lpSrc")}">${chips}</div></div>
       <div class="set-grp"><span class="gl">${t("lpDirs")}. ${t("lpDirsH")}</span>${folders}
         <div><button class="set-btn ghost" type="button" data-pick="folder">${t("setFolderAdd")}</button></div></div>
@@ -742,7 +745,7 @@
   function keysPage() {
     const any = KEYS.some((k) => changed("shortcuts." + k));
     return head(t("navKeys"), t("keysDesc")) + (any ? `<div><button class="set-btn ghost" type="button" data-reset-keys>${t("setResetKeys")}</button></div>` : "") + `
-      <div class="keys">${KEYS.map((k) => `<div>${t("setKey-" + k.replaceAll("_", "-"))}</div><div>${chordEditor("shortcuts." + k)}</div>`).join("")}</div>`;
+      <div class="keys">${KEYS.map((k) => `<div>${t("setKey-" + k.replaceAll("_", "-"))}</div><div>${chordEditor("shortcuts." + k, t("setKey-" + k.replaceAll("_", "-")))}</div>`).join("")}</div>`;
   }
 
   function langPage() {

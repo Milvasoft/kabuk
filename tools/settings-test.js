@@ -13,7 +13,9 @@
 // TOML; the custom dimming delay refuses below 10 s, above 60 min and an empty value
 // and saves a valid one; a shortcut is recorded from the keyboard; a window rule is
 // added with every field, refused under the field at fault, edited in place, filled from
-// an open window and removed; switching the language rewords the page; the Create tab makes a
+// an open window and removed; every control on every page has a name for screen readers
+// and every part the page's clicks reach is a control; switching the language rewords the
+// page; the Create tab makes a
 // wallpaper with a local stand-in for Ollama (the first answer too bright and sent back,
 // the second kept and applied), and an API key typed in is stored in Windows Credential
 // Manager and in no file or log, then removed. PLAN M19: a change is answered with only
@@ -782,6 +784,72 @@ async function main() {
   check(!(await page.content()).includes(KEY), "key: not left in the page");
   await page.click("[data-genforget]"); await settled();
   check((await page.locator("[data-genkey]").count()) === 1, "key: removed on Disconnect");
+
+  // PLAN M19 U17: screen readers name every control. Chromium's own accessibility tree
+  // (what Narrator reads through WebView2) on every page and in the states that draw more
+  // (the shortcut recorder waiting, a rule being edited, the Create tab, a custom delay):
+  // nothing one can press, switch, slide, pick or type into is unnamed, and everything the
+  // page's clicks reach is a control the keyboard reaches too.
+  {
+    const cdp = await ctx.newCDPSession(page);
+    await cdp.send("Accessibility.enable");
+    const CONTROLS = new Set(["button", "checkbox", "switch", "slider", "combobox", "textbox", "searchbox", "spinbutton", "link", "radio", "tab", "menuitem", "listbox", "option"]);
+    const src = fs.readFileSync(path.join(root, "apps", "kabuk-settings", "ui", "settings.js"), "utf8");
+    const clicked = [...new Set([...src.matchAll(/on\("\[(data-[a-z-]+)/g)].map((m) => m[1]))];
+    const unnamed = async () => {
+      const { nodes } = await cdp.send("Accessibility.getFullAXTree");
+      const bad = nodes.filter((n) => !n.ignored && CONTROLS.has(n.role && n.role.value) && !String((n.name && n.name.value) || "").trim());
+      const html = [];
+      for (const n of bad) {
+        const { object } = await cdp.send("DOM.resolveNode", { backendNodeId: n.backendDOMNodeId }).catch(() => ({ object: null }));
+        const text = object ? await cdp.send("Runtime.callFunctionOn", { objectId: object.objectId, functionDeclaration: "function () { return this.outerHTML.slice(0, 120); }", returnByValue: true }) : null;
+        html.push(`${n.role.value}: ${text ? text.result.value : "?"}`);
+      }
+      return html;
+    };
+    const unreachable = () => page.$$eval(clicked.map((a) => `[${a}]`).join(","), (els) => els
+      .filter((el) => !el.matches("button, input, select, textarea, a[href], [role][tabindex]"))
+      .map((el) => el.outerHTML.slice(0, 120)));
+    const audit = async (where) => {
+      const names = await unnamed();
+      check(names.length === 0, `${where}: every control named${names.length ? ": " + names.join(" | ") : ""}`);
+      const reach = await unreachable();
+      check(reach.length === 0, `${where}: every clicked part a control${reach.length ? ": " + reach.join(" | ") : ""}`);
+    };
+    check(clicked.length > 20, `the page's clicked parts found (${clicked.length})`);
+    // The check itself finds an unnamed control and a clicked part that is none.
+    await page.evaluate(() => document.body.insertAdjacentHTML("beforeend", '<button id="a11y-probe" type="button"></button><span id="a11y-probe-2" data-set="x"></span>'));
+    check((await unnamed()).length === 1 && (await unreachable()).length === 1, "the screen reader check finds what is missing");
+    await page.evaluate(() => { document.getElementById("a11y-probe").remove(); document.getElementById("a11y-probe-2").remove(); });
+    for (const p of PAGES) {
+      await go(p);
+      await audit(p);
+    }
+    // The shortcut recorder waiting for keys says so as it comes.
+    await go("keys");
+    await page.click(`[data-chord="shortcuts.launcher"]`); await settled();
+    const waiting = page.locator(".keys [role=status]");
+    check((await waiting.count()) === 1 && (await waiting.getAttribute("aria-live")) === "polite", "keys: the recorder's wait is told");
+    await audit("keys, recording");
+    await page.keyboard.press("Escape"); await settled();
+    // Each shortcut's buttons are a group named by their row.
+    const group = await page.locator(`[data-chord="shortcuts.launcher"]`).first().evaluate((b) => (b.closest("[role=group]") || {}).ariaLabel || "");
+    check(group.trim().length > 0 && !group.includes("<"), `keys: a shortcut's buttons named by their row (${group})`);
+    await go("rules");
+    await page.click(`[data-rule-new="pick"]`); await settled();
+    await until(async () => (await page.locator("[data-rule-win]").count()) > 0);
+    await audit("rules, a rule edited");
+    await go("wall");
+    await page.click(`[data-walltab="gen"]`); await settled();
+    await audit("wall, create");
+    await page.click(`[data-walltab="pick"]`); await settled();
+    await go("oled");
+    if (await page.locator(`[data-dim="custom"]`).count()) {
+      await page.click(`[data-dim="custom"]`); await settled();
+      await audit("oled, a custom delay");
+    }
+    await cdp.detach();
+  }
 
   // The language switches the words.
   await go("lang");
