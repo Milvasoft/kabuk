@@ -43,7 +43,7 @@
   const LOOK_NAMES = { a: "ada", b: "cizgi", c: "devre", d: "ray", e: "konsol", f: "rihtim", g: "etkinlik", h: "pano", i: "izgara", j: "defter" };
   const DIM_MIN = 10, DIM_MAX = 3600, DIM_PRESETS = [30, 60, 120];
   const SAVER_WAITS = [3, 5, 10, 15];
-  const RANGES = { height: [24, 72], tray: [0, 12], gap: [0, 32], bright: [10, 100, 5], dropdown: [20, 90, 5], workspaces: [1, 9] };
+  const RANGES = { height: [24, 72], tray: [0, 12], gap: [0, 32], bright: [10, 100, 5], dropdown: [20, 90, 5], workspaces: [1, 9], drift: [1, 120] };
 
   const cfg = () => S.config;
   const at = (root, path) => path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), root);
@@ -600,10 +600,18 @@
     hint.textContent = ok ? `${t("dimRange")} · ${tv("dimNow", dimLabel(sec))}` : t("dimBad");
     return ok ? sec : null;
   }
+  // How often a still picture drifts (DECISIONS D47); off while it does not drift.
+  function driftRow() {
+    const w = cfg().wallpaper;
+    const path = "wallpaper.drift_minutes";
+    const control = `<span class="rng"><input type="range" id="drift-minutes" data-range="${path}" data-unit=" ${t("min")}" min="${RANGES.drift[0]}" max="${RANGES.drift[1]}" value="${w.drift_minutes}" aria-label="${t("setDriftEvery")}"><span class="v" data-v="drift-minutes">${w.drift_minutes} ${t("min")}</span></span>`;
+    return row(t("setDriftEvery"), t("setDriftEveryH") + resetIfChanged(path) + refusalFor(path), control, w.drift ? "" : " off");
+  }
   function oledPage() {
     return head(t("navOled"), t("oledDesc")) + `
       <div class="set-grp">${tgl("oled.bar_shift", t("shift"), t("shiftH"))}
       ${tgl("wallpaper.drift", t("setDrift"), tv("setDriftH", cfg().wallpaper.drift_minutes))}
+      ${driftRow()}
       ${tgl("oled.idle_dim", t("dim"), t("dimH"))}
       ${dimRow()}</div>`;
   }

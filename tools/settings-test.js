@@ -385,7 +385,16 @@ async function main() {
   check(await page.$eval(`[data-tgl="wallpaper.drift"]`, (e) => e.getAttribute("aria-checked") === "true"), "drift: on by default");
   await page.click(`[data-tgl="wallpaper.drift"]`); await settled();
   check(/drift = false/.test(toml()), "drift: off");
+  const driftRow = () => page.$eval("#drift-minutes", (e) => e.closest(".set-row").classList.contains("off"));
+  check(await driftRow(), "drift: its step is off while it does not drift");
   await page.click(`[data-tgl="wallpaper.drift"]`); await settled();
+  // PLAN M19 U11: its step, which was in kabuk.toml alone.
+  check(!(await driftRow()), "drift: its step can be set while it drifts");
+  await slide("drift-minutes", "30");
+  check(/drift_minutes = 30/.test(toml()) && (await page.locator(`[data-v="drift-minutes"]`).innerText()).startsWith("30"), "drift: a step every 30 minutes");
+  check((await page.locator(".set-main").innerText()).includes("30 dakikada"), "drift: the switch's words follow the step");
+  await page.click(`[data-reset="wallpaper.drift_minutes"]`); await settled();
+  check(!/drift_minutes/.test(toml()), "drift: its step back to the default");
 
   // Dimming delay: 10 s to 60 min, whole numbers.
   await go("oled");
