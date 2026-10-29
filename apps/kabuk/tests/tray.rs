@@ -519,22 +519,20 @@ fn a_program_asking_where_its_icon_is_gets_its_place_on_the_bar() {
     let tip = title("where");
     let app = TestWindow::open(&["--title", &tip, "--tray-log", log.to_str().unwrap()]);
     let control = kabuk_win::window::find_message_window(CONTROL_CLASS, "").expect("bar control window");
-    let mut point = 0isize;
+    let point = || {
+        kabuk_win::msgloop::send_message(
+            control,
+            Msg {
+                id: MSG_TEST_TRAY_WHERE,
+                wparam: app.hwnd.0 as usize,
+                lparam: 0,
+            },
+            Duration::from_secs(1),
+        )
+        .unwrap_or(0)
+    };
     assert!(
-        wait_until(SETTLE, || {
-            point = kabuk_win::msgloop::send_message(
-                control,
-                Msg {
-                    id: MSG_TEST_TRAY_WHERE,
-                    wparam: app.hwnd.0 as usize,
-                    lparam: 0,
-                },
-                Duration::from_secs(1),
-            )
-            .unwrap_or(0);
-            point != 0
-        })
-        .is_some(),
+        wait_until(SETTLE, || point() != 0).is_some(),
         "our icon is not on the bar:\n{}",
         story(&sandbox)
     );
@@ -546,10 +544,10 @@ fn a_program_asking_where_its_icon_is_gets_its_place_on_the_bar() {
         .filter(|w| w.pid() == Some(pid))
         .find_map(|w| w.window_rect().filter(|r| primary.rect.contains(r)))
         .expect("primary bar");
-    let centre = (
-        bar.left + (point & 0xFFFF) as i16 as i32,
-        bar.top + (point >> 16) as i16 as i32,
-    );
+    let centre = || {
+        let p = point();
+        (bar.left + (p & 0xFFFF) as i16 as i32, bar.top + (p >> 16) as i16 as i32)
+    };
 
     // `query tray` tells the icon apart by its program (asked for when a second volume
     // icon showed up on the bar).
@@ -601,6 +599,9 @@ fn a_program_asking_where_its_icon_is_gets_its_place_on_the_bar() {
         story(&sandbox)
     );
     let (l, t, r, b) = rect().unwrap();
+    // Measured after the click: the figures coming after the first frames move the tray
+    // (a centre measured before was one icon off).
+    let centre = centre();
     assert!(
         l <= centre.0 && centre.0 <= r && t <= centre.1 && centre.1 <= b,
         "place {:?} does not hold the icon's centre {centre:?} (bar at {bar:?})",
