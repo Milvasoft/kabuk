@@ -1040,6 +1040,8 @@ pub mod msg {
     pub const DPICHANGED: u32 = w::WM_DPICHANGED;
     pub const DISPLAYCHANGE: u32 = w::WM_DISPLAYCHANGE;
     pub const SETTINGCHANGE: u32 = w::WM_SETTINGCHANGE;
+    /// The system colours changed (a contrast theme was picked or changed).
+    pub const SYSCOLORCHANGE: u32 = w::WM_SYSCOLORCHANGE;
     pub const WINDOWPOSCHANGED: u32 = w::WM_WINDOWPOSCHANGED;
     pub const ACTIVATE: u32 = w::WM_ACTIVATE;
     pub const QUERYENDSESSION: u32 = w::WM_QUERYENDSESSION;

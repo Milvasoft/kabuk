@@ -162,6 +162,72 @@ pub fn announce_setting(action: u32) {
 /// `WM_SETTINGCHANGE` area sent when the light/dark app mode or accent changes.
 pub const IMMERSIVE_COLOR_SET: &str = "ImmersiveColorSet";
 
+/// `WM_SETTINGCHANGE`'s `wparam` when high contrast was turned on or off.
+pub const HIGH_CONTRAST_CHANGED: usize = windows::Win32::UI::WindowsAndMessaging::SPI_SETHIGHCONTRAST.0 as usize;
+
+/// Windows' system colours as red, green and blue, read while high contrast is on
+/// (DECISIONS D97): the theme the user picked in Settings → Accessibility → Contrast themes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ContrastColors {
+    /// Background and text of windows (`COLOR_WINDOW`, `COLOR_WINDOWTEXT`).
+    pub window: [u8; 3],
+    pub window_text: [u8; 3],
+    /// Selected items and their text (`COLOR_HIGHLIGHT`, `COLOR_HIGHLIGHTTEXT`).
+    pub highlight: [u8; 3],
+    pub highlight_text: [u8; 3],
+    /// Disabled text (`COLOR_GRAYTEXT`).
+    pub gray_text: [u8; 3],
+    /// Buttons and their text (`COLOR_BTNFACE`, `COLOR_BTNTEXT`).
+    pub button_face: [u8; 3],
+    pub button_text: [u8; 3],
+    /// Links (`COLOR_HOTLIGHT`).
+    pub hot_light: [u8; 3],
+}
+
+/// Windows' high-contrast colours while high contrast is on; `None` while it is off.
+/// Read-only.
+pub fn high_contrast() -> Option<ContrastColors> {
+    use windows::Win32::Graphics::Gdi::{
+        GetSysColor, COLOR_BTNFACE, COLOR_BTNTEXT, COLOR_GRAYTEXT, COLOR_HIGHLIGHT, COLOR_HIGHLIGHTTEXT,
+        COLOR_HOTLIGHT, COLOR_WINDOW, COLOR_WINDOWTEXT, SYS_COLOR_INDEX,
+    };
+    use windows::Win32::UI::Accessibility::{HCF_HIGHCONTRASTON, HIGHCONTRASTW};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SystemParametersInfoW, SPI_GETHIGHCONTRAST, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
+    };
+    let mut hc = HIGHCONTRASTW {
+        cbSize: u32::try_from(std::mem::size_of::<HIGHCONTRASTW>()).unwrap_or_default(),
+        ..Default::default()
+    };
+    // SAFETY: the out parameter is a HIGHCONTRASTW of the size given, as this action expects.
+    let read = unsafe {
+        SystemParametersInfoW(
+            SPI_GETHIGHCONTRAST,
+            hc.cbSize,
+            Some((&mut hc as *mut HIGHCONTRASTW).cast()),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+    };
+    if read.is_err() || !hc.dwFlags.contains(HCF_HIGHCONTRASTON) {
+        return None;
+    }
+    let rgb = |index: SYS_COLOR_INDEX| {
+        // SAFETY: plain read of a system colour (0x00BBGGRR).
+        let c = unsafe { GetSysColor(index) };
+        [(c & 0xff) as u8, ((c >> 8) & 0xff) as u8, ((c >> 16) & 0xff) as u8]
+    };
+    Some(ContrastColors {
+        window: rgb(COLOR_WINDOW),
+        window_text: rgb(COLOR_WINDOWTEXT),
+        highlight: rgb(COLOR_HIGHLIGHT),
+        highlight_text: rgb(COLOR_HIGHLIGHTTEXT),
+        gray_text: rgb(COLOR_GRAYTEXT),
+        button_face: rgb(COLOR_BTNFACE),
+        button_text: rgb(COLOR_BTNTEXT),
+        hot_light: rgb(COLOR_HOTLIGHT),
+    })
+}
+
 /// Sends `WM_SETTINGCHANGE` naming `area` to one window (not a broadcast), waiting at most
 /// `timeout`. Windows copies the string into the receiving process.
 pub fn send_setting_change(to: crate::window::Hwnd, area: &str, timeout: std::time::Duration) -> std::io::Result<()> {
@@ -335,6 +401,19 @@ mod tests {
     fn the_animation_setting_reads() {
         // Either answer is the user's; reading it twice gives the same one.
         assert_eq!(animations_on(), animations_on());
+    }
+
+    /// D97: high contrast is read, not changed. Either answer is the user's; reading it
+    /// twice gives the same one, and a contrast theme's text stands off its background.
+    #[test]
+    fn the_high_contrast_setting_reads() {
+        let now = high_contrast();
+        assert_eq!(now, high_contrast());
+        if let Some(c) = now {
+            assert_ne!(c.window, c.window_text, "{c:?}");
+            assert_ne!(c.highlight, c.highlight_text, "{c:?}");
+        }
+        assert_eq!(HIGH_CONTRAST_CHANGED, 0x0043);
     }
 
     #[test]
