@@ -224,6 +224,8 @@ mod timer {
     pub const APPS: usize = 40;
     /// Messages came while the state was busy: they are handled once it is free.
     pub const DEFERRED: usize = 41;
+    /// The app grid has been closed a while: its screen taking (a GPU device) goes.
+    pub const APP_GRID_CAPTURE: usize = 42;
 }
 
 /// An auto-hiding bar (SPEC §2.1): how much of it stays on screen for the mouse to reach
@@ -1637,6 +1639,10 @@ impl Shared {
                     }
                     // The deferred messages were handled on the way in.
                     timer::DEFERRED => self.kill(timer::DEFERRED),
+                    timer::APP_GRID_CAPTURE => {
+                        self.kill(timer::APP_GRID_CAPTURE);
+                        self.app_grid_capture_idle();
+                    }
                     timer::APPS => {
                         self.kill(timer::APPS);
                         self.refresh_apps();

@@ -46,6 +46,8 @@ pub const MSG_TEST_APP_GRID: u32 = msg::APP + 45;
 pub(super) const MSG_APP_GRID_PICTURES: u32 = msg::APP + 46;
 /// A wallpaper was blurred.
 pub(super) const MSG_APP_GRID_BACKDROP: u32 = msg::APP + 47;
+/// How long the screen taking is kept after the grid closes, as the genie's renderer is.
+const CAPTURE_KEPT: Duration = Duration::from_secs(60);
 /// The screen behind the open grid has been blurred off the bar thread.
 pub(super) const MSG_APP_GRID_SCREEN: u32 = msg::APP + 94;
 /// The grid's global shortcuts take these hotkey ids (the screen saver's start at 300).
@@ -216,6 +218,10 @@ impl Shared {
         }
         if self.game_devices.is_empty() {
             self.app_grid_capture(true);
+            // Made ahead: let go a while later too if the grid is not opened.
+            if let Some(c) = &self.control {
+                c.set_timer(timer::APP_GRID_CAPTURE, CAPTURE_KEPT);
+            }
         }
         if let Some(primary) = kabuk_win::shell::monitors().into_iter().find(|m| m.primary) {
             let scale = primary.dpi as f32 / kabuk_layout::desk::BASE_DPI as f32;
@@ -319,6 +325,14 @@ impl Shared {
             tracing::info!("app grid screen taking made");
         } else {
             tracing::warn!("the screen cannot be taken; the app grid shows the wallpaper under it");
+        }
+    }
+
+    /// The grid stayed closed a while: the screen taking goes, made again at the next
+    /// opening.
+    pub(super) fn app_grid_capture_idle(&mut self) {
+        if self.app_grid.open.is_none() && self.app_grid.capture.take().is_some() {
+            tracing::info!("app grid screen taking let go while closed");
         }
     }
 
@@ -778,6 +792,11 @@ impl Shared {
             }
         }
         tracing::info!("app grid closed");
+        // Its screen taking (a GPU device) is kept a while for the next opening, then let
+        // go (PLAN M19 P15: it was kept for as long as the shell ran).
+        if let Some(c) = &self.control {
+            c.set_timer(timer::APP_GRID_CAPTURE, CAPTURE_KEPT);
+        }
         self.retire(Some(o.sheet));
         self.retire(Some(o.chrome));
     }
