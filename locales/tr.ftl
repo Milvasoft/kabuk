@@ -15,7 +15,7 @@ cli-usage =
                                 focus <left|down|up|right>, move <left|down|up|right>,
                                 float <toggle|on|off>, close, scratchpad <toggle|send>,
                                 group <toggle|next>, layout <dwindle|master|floating|tiling|cycle>,
-                                dropdown, desktop, launcher, overview, apps, keys, saver,
+                                dropdown, desktop, launcher, overview, apps, keys, saver, tray,
                                 panel <quick|network|calendar|volume>, profile <ad>, reload,
                                 query <state|windows|monitors|tray>, quiet <on|off|toggle>, restore
     Seçenekler:
@@ -419,6 +419,7 @@ set-key-next-tab = Gruptaki sonraki sekme
 set-key-overview = Tüm çalışma alanlarına genel bakış
 set-key-start-saver = Ekran koruyucuyu hemen başlat
 set-key-keys-card = Kısayol kartını göster
+set-key-focus-bar = Klavyeyi bardaki tepsiye getir
 keys-title = Kısayollar
 keys-title-h = Kabuk'un ana kısayolları, senin ayarladığın gibi
 keys-welcome = Kabuk'a hoş geldin

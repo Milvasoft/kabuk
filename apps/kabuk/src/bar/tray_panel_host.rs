@@ -5,8 +5,9 @@
 //! menu or its windows, and closes once another program, the desktop or a taskbar comes
 //! to the front, or the bar is clicked (asked for by the user: it closed as the menu
 //! opened, and as the program opened). The keyboard moves over its icons as in every popup, by rows and
-//! columns ([`crate::bar::popup_keys::step_grid`]), and Enter or Space clicks the one
-//! selected.
+//! columns ([`crate::bar::popup_keys::step_grid`]), Enter or Space clicks the one
+//! selected and the menu key or Shift+F10 right-clicks it (PLAN M19 U10): its program
+//! gets the same messages as from the mouse.
 
 use kabuk_core::tray::Click;
 use kabuk_ui::geom::{Point, Scale};
@@ -207,23 +208,35 @@ impl Shared {
                 let Some(p) = self.tray_panel.as_mut() else { return };
                 p.layout = layout;
                 p.selected = Some(i);
+                let owner = self
+                    .hidden_tray()
+                    .get(usize::try_from(i).unwrap_or(usize::MAX))
+                    .and_then(|(at, _)| self.tray.visible().nth(*at))
+                    .map(|icon| icon.hwnd);
+                tracing::debug!(icon = i, owner, "tray panel icon selected");
             }
-            Step::Activate(i) => {
-                let Some((cell, _)) = p
-                    .layout
-                    .hits
-                    .iter()
-                    .find(|(_, h)| h.module == tray_panel::HIT && h.value == i)
-                else {
-                    return;
-                };
-                let (x, y) = (p.scale.px(cell.x + cell.w / 2.0), p.scale.px(cell.y + cell.h / 2.0));
-                let origin = kabuk_win::window::Hwnd(p.shown.window().hwnd().0).window_rect();
-                let (sx, sy) = origin.map_or((x, y), |r| (r.left + x, r.top + y));
-                self.panel_click(usize::try_from(i).unwrap_or(usize::MAX), Click::Left, sx, sy);
-            }
+            Step::Activate(i) => self.tray_panel_press(i, Click::Left),
             Step::Same | Step::Adjust(..) => {}
         }
+    }
+
+    /// Icon `i` of the panel clicked from the keyboard (`click`: Enter's left click, the
+    /// menu key's right one), at its middle, as the mouse would.
+    fn tray_panel_press(&mut self, i: u32, click: Click) {
+        let Some(p) = self.tray_panel.as_ref() else { return };
+        let Some((cell, _)) = p
+            .layout
+            .hits
+            .iter()
+            .find(|(_, h)| h.module == tray_panel::HIT && h.value == i)
+        else {
+            return;
+        };
+        let (x, y) = (p.scale.px(cell.x + cell.w / 2.0), p.scale.px(cell.y + cell.h / 2.0));
+        let origin = kabuk_win::window::Hwnd(p.shown.window().hwnd().0).window_rect();
+        let (sx, sy) = origin.map_or((x, y), |r| (r.left + x, r.top + y));
+        tracing::info!(icon = i, ?click, "tray panel icon pressed from the keyboard");
+        self.panel_click(usize::try_from(i).unwrap_or(usize::MAX), click, sx, sy);
     }
 
     /// The tray changed while the panel is open: draw it again (or close it, empty).
@@ -279,6 +292,13 @@ impl Shared {
             msg::KEYDOWN => {
                 let key = popup_keys::Key::of(m.wparam, msgloop::shift_held(), false)?;
                 self.tray_panel_key(key);
+                return Some(0);
+            }
+            // The menu key or Shift+F10: the selected icon's menu, as a right click.
+            msg::CONTEXTMENU if msg::by_keyboard(m.lparam) => {
+                if let Some(i) = self.tray_panel.as_ref().and_then(|p| p.selected) {
+                    self.tray_panel_press(i, Click::Right);
+                }
                 return Some(0);
             }
             msg::ACTIVATE => {

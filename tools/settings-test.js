@@ -827,6 +827,9 @@ async function main() {
     }
     // The shortcut recorder waiting for keys says so as it comes.
     await go("keys");
+    // PLAN M19 U10: the shortcut that puts the keyboard on the bar's tray (DECISIONS D98).
+    const trayKeys = (await page.locator(`[data-chord="shortcuts.focus_bar"]`).first().innerText()).replace(/\s+/g, "");
+    check(trayKeys === "WinB", `keys: the bar's tray shortcut shown (${trayKeys})`);
     await page.click(`[data-chord="shortcuts.launcher"]`); await settled();
     const waiting = page.locator(".keys [role=status]");
     check((await waiting.count()) === 1 && (await waiting.getAttribute("aria-live")) === "polite", "keys: the recorder's wait is told");

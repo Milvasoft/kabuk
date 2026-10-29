@@ -920,3 +920,213 @@ fn a_forced_kill_gives_the_users_wallpaper_back() {
     assert_eq!(kabuk_win::wallpaper::current().as_ref(), Some(&theirs));
     assert!(wait_until(SETTLE, || before.is_back()).is_some(), "desktop not back");
 }
+
+/// The bar's window on Monitor 1 (main) of shell `pid`.
+fn primary_bar(pid: u32) -> kabuk_win::window::Hwnd {
+    let primary = kabuk_win::shell::monitors().into_iter().find(|m| m.primary).unwrap();
+    kabuk_win::window::windows_of_class("Kabuk.Bar")
+        .into_iter()
+        .filter(|w| w.pid() == Some(pid))
+        .find(|w| w.window_rect().is_some_and(|r| primary.rect.contains(&r)))
+        .expect("primary bar")
+}
+
+/// A key pressed on window `to`, as Windows sends it.
+fn press(to: kabuk_win::window::Hwnd, key: usize) {
+    post_message(
+        to,
+        Msg {
+            id: kabuk_win::msgloop::msg::KEYDOWN,
+            wparam: key,
+            lparam: 0,
+        },
+    )
+    .unwrap();
+}
+
+/// The menu key or Shift+F10 on window `to`: Windows makes a context menu at (-1, -1).
+fn menu_key(to: kabuk_win::window::Hwnd) {
+    post_message(
+        to,
+        Msg {
+            id: kabuk_win::msgloop::msg::CONTEXTMENU,
+            wparam: to.0 as usize,
+            lparam: 0xFFFF_FFFF,
+        },
+    )
+    .unwrap();
+}
+
+/// PLAN M19 U10 (DECISIONS D98): a tray icon's menu could not be opened from the keyboard.
+/// Win+B (here its test message, which leaves the user's window the keyboard) puts it on
+/// the bar's tray; the arrows move over the bar's parts; the menu key or Shift+F10 sends
+/// the icon's program what a right click sends, Enter what a left click sends; Esc lets
+/// the bar go.
+#[test]
+fn the_keyboard_on_the_bar_opens_a_tray_icons_menu() {
+    use kabuk::bar::manager::MSG_TEST_BAR_KEYS;
+    use kabuk_win::msgloop::vk;
+    let before = Desktop::now();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    let _shell = sandbox.kabuk_with(&[TAKE_EXPLORER, "--no-wm"]);
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("tray window up") == 1).is_some());
+    let log = sandbox.dir.path().join("tray-keys.txt");
+    let tip = title("tray-keys");
+    let app = TestWindow::open(&["--title", &tip, "--tray-log", log.to_str().unwrap()]);
+    assert!(
+        wait_until(SETTLE, || sandbox.last_log_line(&["tray call", &tip]).is_some()).is_some(),
+        "{}",
+        story(&sandbox)
+    );
+    let pid = sandbox.state().kabuk_pid.unwrap();
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|w| w.pid() == Some(pid))
+        .expect("bar control window");
+    let bar = primary_bar(pid);
+    let post = |wparam: usize| {
+        post_message(
+            control,
+            Msg {
+                id: MSG_TEST_BAR_KEYS,
+                wparam,
+                lparam: 0,
+            },
+        )
+        .unwrap()
+    };
+    let on = || sandbox.log_lines("keyboard on the bar");
+    // Where Win+B puts it: a tray icon.
+    post(0);
+    assert!(wait_until(SETTLE, || on() == 1).is_some(), "{}", story(&sandbox));
+    let first = sandbox.last_log_line(&["keyboard on the bar"]).unwrap();
+    assert!(first.contains("module=tray"), "{first}");
+    // The arrows move over the bar's parts.
+    press(bar, vk::LEFT);
+    assert!(wait_until(SETTLE, || on() == 2).is_some(), "Left moved nothing");
+    assert_ne!(sandbox.last_log_line(&["keyboard on the bar"]).unwrap(), first);
+    press(bar, vk::RIGHT);
+    assert!(wait_until(SETTLE, || on() == 3).is_some(), "Right moved nothing");
+    assert_eq!(
+        sandbox
+            .last_log_line(&["keyboard on the bar"])
+            .unwrap()
+            .split("keyboard on the bar")
+            .nth(1),
+        first.split("keyboard on the bar").nth(1),
+        "Right came back"
+    );
+    // On our icon: the menu key opens its menu, as a right click.
+    post(app.hwnd.0 as usize);
+    assert!(wait_until(SETTLE, || on() == 4).is_some());
+    menu_key(bar);
+    let got = || std::fs::read_to_string(&log).unwrap_or_default();
+    let has = |m: isize| {
+        got()
+            .lines()
+            .any(|l| l.ends_with(&format!(" {}", (TEST_ICON_ID << 16) | m)))
+    };
+    assert!(
+        wait_until(SETTLE, || has(WM_CONTEXTMENU) && has(WM_RBUTTONUP)).is_some(),
+        "no right click from the menu key: {:?}\n{}",
+        got(),
+        calls_of(&sandbox, app.hwnd.0)
+    );
+    // Enter: a left click.
+    post(app.hwnd.0 as usize);
+    assert!(wait_until(SETTLE, || on() == 5).is_some());
+    press(bar, vk::RETURN);
+    assert!(
+        wait_until(SETTLE, || has(NIN_SELECT)).is_some(),
+        "no left click from Enter: {:?}",
+        got()
+    );
+    // Esc: the bar lets it go.
+    post(app.hwnd.0 as usize);
+    assert!(wait_until(SETTLE, || on() == 6).is_some());
+    press(bar, vk::ESCAPE);
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("keyboard off the bar") == 1).is_some(),
+        "Esc kept the keyboard on the bar"
+    );
+    app.close();
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || before.is_back()).is_some(), "desktop not back");
+}
+
+/// More icons than a tray holds: the most a walk over the overflow panel takes.
+const MOST_ICONS: usize = 100;
+
+/// PLAN M19 U10: in the tray's overflow panel too, the menu key or Shift+F10 sends the
+/// selected icon's program what a right click sends.
+#[test]
+fn the_menu_key_opens_a_tray_icons_menu_in_the_overflow_panel() {
+    use kabuk::bar::manager::MSG_TEST_TRAY_PANEL;
+    use kabuk_win::msgloop::vk;
+    let before = Desktop::now();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n[bar]\ntray_shown = 0\n").unwrap();
+    let _shell = sandbox.kabuk_with(&[TAKE_EXPLORER, "--no-wm"]);
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("tray window up") == 1).is_some());
+    let log = sandbox.dir.path().join("tray-panel-keys.txt");
+    let tip = title("tray-panel-keys");
+    let app = TestWindow::open(&["--title", &tip, "--tray-log", log.to_str().unwrap()]);
+    assert!(wait_until(SETTLE, || sandbox.last_log_line(&["tray call", &tip]).is_some()).is_some());
+    let pid = sandbox.state().kabuk_pid.unwrap();
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|w| w.pid() == Some(pid))
+        .expect("bar control window");
+    post_message(
+        control,
+        Msg {
+            id: MSG_TEST_TRAY_PANEL,
+            wparam: 1,
+            lparam: 0,
+        },
+    )
+    .unwrap();
+    let panel = || {
+        kabuk_win::window::windows_of_class("Kabuk.TrayPanel")
+            .into_iter()
+            .find(|w| w.pid() == Some(pid) && w.is_visible())
+    };
+    assert!(
+        wait_until(SETTLE, || panel().is_some()).is_some(),
+        "{}",
+        story(&sandbox)
+    );
+    let panel = panel().unwrap();
+    // The selection walks the icons until it is on ours (other programs' come too).
+    let ours = format!("owner={}", app.hwnd.0);
+    let on_ours = || {
+        sandbox
+            .last_log_line(&["tray panel icon selected"])
+            .is_some_and(|l| l.contains(&ours))
+    };
+    for n in 1..=MOST_ICONS {
+        press(panel, vk::RIGHT);
+        let moved = wait_until(SETTLE, || sandbox.log_lines("tray panel icon selected") >= n);
+        if moved.is_none() || on_ours() {
+            break;
+        }
+    }
+    assert!(on_ours(), "our icon never selected: {}", story(&sandbox));
+    menu_key(panel);
+    let got = || std::fs::read_to_string(&log).unwrap_or_default();
+    let has = |m: isize| {
+        got()
+            .lines()
+            .any(|l| l.ends_with(&format!(" {}", (TEST_ICON_ID << 16) | m)))
+    };
+    assert!(
+        wait_until(SETTLE, || has(WM_CONTEXTMENU)).is_some(),
+        "no right click from the menu key: {:?}\n{}",
+        got(),
+        calls_of(&sandbox, app.hwnd.0)
+    );
+    app.close();
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || before.is_back()).is_some(), "desktop not back");
+}

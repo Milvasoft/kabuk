@@ -4,6 +4,7 @@ pub mod access;
 pub mod app_menu;
 pub mod app_preview;
 pub mod apps;
+pub mod bar_keys;
 pub mod calendar_panel;
 pub mod dock;
 pub mod figures;

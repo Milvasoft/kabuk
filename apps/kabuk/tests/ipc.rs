@@ -518,8 +518,9 @@ fn every_window_action_of_the_shortcuts_has_a_command() {
     assert_eq!(sandbox.restore().0, 0);
 }
 
-/// PLAN M19 U4: `desktop`, `keys` and `panel <name>` do what the show-desktop corner, the
-/// shortcut card's chord and a click on the bar's icons do, and a second time undo it.
+/// PLAN M19 U4: `desktop`, `keys`, `tray` and `panel <name>` do what the show-desktop
+/// corner, the shortcut card's and the bar's chords and a click on the bar's icons do,
+/// and (but `tray`) a second time undo it.
 #[test]
 fn the_bars_actions_and_panels_have_commands() {
     let sandbox = Sandbox::new();
@@ -542,6 +543,13 @@ fn the_bars_actions_and_panels_have_commands() {
     assert_eq!(sandbox.log_lines("keys card shown welcome=false"), 1);
     ok(&sandbox, &["keys"]);
     assert!(wait_until(SETTLE, || !open("Kabuk.KeysCard")).is_some(), "card stayed");
+    // PLAN M19 U10: `tray` puts the keyboard on the bar's tray, as Win+B does (in a test
+    // the user's window keeps it).
+    ok(&sandbox, &["tray"]);
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("keyboard on the bar") == 1).is_some(),
+        "the keyboard not on the bar"
+    );
 
     for (name, class, line) in [
         ("quick", "Kabuk.QuickPanel", "quick settings opened"),

@@ -60,6 +60,8 @@ pub enum Request {
     AppGrid,
     /// `keys`: show or hide the card of Kabuk's shortcuts (DECISIONS D61).
     KeysCard,
+    /// `tray`: put the keyboard on the bar's tray, as Win+B does (DECISIONS D98).
+    FocusBar,
     /// `panel <quick|network|calendar|volume>`: open or close one of the bar's panels, as
     /// a click on its icon does.
     Panel(PanelName),
@@ -102,6 +104,7 @@ impl Request {
             | Request::Saver
             | Request::AppGrid
             | Request::KeysCard
+            | Request::FocusBar
             | Request::Panel(_)
             | Request::Profile(_)
             | Request::Restore
@@ -115,7 +118,12 @@ impl Request {
     pub fn takes_keyboard(&self) -> bool {
         matches!(
             self,
-            Request::Launcher | Request::Overview | Request::AppGrid | Request::KeysCard | Request::Panel(_)
+            Request::Launcher
+                | Request::Overview
+                | Request::AppGrid
+                | Request::KeysCard
+                | Request::FocusBar
+                | Request::Panel(_)
         )
     }
 }
@@ -181,6 +189,7 @@ pub const COMMANDS: &[&str] = &[
     "apps",
     "keys",
     "saver",
+    "tray",
     "panel",
     "profile",
     "reload",
@@ -300,6 +309,10 @@ pub fn parse(words: &[String]) -> Result<Request, IpcError> {
         "keys" => {
             takes(0, "no arguments")?;
             Request::KeysCard
+        }
+        "tray" => {
+            takes(0, "no arguments")?;
+            Request::FocusBar
         }
         "panel" => {
             const EXPECTED: &str = "quick, network, calendar or volume";
@@ -515,6 +528,7 @@ mod tests {
         assert_eq!(p("dropdown"), Ok(Request::Dropdown));
         assert_eq!(p("desktop"), Ok(Request::ShowDesktop));
         assert_eq!(p("keys"), Ok(Request::KeysCard));
+        assert_eq!(p("tray"), Ok(Request::FocusBar));
         assert_eq!(p("panel quick"), Ok(Request::Panel(PanelName::Quick)));
         assert_eq!(p("panel network"), Ok(Request::Panel(PanelName::Network)));
         assert_eq!(p("panel calendar"), Ok(Request::Panel(PanelName::Calendar)));
@@ -588,6 +602,7 @@ mod tests {
         ("start_saver", "saver"),
         ("app_grid", "apps"),
         ("keys_card", "keys"),
+        ("focus_bar", "tray"),
         ("dropdown", "dropdown"),
     ];
     const NOT_AN_ACTION: &[&str] = &["drag"];
@@ -634,6 +649,7 @@ mod tests {
                                 | Request::Saver
                                 | Request::AppGrid
                                 | Request::KeysCard
+                                | Request::FocusBar
                         ),
                         "{field}: `{command}` is {request:?}"
                     );
@@ -667,6 +683,7 @@ mod tests {
             "saver",
             "apps",
             "keys",
+            "tray",
             "panel quick",
             "profile Kodlama",
             "restore",
@@ -679,7 +696,7 @@ mod tests {
 
     #[test]
     fn what_opens_with_the_keyboard_lets_the_shell_come_to_the_front() {
-        for command in ["launcher", "overview", "apps", "keys", "panel network"] {
+        for command in ["launcher", "overview", "apps", "keys", "tray", "panel network"] {
             assert!(p(command).unwrap().takes_keyboard(), "{command}");
         }
         for command in ["workspace 2", "close", "desktop", "saver", "dropdown", "reload"] {

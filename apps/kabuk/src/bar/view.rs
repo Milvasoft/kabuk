@@ -155,6 +155,8 @@ pub struct BarData {
     pub keyboard: Option<String>,
     /// What programs use now: the microphone, the camera, the location (D88).
     pub privacy: Vec<kabuk_core::privacy::Kind>,
+    /// The part the keyboard is on (Win+B; PLAN M19 U10), drawn as a popup's selection.
+    pub keyboard_on: Option<(&'static str, u32)>,
 }
 
 /// An app of the apps module as the bar draws it.
@@ -1201,6 +1203,27 @@ pub struct Regions {
 }
 
 pub fn regions(d: &BarData, s: &Style, i18n: &I18n, thickness: f32) -> Regions {
+    let mut r = drawn_regions(d, s, i18n, thickness);
+    // The part the keyboard is on (Win+B; PLAN M19 U10), marked as a popup's selection.
+    if let Some((module, value)) = d.keyboard_on {
+        let mark = |list: &mut Vec<Node>| {
+            *list = std::mem::take(list)
+                .into_iter()
+                .map(|n| super::popup_keys::marked(n, module, Some(value), &super::tooltip::TIP))
+                .collect();
+        };
+        mark(&mut r.start);
+        mark(&mut r.center);
+        mark(&mut r.end);
+        if let Some(a) = r.apps.as_mut() {
+            mark(&mut a.icons);
+            mark(&mut a.more);
+        }
+    }
+    r
+}
+
+fn drawn_regions(d: &BarData, s: &Style, i18n: &I18n, thickness: f32) -> Regions {
     let v = d.vertical();
     let g = |children: Vec<Node>| group(children, s, v, thickness);
 
@@ -1655,6 +1678,7 @@ mod tests {
             battery: None,
             keyboard: None,
             privacy: Vec::new(),
+            keyboard_on: None,
             volume: Some(Volume {
                 percent: 40,
                 muted: false,
@@ -2278,6 +2302,39 @@ mod tests {
         assert!(mark(true, false));
         assert!(mark(true, true));
         assert!(!mark(false, false));
+    }
+
+    /// PLAN M19 U10 (DECISIONS D98): the part the keyboard is on (Win+B) is drawn as a
+    /// popup's selection; its place and the others' stay where they were.
+    #[test]
+    fn the_part_the_keyboard_is_on_is_drawn_selected() {
+        let tr = I18n::new(Lang::Tr);
+        let panels = |l: &Layout| -> Vec<Paint> {
+            l.draws
+                .iter()
+                .filter_map(|x| match x {
+                    Draw::Panel { paint, .. } => Some(*paint),
+                    _ => None,
+                })
+                .collect()
+        };
+        let plain = render(&data(&tr), &tr);
+        for part in [(hit::TRAY, 1), (hit::CLOCK, 0), (hit::POWER, 0)] {
+            let on = render(
+                &BarData {
+                    keyboard_on: Some(part),
+                    ..data(&tr)
+                },
+                &tr,
+            );
+            assert_eq!(on.hits, plain.hits, "{part:?} moved the parts");
+            let (with, without) = (panels(&on), panels(&plain));
+            let selected = |p: &Paint| p.fill == Role::SurfaceSel || p.border.is_some_and(|(r, _)| r == Role::Fg);
+            assert!(
+                with.iter().filter(|p| selected(p)).count() > without.iter().filter(|p| selected(p)).count(),
+                "{part:?} not drawn selected"
+            );
+        }
     }
 
     /// M19 P3: the apps' pictures load off the bar thread; until one comes its app shows

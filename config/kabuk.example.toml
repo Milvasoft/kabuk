@@ -186,6 +186,7 @@ start_saver = ["Win+Shift+L"]       # the screen saver now (the display off when
 app_grid = ["Win+Shift+A"]          # every app on a full-screen grid, as macOS's Launchpad
 dropdown = ["Win+Enter"]            # the drop-down terminal, over every workspace
 keys_card = ["Win+F1"]              # the card of Kabuk's main shortcuts (it greets you on the first start)
+focus_bar = ["Win+B"]               # the keyboard on the bar's tray, as Windows' Win+B
 drag = "Alt"                      # held while dragging: left button moves, right button resizes
 
 [language]

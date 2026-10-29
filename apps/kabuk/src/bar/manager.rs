@@ -107,8 +107,11 @@ mod app_menu_host;
 mod app_preview_host;
 pub use app_preview_host::MSG_TEST_APP_PREVIEW;
 pub use wallpaper_host::MSG_TEST_DRIFT;
+#[path = "bar_keys_host.rs"]
+mod bar_keys_host;
 #[path = "keys_card_host.rs"]
 mod keys_card_host;
+pub use bar_keys_host::{MSG_FOCUS_BAR, MSG_TEST_BAR_KEYS};
 #[path = "media_card_host.rs"]
 mod media_card_host;
 #[path = "power_menu_host.rs"]
@@ -810,6 +813,8 @@ struct Shared {
     power_menu: Option<power_menu_host::PowerMenu>,
     /// The shortcut card's shortcuts, and the card while it shows (DECISIONS D61).
     keys_card: keys_card_host::KeysCardState,
+    /// The keyboard on the bar (Win+B; PLAN M19 U10).
+    bar_keys: bar_keys_host::BarKeysState,
     /// The media card while it is open (D66).
     media_card: Option<media_card_host::MediaCard>,
     volume_panel: Option<volume_panel_host::VolumePanel>,
@@ -1116,6 +1121,7 @@ impl BarManager {
                 saver: saver_host::SaverState::default(),
                 power_menu: None,
                 keys_card: Default::default(),
+                bar_keys: Default::default(),
                 media_card: None,
                 volume_panel: None,
                 app_menu: None,
@@ -1225,6 +1231,7 @@ impl BarManager {
             timed("bind_overview_keys", || s.bind_overview_keys());
             timed("bind_saver_keys", || s.bind_saver_keys());
             timed("bind_keys_card_keys", || s.bind_keys_card_keys());
+            timed("bind_bar_keys", || s.bind_bar_keys());
             timed("schedule_greeting", || s.schedule_greeting());
             timed("load_pins", || s.load_pins());
             timed("apply_cursors", || s.apply_cursors());
@@ -1621,6 +1628,11 @@ impl Shared {
                 Some(0)
             }
             #[cfg(feature = "integration")]
+            MSG_TEST_BAR_KEYS => {
+                self.test_bar_keys(m.wparam as u64);
+                Some(0)
+            }
+            #[cfg(feature = "integration")]
             MSG_TEST_KEYS_CARD => {
                 match m.wparam {
                     0 => self.close_keys_card(),
@@ -1946,7 +1958,8 @@ impl Shared {
                 || self.overview_hotkey(m.wparam)
                 || self.saver_hotkey(m.wparam)
                 || self.app_grid_hotkey(m.wparam)
-                || self.keys_card_hotkey(m.wparam))
+                || self.keys_card_hotkey(m.wparam)
+                || self.bar_keys_hotkey(m.wparam))
             .then_some(0),
             MSG_VOLUME_KEY => {
                 self.volume_key(m.wparam);
@@ -2022,6 +2035,11 @@ impl Shared {
             MSG_OPEN_KEYS_CARD => {
                 let activate = self.shortcuts;
                 self.toggle_keys_card(activate);
+                Some(0)
+            }
+            MSG_FOCUS_BAR => {
+                let activate = self.shortcuts;
+                self.focus_bar(activate);
                 Some(0)
             }
             MSG_OPEN_QUICK_PANEL => {
@@ -2541,6 +2559,9 @@ impl Shared {
         }
         if before.shortcuts.keys_card != after.shortcuts.keys_card {
             self.bind_keys_card_keys();
+        }
+        if before.shortcuts.focus_bar != after.shortcuts.focus_bar {
+            self.bind_bar_keys();
         }
         if before.bar.modules.taskbar != after.bar.modules.taskbar {
             self.refresh_apps();
@@ -4244,6 +4265,7 @@ impl Shared {
             || self.app_menu.is_some()
             || self.media_card.is_some()
             || self.app_preview.is_some()
+            || self.bar_keys_on()
     }
 
     /// Moves the auto-hiding bars and dock to where their slides have got, again until
@@ -4394,8 +4416,14 @@ impl Shared {
                 if let Some(a) = &self.bars[index].appbar {
                     a.activated();
                 }
+                // Another window took the keyboard (a panel a key opened, a tray icon's
+                // menu): it is off the bar.
+                if (m.wparam & 0xFFFF) == msg::WA_INACTIVE {
+                    self.leave_bar(false);
+                }
                 None
             }
+            msg::KEYDOWN | msg::CONTEXTMENU => self.on_bar_key(index, m),
             msg::LBUTTONDOWN => {
                 let (x, y) = msg::point(m.lparam);
                 if let Some((view::hit::APP, i)) = self.hit(index, x, y) {
@@ -4781,6 +4809,7 @@ impl Shared {
             battery: self.live.battery,
             keyboard: self.live.keyboard.clone(),
             privacy: kabuk_core::privacy::kinds(&self.live.privacy),
+            keyboard_on: self.keyboard_on(device),
         }
     }
 

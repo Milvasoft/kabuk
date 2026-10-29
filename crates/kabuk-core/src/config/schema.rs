@@ -1101,6 +1101,9 @@ pub struct Shortcuts {
     pub keys_card: Vec<String>,
     /// Drops the terminal down from the top of the monitor, or hides it (D62).
     pub dropdown: Vec<String>,
+    /// Puts the keyboard on the bar's tray, as Windows' Win+B puts it on the notification
+    /// area (PLAN M19 U10, DECISIONS D98).
+    pub focus_bar: Vec<String>,
     /// Held while dragging: left button moves, right button resizes.
     pub drag: String,
 }
@@ -1137,6 +1140,7 @@ impl Default for Shortcuts {
             app_grid: chords(&["Win+Shift+A"]),
             keys_card: chords(&["Win+F1"]),
             dropdown: chords(&["Win+Enter"]),
+            focus_bar: chords(&["Win+B"]),
             drag: "Alt".into(),
         }
     }

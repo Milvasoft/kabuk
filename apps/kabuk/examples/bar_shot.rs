@@ -255,6 +255,7 @@ fn main() {
         battery: None,
         keyboard: None,
         privacy: Vec::new(),
+        keyboard_on: None,
         apps: (0..number("--apps"))
             .map(|i| AppIcon {
                 // The design's window names, which Pano's task list shows.

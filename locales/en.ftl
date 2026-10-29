@@ -15,7 +15,7 @@ cli-usage =
                                 focus <left|down|up|right>, move <left|down|up|right>,
                                 float <toggle|on|off>, close, scratchpad <toggle|send>,
                                 group <toggle|next>, layout <dwindle|master|floating|tiling|cycle>,
-                                dropdown, desktop, launcher, overview, apps, keys, saver,
+                                dropdown, desktop, launcher, overview, apps, keys, saver, tray,
                                 panel <quick|network|calendar|volume>, profile <name>, reload,
                                 query <state|windows|monitors|tray>, quiet <on|off|toggle>, restore
     Options:
@@ -420,6 +420,7 @@ set-key-next-tab = Next tab of the group
 set-key-overview = Overview of every workspace
 set-key-start-saver = Start the screen saver now
 set-key-keys-card = Show the shortcut card
+set-key-focus-bar = Put the keyboard on the bar's tray
 keys-title = Shortcuts
 keys-title-h = Kabuk's main shortcuts, as you set them
 keys-welcome = Welcome to Kabuk

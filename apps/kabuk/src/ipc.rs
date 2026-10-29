@@ -11,7 +11,7 @@ use kabuk_win::window::Hwnd;
 use serde_json::{json, Value};
 
 use crate::bar::manager::{
-    MSG_OPEN_APP_GRID, MSG_OPEN_CALENDAR_PANEL, MSG_OPEN_KEYS_CARD, MSG_OPEN_LAUNCHER, MSG_OPEN_NETWORK_PANEL,
+    MSG_FOCUS_BAR, MSG_OPEN_APP_GRID, MSG_OPEN_CALENDAR_PANEL, MSG_OPEN_KEYS_CARD, MSG_OPEN_LAUNCHER, MSG_OPEN_NETWORK_PANEL,
     MSG_OPEN_OVERVIEW, MSG_OPEN_QUICK_PANEL, MSG_OPEN_VOLUME_PANEL, MSG_RELOAD, MSG_SET_QUIET, MSG_STARTED_AGAIN,
     MSG_START_SAVER,
 };
@@ -97,6 +97,7 @@ fn handle(line: &str, t: &Targets) -> Reply {
         Request::Saver => to_bar(MSG_START_SAVER),
         Request::AppGrid => to_bar(MSG_OPEN_APP_GRID),
         Request::KeysCard => to_bar(MSG_OPEN_KEYS_CARD),
+        Request::FocusBar => to_bar(MSG_FOCUS_BAR),
         Request::Panel(panel) => to_bar(match panel {
             PanelName::Quick => MSG_OPEN_QUICK_PANEL,
             PanelName::Network => MSG_OPEN_NETWORK_PANEL,

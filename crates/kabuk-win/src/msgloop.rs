@@ -1062,6 +1062,9 @@ pub mod msg {
     pub const MBUTTONDOWN: u32 = w::WM_MBUTTONDOWN;
     pub const MBUTTONUP: u32 = w::WM_MBUTTONUP;
     pub const CHAR: u32 = w::WM_CHAR;
+    /// A context menu is asked for: a right click's, or the keyboard's (the menu key or
+    /// Shift+F10, [`by_keyboard`]), which `DefWindowProc` makes of their key's release.
+    pub const CONTEXTMENU: u32 = w::WM_CONTEXTMENU;
     /// The window may choose the cursor: [`super::show_text_cursor`] and `Some(1)`, or
     /// `None` for the class's arrow.
     pub const SETCURSOR: u32 = w::WM_SETCURSOR;
@@ -1098,9 +1101,16 @@ pub mod msg {
         i32::from(((wparam >> 16) & 0xffff) as u16 as i16)
     }
 
+    /// Whether a [`CONTEXTMENU`] with `lparam` came from the keyboard: its point is
+    /// (-1, -1) then, a mouse's is where it was clicked.
+    pub fn by_keyboard(lparam: isize) -> bool {
+        point(lparam) == (-1, -1)
+    }
+
     #[cfg(test)]
     mod tests {
-        //! Edge cases: negative coordinates (left monitor), wheel up and down.
+        //! Edge cases: negative coordinates (left monitor), wheel up and down; a context
+        //! menu from the keyboard or from a click.
         use super::*;
 
         #[test]
@@ -1108,6 +1118,12 @@ pub mod msg {
             let lp = ((-20i32 as u16 as isize) << 16) | (-2560i32 as u16 as isize);
             assert_eq!(point(lp), (-2560, -20));
             assert_eq!(point((40 << 16) | 300), (300, 40));
+            // A context menu from the keyboard, as Windows sends it on 64 bits (and
+            // sign-extended), and one from a click.
+            assert!(by_keyboard(0xFFFF_FFFF));
+            assert!(by_keyboard(-1));
+            assert!(!by_keyboard((40 << 16) | 300));
+            assert!(!by_keyboard(lp), "a click at (-2560, -20)");
             assert_eq!(wheel((120usize) << 16), 120);
             assert_eq!(wheel(((-240i32 as u16) as usize) << 16), -240);
         }

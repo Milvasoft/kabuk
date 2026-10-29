@@ -13,10 +13,18 @@ use crate::bar::access::{self, Said};
 impl Shared {
     /// The parts of a bar showing `data`, drawn as `layout` at `origin`.
     pub(super) fn bar_parts(&self, layout: &Layout, origin: Point, scale: Scale, data: &BarData) -> Vec<Part> {
-        access::bar_parts(layout, origin, scale, |d| {
+        let mut parts = access::bar_parts(layout, origin, scale, |d| {
             let said = self.module_said(d.hit.module, d.hit.value, data);
             access::bar_name(&self.i18n, (d.hit.module, d.hit.value), &d.text, said)
-        })
+        });
+        // The part the keyboard is on (Win+B; PLAN M19 U10) holds it for screen readers.
+        let on = data
+            .keyboard_on
+            .map(|(module, value)| kabuk_win::uia::part_id(module, value));
+        for p in &mut parts {
+            p.focused = Some(p.id) == on;
+        }
+        parts
     }
 
     /// Figure `which` of the bar's system figures, written as the bar writes it.

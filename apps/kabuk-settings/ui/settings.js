@@ -741,7 +741,7 @@
         <div><button class="set-btn ghost" type="button" data-grid-reset ${g.ordered ? "" : "disabled"}>${t("lpGridReset")}</button></div></div>`;
   }
 
-  const KEYS = ["launcher", "workspace", "move_to_workspace", "focus_left", "focus_down", "focus_up", "focus_right", "move_left", "move_down", "move_up", "move_right", "toggle_float", "close_window", "cycle_layout", "toggle_scratchpad", "to_scratchpad", "toggle_group", "next_tab", "overview", "start_saver", "app_grid", "keys_card", "dropdown", "drag"];
+  const KEYS = ["launcher", "workspace", "move_to_workspace", "focus_left", "focus_down", "focus_up", "focus_right", "move_left", "move_down", "move_up", "move_right", "toggle_float", "close_window", "cycle_layout", "toggle_scratchpad", "to_scratchpad", "toggle_group", "next_tab", "overview", "start_saver", "app_grid", "keys_card", "focus_bar", "dropdown", "drag"];
   function keysPage() {
     const any = KEYS.some((k) => changed("shortcuts." + k));
     return head(t("navKeys"), t("keysDesc")) + (any ? `<div><button class="set-btn ghost" type="button" data-reset-keys>${t("setResetKeys")}</button></div>` : "") + `
