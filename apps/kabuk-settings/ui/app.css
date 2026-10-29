@@ -29,3 +29,15 @@ body { background: var(--desk, #000); }
 .swatch-pick::-webkit-color-swatch-wrapper { padding: 3px; }
 .swatch-pick::-webkit-color-swatch { border: none; border-radius: 50%; }
 .sw-warn { display: block; margin-top: 8px; font-size: 12.5px; color: var(--accent-s); }
+
+/* The window rule editor (PLAN M19 U11): under the rule it edits, across the table. */
+.rules-t > .rule-edit-row { grid-column: 1 / -1; padding: 14px 0 18px; }
+/* "Pick an open window": each window's title, its program and class under it. */
+.rule-wins { display: grid; gap: 6px; max-height: 260px; overflow-y: auto; }
+.rule-win { font: inherit; text-align: left; color: var(--fg-s); background: none; border: 1px solid var(--line-s); border-radius: 8px; padding: 8px 12px; cursor: pointer; display: grid; gap: 2px; }
+.rule-win span { color: var(--dim); font-family: var(--num); font-size: 12.5px; }
+.rule-win:hover { background: var(--surf-sel); }
+.rule-win:focus-visible { outline: 2px solid var(--accent-s); outline-offset: 1px; }
+.screen[data-dir="i"] .rule-win, .screen[data-dir="k"] .rule-win { border-radius: 0; }
+/* A rule matching on several fields fills its cell: the columns keep apart. */
+.rules-t { column-gap: 16px; }

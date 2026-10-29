@@ -5,11 +5,14 @@
 //!   the live information.
 //! - `{"op":"set","path":"windows.gap","value":12}` → the setting written to
 //!   `kabuk.toml` (only that key changes, atomically; Kabuk applies it live) and a fresh
-//!   `state`; or `{"op":"refused","path":…}` when the value is not valid.
+//!   `state`; or `{"op":"refused","path":…,"reason":…,"at":…}` when the value is not
+//!   valid: why, in the user's language, and the key the mistake is at
+//!   (`rules.rule[2].title`; `null` when not known).
 //! - `{"op":"info"}` → `{"op":"info", …}`: monitors, managed windows, memory, from the
 //!   running shell over its command pipe.
-//! - `{"op":"apps"}` → `{"op":"apps","apps":["Discord.exe", …]}`: the programs of the
-//!   windows Kabuk manages now, for a new window rule.
+//! - `{"op":"windows"}` → `{"op":"windows","windows":[{"exe":…,"class":…,"title":…}, …]}`:
+//!   the windows Kabuk manages now, for "Pick an open window" (SPEC §2.3; a test passes
+//!   `"windows"` as `query windows` gives them).
 //! - `{"op":"pick","what":"image"|"folder"}` → `{"op":"picked","what":…,"path":…}`:
 //!   Windows' own dialog; `path` is `null` when the user cancels.
 //! - `{"op":"preview-saver"}` → `{"op":"previewed","started":…}`: the screen saver the
@@ -137,7 +140,10 @@ impl Bridge {
                 self.set(path, &value)
             }
             "info" => self.info(),
-            "apps" => self.apps(),
+            "windows" => {
+                let windows = m.get("windows").cloned().or_else(|| self.ask(&["query", "windows"]));
+                json!({ "op": "windows", "windows": open_windows(windows.as_ref()) })
+            }
             "preview-saver" => self.preview_saver(),
             "quit" => self.quit(),
             "update-check" => self.check_update(),
@@ -197,9 +203,9 @@ impl Bridge {
 
     fn set(&self, path: &str, value: &Value) -> Value {
         let source = self.read();
-        let refused = |why: String| {
-            tracing::warn!(path, value = %value, why, "setting refused");
-            json!({ "op": "refused", "path": path, "reason": why })
+        let refused = |(why, at): (String, Option<String>)| {
+            tracing::warn!(path, value = %value, why, at, "setting refused");
+            json!({ "op": "refused", "path": path, "reason": why, "at": at })
         };
         let text = match config::edit::set(&source, path, value) {
             Ok(text) => text,
@@ -211,7 +217,7 @@ impl Bridge {
         if let Err(e) = kabuk_core::fsutil::write_atomic(&self.config_file, text.as_bytes()) {
             tracing::error!(error = %e, "kabuk.toml not written");
             let i18n = kabuk_win::system::i18n(Some(&self.config()));
-            return refused(i18n.tr("set-refused"));
+            return refused((i18n.tr("set-refused"), None));
         }
         tracing::info!(path, value = %value, "setting saved");
         let mut state = self.state();
@@ -491,22 +497,6 @@ impl Bridge {
         json!({ "op": "previewed", "started": started })
     }
 
-    /// The program file names of the managed windows, sorted, each once.
-    pub fn apps(&self) -> Value {
-        let windows = self.ask(&["query", "windows"]);
-        let mut apps: Vec<String> = windows
-            .as_ref()
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(|w| w["pid"].as_u64().and_then(|p| u32::try_from(p).ok()))
-            .filter_map(|pid| kabuk_win::process::Process::query(pid).ok()?.image_name())
-            .collect();
-        apps.sort_by_key(|a| a.to_lowercase());
-        apps.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
-        json!({ "op": "apps", "apps": apps })
-    }
-
     /// The running shell's figures for the About page; `running: false` without one.
     pub fn info(&self) -> Value {
         let state = self.ask(&["query", "state"]);
@@ -563,22 +553,46 @@ const TOUCHPAD_SETTINGS: &str = "ms-settings:devices-touchpad";
 /// What opens `kabuk.toml` when no program is set for `.toml` files.
 const NOTEPAD: &str = "notepad.exe";
 
-/// Why a change was refused, in the user's language (PLAN M19 U2): the mistakes about
-/// `path` first (a mistake elsewhere in the file refuses every change too).
-fn refusal(e: &config::edit::EditError, path: &str, i18n: &kabuk_i18n::I18n) -> String {
+/// Why a change was refused, in the user's language (PLAN M19 U2), and the key the
+/// mistake is at: the mistakes about `path` first (a mistake elsewhere in the file refuses
+/// every change too, as a rule on workspace 5 refuses three workspaces). A mistake at a key
+/// is said without its line: the page shows it at its row, and the line was of the file as
+/// it would have been, not as it is.
+fn refusal(e: &config::edit::EditError, path: &str, i18n: &kabuk_i18n::I18n) -> (String, Option<String>) {
     use config::edit::EditError;
     match e {
         EditError::Invalid(errors) => {
             let about = |c: &&config::ConfigError| c.path.as_ref().is_some_and(|p| p.to_string().starts_with(path));
-            errors
-                .iter()
-                .find(about)
-                .or_else(|| errors.first())
-                .map_or_else(|| i18n.tr("set-refused"), |c| c.describe(i18n))
+            errors.iter().find(about).or_else(|| errors.first()).map_or_else(
+                || (i18n.tr("set-refused"), None),
+                |c| match &c.path {
+                    Some(at) => (c.problem.describe(i18n), Some(at.to_string())),
+                    None => (c.describe(i18n), None),
+                },
+            )
         }
-        EditError::Syntax(d) => config::Problem::Syntax(d.clone()).describe(i18n),
-        EditError::BadPath(_) | EditError::BadValue(_) => i18n.tr("set-refused"),
+        EditError::Syntax(d) => (config::Problem::Syntax(d.clone()).describe(i18n), None),
+        EditError::BadPath(_) | EditError::BadValue(_) => (i18n.tr("set-refused"), None),
     }
+}
+
+/// The windows a rule can be made from (`query windows`' answer): each one's program,
+/// class and title, those with neither program nor class left out, each once, by program
+/// and title.
+fn open_windows(windows: Option<&Value>) -> Vec<Value> {
+    let text = |w: &Value, key: &str| w[key].as_str().unwrap_or_default().to_string();
+    let mut list: Vec<(String, String, String)> = windows
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|w| (text(w, "exe"), text(w, "class"), text(w, "title")))
+        .filter(|(exe, class, _)| !exe.is_empty() || !class.is_empty())
+        .collect();
+    list.sort_by_key(|(exe, class, title)| (exe.to_lowercase(), title.to_lowercase(), class.clone()));
+    list.dedup();
+    list.into_iter()
+        .map(|(exe, class, title)| json!({ "exe": exe, "class": class, "title": title }))
+        .collect()
 }
 
 fn open_release_page(page: &str) -> Option<Value> {
@@ -777,6 +791,71 @@ mod tests {
         );
     }
 
+    /// PLAN M19 U11: a refused rule names the key its mistake is at, so the rule editor
+    /// shows it under its field; a change refused for a rule's sake names the rule.
+    #[test]
+    fn a_refused_rule_names_the_field_at_fault() {
+        let dir = tempfile::tempdir().unwrap();
+        let before =
+            "schema = 1\n[language]\nlanguage = \"en\"\n[[rules.rule]]\nexe = \"Discord.exe\"\nworkspace = 5\n";
+        let b = bridge(&dir, Some(before));
+        let bad = json!([{ "exe": "Discord.exe", "workspace": 5 }, { "title": "(", "regex": true, "float": true }]);
+        let r = reply(&b, json!({"op": "set", "path": "rules.rule", "value": bad}));
+        assert_eq!(
+            (r["op"].as_str(), r["at"].as_str()),
+            (Some("refused"), Some("rules.rule[1].title")),
+            "{r}"
+        );
+        // Said without a line: the page shows it under the field, and the file was not
+        // written.
+        let why = r["reason"].as_str().unwrap_or_default();
+        assert!(
+            why.starts_with("not a valid regular expression") && !why.contains("Line"),
+            "{r}"
+        );
+        let r = reply(
+            &b,
+            json!({"op": "set", "path": "rules.rule", "value": [{ "exe": "a.exe" }]}),
+        );
+        assert_eq!(r["at"], "rules.rule[0]", "{r}");
+        // Three workspaces: the rule on workspace 5 is in the way.
+        let r = reply(&b, json!({"op": "set", "path": "windows.workspaces", "value": 3}));
+        assert_eq!(
+            (r["path"].as_str(), r["at"].as_str()),
+            (Some("windows.workspaces"), Some("rules.rule[0].workspace")),
+            "{r}"
+        );
+        assert_eq!(std::fs::read_to_string(&b.config_file).unwrap(), before);
+        // A value refused for itself is at its own key.
+        let r = reply(
+            &b,
+            json!({"op": "set", "path": "windows.shown_workspaces", "value": 10}),
+        );
+        assert_eq!(r["at"], "windows.shown_workspaces", "{r}");
+    }
+
+    /// SPEC §2.3 "Pick an open window": the managed windows' program, class and title,
+    /// each once, by program; a window with neither program nor class is left out.
+    #[test]
+    fn open_windows_are_offered_for_a_rule() {
+        let dir = tempfile::tempdir().unwrap();
+        let b = bridge(&dir, None);
+        let windows = json!([
+            { "hwnd": 1, "exe": "Slack.exe", "class": "Chrome_WidgetWin_1", "title": "Slack", "pid": 4 },
+            { "hwnd": 2, "exe": "Code.exe", "class": "Chrome_WidgetWin_1", "title": "main.rs - kabuk", "pid": 5 },
+            { "hwnd": 3, "exe": null, "class": "", "title": "Ghost", "pid": 6 },
+            { "hwnd": 4, "exe": "Slack.exe", "class": "Chrome_WidgetWin_1", "title": "Slack", "pid": 4 },
+        ]);
+        let r = reply(&b, json!({"op": "windows", "windows": windows}));
+        assert_eq!(
+            r["windows"],
+            json!([
+                { "exe": "Code.exe", "class": "Chrome_WidgetWin_1", "title": "main.rs - kabuk" },
+                { "exe": "Slack.exe", "class": "Chrome_WidgetWin_1", "title": "Slack" },
+            ])
+        );
+    }
+
     /// PLAN M19 U1: with a mistake in the file the page is told what is wrong and where,
     /// instead of showing the defaults as the user's.
     #[test]
@@ -800,7 +879,7 @@ mod tests {
         assert_eq!(b.handle("not json"), None);
         assert_eq!(b.handle("{\"op\":\"set\"}"), None);
         assert_eq!(reply(&b, json!({"op": "info"}))["info"]["running"], false);
-        assert_eq!(reply(&b, json!({"op": "apps"}))["apps"], json!([]));
+        assert_eq!(reply(&b, json!({"op": "windows"}))["windows"], json!([]));
         // Nothing installed in a fresh state folder: nothing starts.
         assert_eq!(reply(&b, json!({"op": "preview-saver"}))["started"], false);
         assert_eq!(b.handle("{\"op\":\"pick\",\"what\":\"song\"}"), None);

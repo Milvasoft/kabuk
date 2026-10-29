@@ -12,7 +12,8 @@
 // every page writes a value the bridge accepts; the main settings land in the file as
 // TOML; the custom dimming delay refuses below 10 s, above 60 min and an empty value
 // and saves a valid one; a shortcut is recorded from the keyboard; a window rule is
-// added and removed; switching the language rewords the page; the Create tab makes a
+// added with every field, refused under the field at fault, edited in place, filled from
+// an open window and removed; switching the language rewords the page; the Create tab makes a
 // wallpaper with a local stand-in for Ollama (the first answer too bright and sent back,
 // the second kept and applied), and an API key typed in is stored in Windows Credential
 // Manager and in no file or log, then removed.
@@ -469,15 +470,93 @@ async function main() {
   await page.click(`[data-tgl="rules.defaults"]`); await settled();
   check(/defaults = true/.test(toml()) && (await defaultRows()) > 0, "default rules: on again");
 
-  // A window rule added and removed.
+  // PLAN M19 U11: the window rule editor. Every field of a rule written; a wrong value
+  // said under its field; a rule edited in place, not added again; "Pick an open window"
+  // fills the form from the shell's windows; rules removed.
   await go("rules");
   await page.click(`[data-rule-new]`); await settled();
+  const saveOff = () => page.locator("[data-rule-save]").isDisabled();
+  const note = (g) => page.locator(`[data-rule-note="${g}"]`).innerText();
+  check((await saveOff()) && (await note("match")).length > 0, "rule: nothing to match, nothing saved");
   await page.fill("#rule-exe", "Discord.exe");
-  await page.selectOption("#rule-what", "ws5");
-  await page.click(`[data-rule-save]`); await settled();
-  check(/\[\[rules\.rule\]\]\s*exe = "Discord\.exe"\s*workspace = 5/.test(toml()), "rule: Discord.exe on workspace 5");
+  check((await saveOff()) && (await note("match")) === "" && (await note("action")).length > 0, "rule: a program but nothing to do, nothing saved");
+  await page.selectOption("#rule-workspace", "5");
+  check(!(await saveOff()) && (await note("action")) === "", "rule: a program and a workspace can be saved");
+  await page.fill("#rule-monitor", "17");
+  const wrong = (id) => page.$eval(`#${id}`, (e) => e.getAttribute("aria-invalid") === "true" && document.getElementById(e.id + "-h").classList.contains("err"));
+  check((await saveOff()) && (await wrong("rule-monitor")), "rule: monitor 17 refused under its field");
+  await page.fill("#rule-monitor", "2");
+  await page.fill("#rule-min_width", "0");
+  check((await saveOff()) && (await wrong("rule-min_width")) && !(await wrong("rule-monitor")), "rule: width 0 refused under its field");
+  await page.fill("#rule-min_width", "800");
+  check(!(await saveOff()), "rule: right again, it can be saved");
+  await page.fill("#rule-class", "Chrome_WidgetWin_1");
+  await page.selectOption("#rule-placement", "right");
+  await page.click(`[data-rule-flag="float"]`); await settled();
+  await page.click(`[data-rule-flag="no_grab"]`); await settled();
+  check((await page.inputValue("#rule-min_width")) === "800" && (await page.inputValue("#rule-class")) === "Chrome_WidgetWin_1", "rule: a switch keeps what was typed");
+  await page.click("[data-rule-save]"); await settled();
+  const rulesIn = () => toml().split("[[rules.rule]]").slice(1).map((r) => r.split(/\n\[/)[0]);
+  const r0 = rulesIn()[0] || "";
+  check(rulesIn().length === 1 && [/exe = "Discord\.exe"/, /class = "Chrome_WidgetWin_1"/, /workspace = 5/, /monitor = 2/, /min_width = 800/, /placement = "right"/, /float = true/, /no_grab = true/].every((re) => re.test(r0)), `rule: every field written: ${r0.trim().replace(/\n/g, " ")}`);
+  check((await page.locator("[data-rule-editor]").count()) === 0 && (await page.locator(".rules-t").innerText()).includes("Chrome_WidgetWin_1"), "rule: the editor closes, the rule is listed");
+
+  // Fewer workspaces than the rule sends windows to: refused, the rule named.
+  await go("windows");
+  await slide("ws-count", "3");
+  const wsWhy = await page.locator("[data-refusal]").innerText().catch(() => "");
+  check(!/\nworkspaces = 3/.test(toml()) && wsWhy.includes("Discord.exe") && wsWhy.includes("1 ile 3"), `workspaces: three refused, the rule in the way named (${wsWhy})`);
+
+  // Edited in place: a wrong regular expression is refused under the title, the file
+  // unchanged; a right one replaces the rule.
+  await go("rules");
+  await page.click(`[data-rule-edit="0"]`); await settled();
+  check((await page.locator(".rules-t .rule-edit-row [data-rule-editor]").count()) === 1 && (await page.inputValue("#rule-monitor")) === "2" && (await page.inputValue("#rule-workspace")) === "5", "rule: edited in place, its fields filled");
+  await page.fill("#rule-title", "(Discord");
+  await page.click(`[data-rule-flag="regex"]`); await settled();
+  const before = toml();
+  await page.click("[data-rule-save]"); await settled();
+  const titleWhy = await page.$eval("#rule-title", (e) => (e.closest(".set-row").querySelector("[data-refusal]") || {}).textContent || "");
+  check(toml() === before && titleWhy.includes("düzenli ifade") && (await page.locator("[data-rule-editor]").count()) === 1, `rule: a wrong regular expression refused under the title (${titleWhy})`);
+  await page.fill("#rule-title", "^Discord");
+  await page.click("[data-rule-save]"); await settled();
+  const r1 = rulesIn()[0] || "";
+  check(rulesIn().length === 1 && /title = "\^Discord"/.test(r1) && /regex = true/.test(r1) && /min_width = 800/.test(r1), `rule: edited, not added: ${r1.trim().replace(/\n/g, " ")}`);
+  await page.click(`[data-rule-edit="0"]`); await settled();
+  await page.selectOption("#rule-workspace", "");
+  await page.fill("#rule-min_width", "");
+  await page.click(`[data-rule-flag="no_grab"]`); await settled();
+  await page.click("[data-rule-save]"); await settled();
+  const r2 = rulesIn()[0] || "";
+  check(!/workspace|min_width|no_grab/.test(r2) && /monitor = 2/.test(r2) && /float = true/.test(r2), `rule: emptied fields leave it: ${r2.trim().replace(/\n/g, " ")}`);
+  await page.click(`[data-rule-edit="0"]`); await settled();
+  await page.click("[data-rule-cancel]"); await settled();
+  check((await page.locator("[data-rule-editor]").count()) === 0 && toml().includes('title = "^Discord"'), "rule: Cancel leaves it as it was");
+
+  // "Pick an open window": with no shell here none, and said so; the shell's windows
+  // (as `query windows` gives them, through the bridge) listed by program; one picked
+  // fills the program, class and title.
+  await page.click(`[data-rule-new="pick"]`); await settled();
+  check((await page.locator(".rule-win").count()) === 0 && (await page.locator(".rule-edit [role=status]").first().innerText()).length > 0, "pick: no windows without the shell, and said so");
+  const shellWindows = [
+    { hwnd: 7, exe: "Slack.exe", class: "Chrome_WidgetWin_1", title: "Slack | general", pid: 70 },
+    { hwnd: 8, exe: "Code.exe", class: "Chrome_WidgetWin_1", title: "main.rs - kabuk", pid: 80 },
+  ];
+  await page.evaluate((w) => window.chrome.webview.postMessage(JSON.stringify({ op: "windows", windows: w })), shellWindows); await settled();
+  if (shots) { await page.locator(".rule-wins").scrollIntoViewIfNeeded(); await page.screenshot({ path: path.join(shots, "rules-pick.png") }); }
+  const picks = await page.locator(".rule-win b").allInnerTexts();
+  check(picks.length === 2 && picks[0] === "main.rs - kabuk", `pick: the windows listed by program (${picks})`);
+  await page.click(`[data-rule-win="1"]`); await settled();
+  check((await page.inputValue("#rule-exe")) === "Slack.exe" && (await page.inputValue("#rule-class")) === "Chrome_WidgetWin_1" && (await page.inputValue("#rule-title")) === "Slack | general" && (await page.locator(".rule-win").count()) === 0, "pick: the window fills the program, class and title");
+  await page.fill("#rule-title", "");
+  await page.click(`[data-rule-flag="ignore"]`); await settled();
+  await page.click("[data-rule-save]"); await settled();
+  check(rulesIn().length === 2 && /exe = "Slack\.exe"/.test(rulesIn()[1]) && /ignore = true/.test(rulesIn()[1]), "pick: a second rule added after the first");
+  if (shots) { await page.click(`[data-rule-edit="1"]`); await settled(); await page.screenshot({ path: path.join(shots, "rules-edit.png") }); await page.locator("[data-rule-save]").scrollIntoViewIfNeeded(); await page.screenshot({ path: path.join(shots, "rules-edit-2.png") }); await page.click("[data-rule-cancel]"); await settled(); }
   await page.click(`[data-rule-drop="0"]`); await settled();
-  check(!/rules\.rule/.test(toml()), "rule removed");
+  check(rulesIn().length === 1 && /Slack\.exe/.test(rulesIn()[0]), "rule: the first removed, the second kept");
+  await page.click(`[data-rule-drop="0"]`); await settled();
+  check(!/rules\.rule/.test(toml()), "rule: the last removed");
 
   // Check for updates: Kabuk's latest GitHub release is asked for and what it said shown
   // (up to date, a newer version, or GitHub unreachable when offline).

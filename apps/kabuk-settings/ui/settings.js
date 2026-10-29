@@ -16,8 +16,9 @@
     wallMon: "all",
     wallTab: "pick",
     dimCustom: null, // null: follow the value; true/false: chosen
-    ruleForm: null, // { exe, what } while adding a rule
-    apps: [],
+    ruleForm: null, // the rule being added (index null) or edited, as its fields read
+    rulePicking: false, // the open windows listed to fill the rule from
+    ruleWindows: null, // null: asked, not answered; else [{ exe, class, title }]
     capture: null, // { path, index, mods } while a shortcut is being pressed
     refused: null,
     pending: null, // what a picked file or folder is for
@@ -43,7 +44,7 @@
   const LOOK_NAMES = { a: "ada", b: "cizgi", c: "devre", d: "ray", e: "konsol", f: "rihtim", g: "etkinlik", h: "pano", i: "izgara", j: "defter" };
   const DIM_MIN = 10, DIM_MAX = 3600, DIM_PRESETS = [30, 60, 120];
   const SAVER_WAITS = [3, 5, 10, 15];
-  const RANGES = { height: [24, 72], tray: [0, 12], gap: [0, 32], bright: [10, 100, 5], dropdown: [20, 90, 5], workspaces: [1, 9], drift: [1, 120] };
+  const RANGES = { height: [24, 72], tray: [0, 12], gap: [0, 32], bright: [10, 100, 5], dropdown: [20, 90, 5], workspaces: [1, 9], drift: [1, 120], monitor: [1, 16], minWidth: [1, 16384] };
 
   const cfg = () => S.config;
   const at = (root, path) => path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), root);
@@ -73,7 +74,16 @@
   function refusalFor(path) {
     if (!ui.refused || ui.refused.path !== path) return "";
     ui.refusalShown = true;
-    return `<span class="h" role="alert" data-refusal style="display:block;color:var(--err-fg)">${escapeHtml(ui.refused.reason || t("setRefused"))}</span>`;
+    return `<span class="h" role="alert" data-refusal style="display:block;color:var(--err-fg)">${escapeHtml(refusalText())}</span>`;
+  }
+  /* Why the last change was refused; a rule of the user's in the way is named (fewer
+     workspaces than a rule sends windows to). */
+  function refusalText() {
+    const r = ui.refused;
+    const why = r.reason || t("setRefused");
+    const where = /^rules\.rule\[(\d+)\]/.exec(r.at || "");
+    const rule = where && r.path !== "rules.rule" ? (cfg().rules.rule || [])[Number(where[1])] : null;
+    return rule ? `${tv("setRefusedByRule", ruleName(rule))}: ${why}` : why;
   }
   // A row for setting `path`: its "Use default" sits at the end of its hint, as a switch's
   // does, never between the label and the control (found by the user).
@@ -486,6 +496,12 @@
       <div><button class="set-btn ghost" type="button" data-touchpad-settings>${t("gsWindows")}</button></div></div>`;
   }
 
+  /* ---------- window rules (SPEC §2.3) ---------- */
+  const RULE_TEXTS = [["exe", "setRuleExe", "setRuleExePh"], ["class", "setRuleClass", "setRuleClassPh"], ["title", "setRuleTitle", "setRuleTitlePh"]];
+  const RULE_SWITCHES = [["float", "setRuleFloat", "setRuleFloatH"], ["ignore", "setRuleIgnore", "setRuleIgnoreH"], ["no_grab", "setRuleNoGrab", "setRuleNoGrabH"]];
+  const RULE_NUMBERS = [["monitor", "setRuleMon", "setRuleMonH", RANGES.monitor], ["min_width", "setRuleMin", "setRuleMinH", RANGES.minWidth]];
+  const PLACEMENTS = ["left", "right", "top", "bottom", "center"];
+  const ruleName = (r) => r.exe || r.class || r.title;
   function ruleText(r) {
     const parts = [];
     if (r.ignore) parts.push(t("setRuleIgnore"));
@@ -493,21 +509,121 @@
     if (r.workspace) parts.push(tv("setRuleWorkspace", r.workspace));
     if (r.monitor) parts.push(tv("setRuleMonitor", r.monitor));
     if (r.min_width) parts.push(tv("setRuleMinWidth", r.min_width));
+    if (r.placement) parts.push(`${t("setRulePlace")}: ${t("setRulePlace-" + r.placement)}`);
     if (r.no_grab) parts.push(t("setRuleNoGrab"));
-    return parts.join(", ");
+    return escapeHtml(parts.join(", "));
+  }
+  // What a rule matches: its program and class as code, its title as text.
+  function ruleMatch(r) {
+    const parts = [r.exe && `<code>${escapeHtml(r.exe)}</code>`, r.class && `<code>${escapeHtml(r.class)}</code>`, r.title && escapeHtml(r.title)].filter(Boolean);
+    return parts.join(" · ") + (r.regex ? ` <span style="color:var(--dim)">· ${t("setRuleRegex")}</span>` : "");
+  }
+  /** A rule as the editor's fields read it (text, so a wrong number can be shown). */
+  const ruleDraft = (r = {}, index = null) => ({
+    index, exe: r.exe || "", class: r.class || "", title: r.title || "", regex: !!r.regex,
+    float: !!r.float, ignore: !!r.ignore, no_grab: !!r.no_grab, placement: r.placement || "",
+    workspace: r.workspace ? String(r.workspace) : "", monitor: r.monitor ? String(r.monitor) : "", min_width: r.min_width ? String(r.min_width) : "",
+  });
+  /** What keeps the rule from being saved, by field (`match` and `action` for the groups). */
+  function ruleProblems(f) {
+    const p = {};
+    for (const [k, , , [min, max]] of RULE_NUMBERS) {
+      const raw = f[k].trim();
+      if (raw && !(/^\d+$/.test(raw) && Number(raw) >= min && Number(raw) <= max)) p[k] = tv("setRuleRange", `${min}–${max}`);
+    }
+    if (!RULE_TEXTS.some(([k]) => f[k].trim())) p.match = t("setRuleNeedMatch");
+    if (!(f.float || f.ignore || f.no_grab || f.workspace || f.monitor.trim() || f.min_width.trim() || f.placement)) p.action = t("setRuleNeedAction");
+    return p;
+  }
+  /** The rule the fields make, as kabuk.toml takes it. */
+  function ruleOf(f) {
+    const r = {};
+    for (const [k] of RULE_TEXTS) if (f[k].trim()) r[k] = f[k].trim();
+    if (f.regex) r.regex = true;
+    if (f.float) r.float = true;
+    if (f.ignore) r.ignore = true;
+    if (f.workspace) r.workspace = Number(f.workspace);
+    if (f.monitor.trim()) r.monitor = Number(f.monitor);
+    if (f.min_width.trim()) r.min_width = Number(f.min_width);
+    if (f.placement) r.placement = f.placement;
+    if (f.no_grab) r.no_grab = true;
+    return r;
+  }
+  /* Why kabuk.toml refused the rule, under the field it is about (the bridge names the
+     key: `rules.rule[2].title`); about the rule as a whole or another one, at its foot. */
+  function ruleFault(field) {
+    const r = ui.refused, f = ui.ruleForm;
+    if (!r || r.path !== "rules.rule" || !f) return "";
+    const where = /^rules\.rule\[(\d+)\](?:\.(\w+))?$/.exec(r.at || "");
+    const index = f.index ?? (cfg().rules.rule || []).length;
+    const known = [...RULE_TEXTS, ...RULE_NUMBERS].map(([k]) => k).concat(["workspace"]);
+    const key = where && Number(where[1]) === index && known.includes(where[2]) ? where[2] : "";
+    if (key !== field) return "";
+    ui.refusalShown = true;
+    return `<span class="h" role="alert" data-refusal style="display:block;color:var(--err-fg)">${escapeHtml(r.reason || t("setRefused"))}</span>`;
+  }
+  const ruleInput = (k, label, ph, numeric) => `<span class="num"><input type="text" id="rule-${k}" data-rule-field="${k}" ${numeric ? `inputmode="numeric" aria-describedby="rule-${k}-h"` : `spellcheck="false" style="width:260px"`} value="${escapeHtml(ui.ruleForm[k])}" placeholder="${escapeHtml(ph)}" aria-label="${escapeHtml(label)}"></span>`;
+  const ruleSwitch = (k, label, hint) => row(label, hint, `<button class="tgl" type="button" role="switch" aria-checked="${ui.ruleForm[k]}" aria-label="${escapeHtml(label)}" data-rule-flag="${k}"></button>`);
+  const ruleSelect = (k, label, options) => `<span class="num"><select id="rule-${k}" data-rule-field="${k}" aria-label="${escapeHtml(label)}">${[["", t("setRuleAny")], ...options].map(([v, n]) => `<option value="${v}"${ui.ruleForm[k] === String(v) ? " selected" : ""}>${n}</option>`).join("")}</select></span>`;
+  // The open windows to fill the rule from (SPEC §2.3 "Pick an open window").
+  function rulePicker() {
+    if (!ui.rulePicking) return `<div><button class="set-btn ghost" type="button" data-rule-pick>${t("pickWin")}</button></div>`;
+    if (ui.ruleWindows == null) return `<div class="h" role="status">${t("setRulePickWait")}</div>`;
+    if (!ui.ruleWindows.length) return `<div class="h" role="status">${t("setRulePickNone")}</div>`;
+    return `<div class="rule-wins" role="group" aria-label="${t("pickWin")}">${ui.ruleWindows.map((w, i) => `<button type="button" class="rule-win" data-rule-win="${i}"><b>${escapeHtml(w.title || w.exe || w.class)}</b><span>${escapeHtml([w.exe, w.class].filter(Boolean).join(" · "))}</span></button>`).join("")}</div>`;
+  }
+  function askWindows() {
+    ui.rulePicking = true;
+    ui.ruleWindows = null;
+    post({ op: "windows" });
+  }
+  function ruleEditor() {
+    const f = ui.ruleForm;
+    const workspaces = Array.from({ length: cfg().windows.workspaces }, (_, i) => [i + 1, tv("setRuleWorkspace", i + 1)]);
+    const texts = RULE_TEXTS.map(([k, label, ph]) => row(t(label), ruleFault(k), ruleInput(k, t(label), t(ph), false))).join("");
+    const numbers = RULE_NUMBERS.map(([k, label, hint, [min, max]]) => `<div class="set-row"><span><b>${t(label)}</b><span class="h">${t(hint)}${ruleFault(k)}</span></span>${ruleInput(k, t(label), `${min}–${max}`, true)}<span class="num-h" id="rule-${k}-h" aria-live="polite"></span></div>`).join("");
+    return `<div class="set-grp rule-edit" data-rule-editor>
+        <span class="gl">${t("setRuleMatch")}. ${t("setRuleMatchH")}</span>
+        ${rulePicker()}
+        ${texts}
+        ${ruleSwitch("regex", t("setRuleRegex"), t("setRuleRegexH"))}
+        <span class="h" data-rule-note="match" role="status"></span>
+        <span class="gl">${t("setRuleDo")}. ${t("setRuleDoH")}</span>
+        ${RULE_SWITCHES.map(([k, label, hint]) => ruleSwitch(k, t(label), t(hint))).join("")}
+        ${row(t("setRuleWs"), t("setRuleWsH") + ruleFault("workspace"), ruleSelect("workspace", t("setRuleWs"), workspaces))}
+        ${numbers}
+        ${row(t("setRulePlace"), t("setRulePlaceH"), ruleSelect("placement", t("setRulePlace"), PLACEMENTS.map((p) => [p, t("setRulePlace-" + p)])))}
+        <span class="h" data-rule-note="action" role="status"></span>
+        ${ruleFault("")}
+        <div><button class="set-btn" type="button" data-rule-save>${f.index == null ? t("setAdd") : t("setSave")}</button> <button class="set-btn ghost" type="button" data-rule-cancel>${t("setCancel")}</button></div></div>`;
+  }
+  /* The editor's state from its fields, without drawing it again (the caret stays): each
+     wrong number and what the rule still lacks, and Save only with nothing wrong. */
+  function checkRule() {
+    const f = ui.ruleForm;
+    if (!f || !document.querySelector("[data-rule-editor]")) return;
+    const p = ruleProblems(f);
+    // The range is the field's placeholder; under it only what is wrong.
+    for (const [k] of RULE_NUMBERS) {
+      const input = document.getElementById(`rule-${k}`), hint = document.getElementById(`rule-${k}-h`);
+      input.setAttribute("aria-invalid", String(!!p[k]));
+      hint.classList.toggle("err", !!p[k]);
+      hint.hidden = !p[k];
+      hint.textContent = p[k] || "";
+    }
+    for (const g of ["match", "action"]) document.querySelector(`[data-rule-note="${g}"]`).textContent = p[g] || "";
+    document.querySelector("[data-rule-save]").disabled = Object.keys(p).length > 0;
   }
   // The built-in rules' programs that keep their Alt + clicks (kabuk-core rules::NO_GRAB_PROGRAMS).
   const NO_GRAB = ["blender.exe", "Code.exe", "Photoshop.exe"];
   function rulesPage() {
     const rules = cfg().rules.rule || [];
     const defaults = cfg().rules.defaults ? [[t("rDialogs"), t("rDialogsR")], [t("rSplash"), t("rSplashR")], ["<code>Taskmgr.exe</code>", t("rTaskmgr")], ...NO_GRAB.map((exe) => [`<code>${exe}</code>`, t("setRuleNoGrab")])].map(([a, r]) => `<div>${a}</div><div>${r}</div><div class="src">${t("srcDefault")}</div>`).join("") : "";
-    const mine = rules.map((r, i) => `<div><code>${escapeHtml(r.exe || r.class || r.title)}</code></div><div>${ruleText(r)}</div><div class="src mine">${t("srcMine")} · <button type="button" class="linkish" data-rule-drop="${i}">${t("setRemove")}</button></div>`).join("");
     const f = ui.ruleForm;
-    const workspaces = Array.from({ length: cfg().windows.workspaces }, (_, i) => [`ws${i + 1}`, tv("setRuleWorkspace", i + 1)]);
-    const form = f ? `<div class="set-grp">
-        ${row(t("setRuleExe"), ui.apps.length ? `${t("setRuleOpen")}: ${ui.apps.map((a) => `<button type="button" class="linkish" data-rule-app="${escapeHtml(a)}">${escapeHtml(a)}</button>`).join(" ")}` : "", `<span class="num"><input type="text" id="rule-exe" style="width:220px;font-family:var(--num)" value="${escapeHtml(f.exe)}" placeholder="${t("setRuleExePh")}" aria-label="${t("setRuleExe")}"></span>`)}
-        ${row(t("setRuleWhat"), "", `<span class="num"><select id="rule-what" aria-label="${t("setRuleWhat")}">${[["float", t("setRuleFloat")], ["ignore", t("setRuleIgnore")], ["nograb", t("setRuleNoGrab")], ...workspaces].map(([v, n]) => `<option value="${v}"${f.what === v ? " selected" : ""}>${n}</option>`).join("")}</select></span>`)}
-        <div><button class="set-btn" type="button" data-rule-save ${f.exe.trim() ? "" : "disabled"}>${t("setAdd")}</button> <button class="set-btn ghost" type="button" data-rule-cancel>${t("setCancel")}</button></div></div>` : `<div><button class="set-btn" type="button" data-rule-new>${t("addRule")}</button> <button class="set-btn ghost" type="button" data-rule-new="apps">${t("pickWin")}</button></div>`;
+    // A rule is edited in place: its editor right under its row (PLAN M19 U11).
+    const mine = rules.map((r, i) => `<div>${ruleMatch(r)}</div><div>${ruleText(r)}</div><div class="src mine">${t("srcMine")} · <button type="button" class="linkish" data-rule-edit="${i}">${t("setEdit")}</button> · <button type="button" class="linkish" data-rule-drop="${i}">${t("setRemove")}</button></div>`
+      + (f && f.index === i ? `<div class="rule-edit-row">${ruleEditor()}</div>` : "")).join("");
+    const form = f ? (f.index == null ? ruleEditor() : "") : `<div><button class="set-btn" type="button" data-rule-new>${t("addRule")}</button> <button class="set-btn ghost" type="button" data-rule-new="pick">${t("pickWin")}</button></div>`;
     return head(t("navRules"), t("rulesDesc")) + `
       <div class="set-grp">${tgl("rules.float_unfit", t("autofloat"), t("autofloatH"))}
       ${tgl("rules.defaults", t("setRuleDefaults"), t("setRuleDefaultsH"))}</div>
@@ -661,7 +777,7 @@
     const page = PAGES[ui.page]();
     // Refused where no row of this page shows it: said at the top.
     const refused = ui.refused && !ui.refusalShown
-      ? `<div class="note" role="alert" style="color:var(--err-fg)">${escapeHtml(ui.refused.reason || t("setRefused"))}</div>` : "";
+      ? `<div class="note" role="alert" style="color:var(--err-fg)">${escapeHtml(refusalText())}</div>` : "";
     // kabuk.toml has a mistake: what and where, and a way to it (PLAN M19 U1).
     const problems = (S.problems || []).length
       ? `<div class="note" role="alert" style="color:var(--err-fg)">${t("setProblems")}<ul>${S.problems.map((p) => `<li>${escapeHtml(p)}</li>`).join("")}</ul><button class="set-btn ghost" type="button" data-open-config>${t("setOpenConfig")}</button></div>` : "";
@@ -679,6 +795,7 @@
     }
     app.querySelector(".set-main").scrollTop = scrolled;
     if (focused) document.getElementById(focused)?.focus({ preventScroll: true });
+    checkRule();
     document.title = t("setBrand");
   }
 
@@ -687,7 +804,7 @@
     const on = (sel) => e.target.closest(sel);
     let el;
     if ((el = on("[data-page]"))) {
-      ui.page = el.dataset.page; ui.refused = null; ui.capture = null; capture(false); ui.ruleForm = null; ui.dimCustom = null;
+      ui.page = el.dataset.page; ui.refused = null; ui.capture = null; capture(false); ui.ruleForm = null; ui.rulePicking = false; ui.dimCustom = null;
       if (ui.page === "about" || ui.page === "wall") post({ op: "info" });
       render();
       document.querySelector(`[data-page="${ui.page}"]`)?.focus({ preventScroll: true });
@@ -763,18 +880,42 @@
       return;
     }
     if ((el = on("[data-chord-drop]"))) { set(el.dataset.chordDrop, get(el.dataset.chordDrop).slice(0, -1)); return; }
-    if ((el = on("[data-rule-new]"))) { ui.ruleForm = { exe: "", what: "float" }; if (el.dataset.ruleNew === "apps") post({ op: "apps" }); render(); document.getElementById("rule-exe")?.focus(); return; }
-    if ((el = on("[data-rule-app]"))) { ui.ruleForm.exe = el.dataset.ruleApp; render(); return; }
-    if (on("[data-rule-cancel]")) { ui.ruleForm = null; render(); return; }
+    if ((el = on("[data-rule-new]"))) {
+      ui.ruleForm = ruleDraft();
+      ui.refused = null;
+      ui.rulePicking = false;
+      if (el.dataset.ruleNew === "pick") askWindows();
+      render();
+      document.getElementById("rule-exe")?.focus();
+      return;
+    }
+    if ((el = on("[data-rule-edit]"))) {
+      const i = Number(el.dataset.ruleEdit);
+      ui.ruleForm = ruleDraft((cfg().rules.rule || [])[i], i);
+      ui.refused = null;
+      ui.rulePicking = false;
+      render();
+      document.getElementById("rule-exe")?.focus();
+      return;
+    }
+    if (on("[data-rule-pick]")) { askWindows(); render(); return; }
+    if ((el = on("[data-rule-win]"))) {
+      const w = (ui.ruleWindows || [])[Number(el.dataset.ruleWin)];
+      if (w) Object.assign(ui.ruleForm, { exe: w.exe || "", class: w.class || "", title: w.title || "" });
+      ui.rulePicking = false;
+      render();
+      return;
+    }
+    if ((el = on("[data-rule-flag]"))) { ui.ruleForm[el.dataset.ruleFlag] = !ui.ruleForm[el.dataset.ruleFlag]; render(); return; }
+    if (on("[data-rule-cancel]")) { ui.ruleForm = null; ui.rulePicking = false; ui.refused = null; render(); return; }
     if (on("[data-rule-save]")) {
       const f = ui.ruleForm;
-      const rule = { exe: f.exe.trim() };
-      if (f.what === "float") rule.float = true;
-      else if (f.what === "ignore") rule.ignore = true;
-      else if (f.what === "nograb") rule.no_grab = true;
-      else rule.workspace = Number(f.what.slice(2));
-      ui.ruleForm = null;
-      set("rules.rule", [...(cfg().rules.rule || []), rule]);
+      if (Object.keys(ruleProblems(f)).length) return;
+      const rules = [...(cfg().rules.rule || [])];
+      if (f.index == null) rules.push(ruleOf(f));
+      else rules[f.index] = ruleOf(f);
+      // The editor stays open until the rule is saved: a refusal is shown in it.
+      set("rules.rule", rules);
       return;
     }
     if ((el = on("[data-rule-drop]"))) {
@@ -801,16 +942,15 @@
       const save = document.querySelector("[data-genkeysave]");
       if (save) save.disabled = !el.value.trim();
     }
-    if (el.id === "rule-exe") {
-      ui.ruleForm.exe = el.value;
-      document.querySelector("[data-rule-save]").disabled = !el.value.trim();
+    if (el.dataset.ruleField && ui.ruleForm) {
+      ui.ruleForm[el.dataset.ruleField] = el.value;
+      checkRule();
     }
   });
   document.addEventListener("change", (e) => {
     const el = e.target;
     if (el.dataset.range) set(el.dataset.range, Number(el.value));
     if (el.id === "dim-value" || el.id === "dim-unit") { const sec = readDim(); if (sec != null) set("oled.dim_after_secs", sec); }
-    if (el.id === "rule-what") ui.ruleForm.what = el.value;
     if (el.id === "bar-color") set("bar.color", el.value.toUpperCase());
     if (el.dataset.select) set(el.dataset.select, el.value);
     if (el.dataset.text) {
@@ -829,6 +969,8 @@
         if (m.theme_imported != null) ui.themeMsg = tv("thImported", m.theme_imported);
         A = A || window.kabukDesignArt(t, escapeHtml);
         ui.refused = null;
+        // A rule saved (or removed): its editor closes.
+        if (m.saved === "rules.rule") { ui.ruleForm = null; ui.rulePicking = false; }
         if (m.applied_wall) {
           ui.gen = { ...ui.gen, phase: "idle" };
           ui.wallTab = "pick";
@@ -866,7 +1008,7 @@
         render();
         break;
       case "refused":
-        ui.refused = { path: m.path, reason: m.reason };
+        ui.refused = { path: m.path, reason: m.reason, at: m.at };
         if (String(m.path).startsWith("gen-") && ui.gen.phase === "running") ui.gen = { ...ui.gen, phase: "idle" };
         render();
         break;
@@ -877,8 +1019,8 @@
         // "opened" only says the browser was asked; what was found stays shown.
         if (m.state !== "opened") { ui.update = m; render(); }
         break;
-      case "apps":
-        ui.apps = m.apps;
+      case "windows":
+        ui.ruleWindows = m.windows;
         render();
         break;
       case "gallery-preview":
