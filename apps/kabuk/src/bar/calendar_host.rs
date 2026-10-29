@@ -24,6 +24,9 @@ const PANEL_CLASS: &str = "Kabuk.CalendarPanel";
 /// Integration tests open (`wparam` 1) or close (0) the panel without taking the keyboard,
 /// or click its part `lparam` (2).
 pub const MSG_TEST_CALENDAR_PANEL: u32 = msg::APP + 66;
+/// `kabuk msg panel calendar`: what a click on the clock does, on the bar of the monitor in
+/// use (posted to the control window).
+pub const MSG_OPEN_CALENDAR_PANEL: u32 = msg::APP + 83;
 
 /// The notices read on their thread, waiting for the bar's (`None` inside: unreadable).
 pub(super) type NoticesSlot = Arc<Mutex<Option<Option<Vec<Notice>>>>>;

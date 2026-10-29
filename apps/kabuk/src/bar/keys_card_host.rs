@@ -24,6 +24,9 @@ pub(super) const GREETING_AFTER: Duration = Duration::from_secs(2);
 /// Integration tests open (`wparam` 1, 2 for the greeting) the card without taking the
 /// keyboard, or close it (0).
 pub const MSG_TEST_KEYS_CARD: u32 = msg::APP + 49;
+/// `kabuk msg keys`: open or close the card, as its shortcut does (posted to the control
+/// window).
+pub const MSG_OPEN_KEYS_CARD: u32 = msg::APP + 80;
 
 #[derive(Default)]
 pub(super) struct KeysCardState {
@@ -58,13 +61,18 @@ impl Shared {
         let first = HOTKEY_FIRST as usize;
         let ours = (first..first + self.keys_card.hotkeys.len()).contains(&id);
         if ours {
-            if self.keys_card.shown.is_some() {
-                self.close_keys_card();
-            } else {
-                self.open_keys_card(false, true);
-            }
+            self.toggle_keys_card(true);
         }
         ours
+    }
+
+    /// Opens the card (with the keyboard when `activate`), or closes it.
+    pub(super) fn toggle_keys_card(&mut self, activate: bool) {
+        if self.keys_card.shown.is_some() {
+            self.close_keys_card();
+        } else {
+            self.open_keys_card(false, activate);
+        }
     }
 
     /// On Kabuk's first start (with its shortcuts, so never in a test), the greeting

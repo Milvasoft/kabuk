@@ -8,28 +8,45 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::wm::Direction;
+use crate::wm::{Action, Direction};
 
-/// The commands of ARCHITECTURE §12.
+/// The commands of ARCHITECTURE §12: every action of `[shortcuts]` and the bar's panels
+/// (SPEC §8.23).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Request {
     /// `workspace <n>`: switch the focused monitor to workspace n.
     Workspace(u32),
+    /// `workspace next|prev`: switch the focused monitor this many workspaces on.
+    StepWorkspace(i32),
     /// `move-to <n>`: move the focused window to workspace n.
     MoveTo(u32),
     /// `focus <left|down|up|right>`.
     Focus(Direction),
+    /// `move <left|down|up|right>`: swap the focused window with its neighbour that way.
+    Move(Direction),
     /// `float toggle`.
     FloatToggle,
+    /// `close`: close the focused window.
+    Close,
     /// `scratchpad toggle`: show or hide the hidden workspace on the focused monitor.
     ScratchpadToggle,
     /// `scratchpad send`: send the focused window to the hidden workspace.
     ScratchpadSend,
+    /// `group toggle`: make the focused window a tabbed group, or break its group up.
+    GroupToggle,
+    /// `group next`: show the next tab of the focused group.
+    NextTab,
     /// `layout <dwindle|master|floating|tiling>` on the focused monitor's workspace.
     Layout(LayoutName),
+    /// `layout cycle`: the focused monitor's workspace takes its next layout.
+    CycleLayout,
+    /// `dropdown`: drop the terminal down, or hide it (DECISIONS D62).
+    Dropdown,
+    /// `desktop`: put every window down, or bring them back (DECISIONS D88).
+    ShowDesktop,
     /// `reload`: read `kabuk.toml` again.
     Reload,
-    /// `query <state|windows|monitors>`: JSON about the running shell.
+    /// `query <state|windows|monitors|tray>`: JSON about the running shell.
     Query(QueryKind),
     /// `launcher`: open the launcher.
     Launcher,
@@ -39,10 +56,72 @@ pub enum Request {
     Saver,
     /// `apps`: open the grid of every app (DECISIONS D56).
     AppGrid,
+    /// `keys`: show or hide the card of Kabuk's shortcuts (DECISIONS D61).
+    KeysCard,
+    /// `panel <quick|network|calendar|volume>`: open or close one of the bar's panels, as
+    /// a click on its icon does.
+    Panel(PanelName),
     /// A layout profile opens (DECISIONS D65).
     Profile(String),
     /// `restore`: emergency stop and restore, as `kabuk --restore`.
     Restore,
+}
+
+impl Request {
+    /// The window manager's action this command does, the same as its shortcut; `None`
+    /// for the commands the bar or the shell itself carries out.
+    pub fn action(&self) -> Option<Action> {
+        Some(match *self {
+            Request::Workspace(n) => Action::Workspace(n),
+            Request::StepWorkspace(by) => Action::StepWorkspace(by),
+            Request::MoveTo(n) => Action::MoveToWorkspace(n),
+            Request::Focus(d) => Action::Focus(d),
+            Request::Move(d) => Action::Move(d),
+            Request::FloatToggle => Action::ToggleFloat,
+            Request::Close => Action::Close,
+            Request::ScratchpadToggle => Action::ToggleScratchpad,
+            Request::ScratchpadSend => Action::ToScratchpad,
+            Request::GroupToggle => Action::ToggleGroup,
+            Request::NextTab => Action::NextTab,
+            Request::CycleLayout => Action::CycleLayout,
+            Request::Dropdown => Action::Dropdown,
+            Request::Layout(_)
+            | Request::ShowDesktop
+            | Request::Reload
+            | Request::Query(_)
+            | Request::Launcher
+            | Request::Overview
+            | Request::Saver
+            | Request::AppGrid
+            | Request::KeysCard
+            | Request::Panel(_)
+            | Request::Profile(_)
+            | Request::Restore => return None,
+        })
+    }
+
+    /// The command opens something that takes the keyboard, so the client lets the
+    /// shell come to the front.
+    pub fn takes_keyboard(&self) -> bool {
+        matches!(
+            self,
+            Request::Launcher | Request::Overview | Request::AppGrid | Request::KeysCard | Request::Panel(_)
+        )
+    }
+}
+
+/// The bar's panels `panel <name>` opens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PanelName {
+    /// The quick settings (Wi-Fi, Bluetooth, volume, brightness…).
+    Quick,
+    /// The network's list of Wi-Fi networks.
+    Network,
+    /// The calendar with the notifications, or Windows' notification centre when Kabuk's
+    /// calendar is off, as a click on the clock.
+    Calendar,
+    /// The volume's level and mixer.
+    Volume,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,16 +153,51 @@ pub enum IpcError {
     Wire(String),
 }
 
+/// Every command's first word, as the usage text (`cli-usage`) lists them.
+pub const COMMANDS: &[&str] = &[
+    "workspace",
+    "move-to",
+    "focus",
+    "move",
+    "float",
+    "close",
+    "scratchpad",
+    "group",
+    "layout",
+    "dropdown",
+    "desktop",
+    "launcher",
+    "overview",
+    "apps",
+    "keys",
+    "saver",
+    "panel",
+    "profile",
+    "reload",
+    "query",
+    "restore",
+];
+
 /// The workspace numbers commands accept (SPEC §2.2: 1-9).
 pub const WORKSPACES: std::ops::RangeInclusive<u32> = 1..=9;
 
-fn workspace(command: &str, arg: Option<&str>) -> Result<u32, IpcError> {
+fn workspace(command: &str, arg: Option<&str>, expected: &'static str) -> Result<u32, IpcError> {
     arg.and_then(|a| a.parse().ok())
         .filter(|n| WORKSPACES.contains(n))
         .ok_or_else(|| IpcError::BadArgs {
             command: command.into(),
-            expected: "a workspace number 1-9",
+            expected,
         })
+}
+
+fn direction(arg: Option<&str>) -> Option<Direction> {
+    match arg {
+        Some("left") => Some(Direction::Left),
+        Some("down") => Some(Direction::Down),
+        Some("up") => Some(Direction::Up),
+        Some("right") => Some(Direction::Right),
+        _ => None,
+    }
 }
 
 /// Parses a command's words (`["workspace", "3"]`).
@@ -98,22 +212,26 @@ pub fn parse(words: &[String]) -> Result<Request, IpcError> {
     let takes = |n: usize, expected: &'static str| if rest.len() == n { Ok(()) } else { Err(one(expected)) };
     let r = match command.as_str() {
         "workspace" => {
-            takes(1, "a workspace number 1-9")?;
-            Request::Workspace(workspace(command, arg)?)
+            const EXPECTED: &str = "a workspace number 1-9, next or prev";
+            takes(1, EXPECTED)?;
+            match arg {
+                Some("next") => Request::StepWorkspace(1),
+                Some("prev") => Request::StepWorkspace(-1),
+                _ => Request::Workspace(workspace(command, arg, EXPECTED)?),
+            }
         }
         "move-to" => {
-            takes(1, "a workspace number 1-9")?;
-            Request::MoveTo(workspace(command, arg)?)
+            const EXPECTED: &str = "a workspace number 1-9";
+            takes(1, EXPECTED)?;
+            Request::MoveTo(workspace(command, arg, EXPECTED)?)
         }
         "focus" => {
             takes(1, "left, down, up or right")?;
-            Request::Focus(match arg {
-                Some("left") => Direction::Left,
-                Some("down") => Direction::Down,
-                Some("up") => Direction::Up,
-                Some("right") => Direction::Right,
-                _ => return Err(one("left, down, up or right")),
-            })
+            Request::Focus(direction(arg).ok_or_else(|| one("left, down, up or right"))?)
+        }
+        "move" => {
+            takes(1, "left, down, up or right")?;
+            Request::Move(direction(arg).ok_or_else(|| one("left, down, up or right"))?)
         }
         "float" => {
             takes(1, "toggle")?;
@@ -121,6 +239,10 @@ pub fn parse(words: &[String]) -> Result<Request, IpcError> {
                 Some("toggle") => Request::FloatToggle,
                 _ => return Err(one("toggle")),
             }
+        }
+        "close" => {
+            takes(0, "no arguments")?;
+            Request::Close
         }
         "scratchpad" => {
             takes(1, "toggle or send")?;
@@ -130,14 +252,47 @@ pub fn parse(words: &[String]) -> Result<Request, IpcError> {
                 _ => return Err(one("toggle or send")),
             }
         }
+        "group" => {
+            takes(1, "toggle or next")?;
+            match arg {
+                Some("toggle") => Request::GroupToggle,
+                Some("next") => Request::NextTab,
+                _ => return Err(one("toggle or next")),
+            }
+        }
         "layout" => {
-            takes(1, "dwindle, master, floating or tiling")?;
-            Request::Layout(match arg {
-                Some("dwindle") => LayoutName::Dwindle,
-                Some("master") => LayoutName::Master,
-                Some("floating") => LayoutName::Floating,
-                Some("tiling") => LayoutName::Tiling,
-                _ => return Err(one("dwindle, master, floating or tiling")),
+            const EXPECTED: &str = "dwindle, master, floating, tiling or cycle";
+            takes(1, EXPECTED)?;
+            match arg {
+                Some("dwindle") => Request::Layout(LayoutName::Dwindle),
+                Some("master") => Request::Layout(LayoutName::Master),
+                Some("floating") => Request::Layout(LayoutName::Floating),
+                Some("tiling") => Request::Layout(LayoutName::Tiling),
+                Some("cycle") => Request::CycleLayout,
+                _ => return Err(one(EXPECTED)),
+            }
+        }
+        "dropdown" => {
+            takes(0, "no arguments")?;
+            Request::Dropdown
+        }
+        "desktop" => {
+            takes(0, "no arguments")?;
+            Request::ShowDesktop
+        }
+        "keys" => {
+            takes(0, "no arguments")?;
+            Request::KeysCard
+        }
+        "panel" => {
+            const EXPECTED: &str = "quick, network, calendar or volume";
+            takes(1, EXPECTED)?;
+            Request::Panel(match arg {
+                Some("quick") => PanelName::Quick,
+                Some("network") => PanelName::Network,
+                Some("calendar") => PanelName::Calendar,
+                Some("volume") => PanelName::Volume,
+                _ => return Err(one(EXPECTED)),
             })
         }
         "query" => {
@@ -262,7 +417,8 @@ pub fn pipe_name(user_sid: &str, instance_id: &str) -> String {
 #[cfg(test)]
 mod tests {
     //! Edge cases: every command of ARCHITECTURE §12, workspace numbers at and past the
-    //! ends, missing, extra and wrong arguments, an unknown and an empty command; the wire
+    //! ends, missing, extra and wrong arguments, an unknown and an empty command; every
+    //! `[shortcuts]` entry against its command's action (and `drag`, no action); the wire
     //! format both ways with Turkish text, a broken line, a response without optional
     //! fields; the pipe name.
     use super::*;
@@ -300,6 +456,191 @@ mod tests {
         assert_eq!(p("restore"), Ok(Request::Restore));
     }
 
+    /// SPEC §8.23: every action has a command (PLAN M19 U4).
+    #[test]
+    fn every_action_has_a_command() {
+        assert_eq!(p("workspace next"), Ok(Request::StepWorkspace(1)));
+        assert_eq!(p("workspace prev"), Ok(Request::StepWorkspace(-1)));
+        assert_eq!(p("move left"), Ok(Request::Move(Direction::Left)));
+        assert_eq!(p("move down"), Ok(Request::Move(Direction::Down)));
+        assert_eq!(p("move up"), Ok(Request::Move(Direction::Up)));
+        assert_eq!(p("move right"), Ok(Request::Move(Direction::Right)));
+        assert_eq!(p("focus down"), Ok(Request::Focus(Direction::Down)));
+        assert_eq!(p("focus up"), Ok(Request::Focus(Direction::Up)));
+        assert_eq!(p("close"), Ok(Request::Close));
+        assert_eq!(p("layout cycle"), Ok(Request::CycleLayout));
+        assert_eq!(p("layout dwindle"), Ok(Request::Layout(LayoutName::Dwindle)));
+        assert_eq!(p("layout tiling"), Ok(Request::Layout(LayoutName::Tiling)));
+        assert_eq!(p("group toggle"), Ok(Request::GroupToggle));
+        assert_eq!(p("group next"), Ok(Request::NextTab));
+        assert_eq!(p("dropdown"), Ok(Request::Dropdown));
+        assert_eq!(p("desktop"), Ok(Request::ShowDesktop));
+        assert_eq!(p("keys"), Ok(Request::KeysCard));
+        assert_eq!(p("panel quick"), Ok(Request::Panel(PanelName::Quick)));
+        assert_eq!(p("panel network"), Ok(Request::Panel(PanelName::Network)));
+        assert_eq!(p("panel calendar"), Ok(Request::Panel(PanelName::Calendar)));
+        assert_eq!(p("panel volume"), Ok(Request::Panel(PanelName::Volume)));
+    }
+
+    #[test]
+    fn the_new_commands_bad_forms_are_explained() {
+        for bad in [
+            "workspace next 2",
+            "workspace previous",
+            "workspace Next",
+            "move",
+            "move north",
+            "move left now",
+            "close 1",
+            "close all",
+            "layout",
+            "layout cycle now",
+            "layout next",
+            "group",
+            "group make",
+            "group toggle now",
+            "dropdown x",
+            "desktop show",
+            "keys all",
+            "panel",
+            "panel clock",
+            "panel quick now",
+        ] {
+            assert!(matches!(p(bad), Err(IpcError::BadArgs { .. })), "{bad}");
+        }
+        assert_eq!(
+            p("move").unwrap_err().to_string(),
+            "`move` expects left, down, up or right"
+        );
+        assert_eq!(
+            p("panel tray").unwrap_err().to_string(),
+            "`panel` expects quick, network, calendar or volume"
+        );
+        assert_eq!(p("tab"), Err(IpcError::Unknown("tab".into())));
+    }
+
+    /// The command for each `[shortcuts]` entry (the schema's keys), which must do what
+    /// the shortcut does. `drag` is no action: it is the key held while dragging.
+    const SHORTCUT_COMMANDS: &[(&str, &str)] = &[
+        ("launcher", "launcher"),
+        ("workspace", "workspace 1"),
+        ("move_to_workspace", "move-to 1"),
+        ("focus_left", "focus left"),
+        ("focus_down", "focus down"),
+        ("focus_up", "focus up"),
+        ("focus_right", "focus right"),
+        ("move_left", "move left"),
+        ("move_down", "move down"),
+        ("move_up", "move up"),
+        ("move_right", "move right"),
+        ("toggle_float", "float toggle"),
+        ("close_window", "close"),
+        ("cycle_layout", "layout cycle"),
+        ("toggle_scratchpad", "scratchpad toggle"),
+        ("to_scratchpad", "scratchpad send"),
+        ("toggle_group", "group toggle"),
+        ("next_tab", "group next"),
+        ("overview", "overview"),
+        ("start_saver", "saver"),
+        ("app_grid", "apps"),
+        ("keys_card", "keys"),
+        ("dropdown", "dropdown"),
+    ];
+    const NOT_AN_ACTION: &[&str] = &["drag"];
+
+    #[test]
+    fn every_shortcut_has_a_command_doing_the_same() {
+        use crate::config::shortcut::{Chord, Key, Mods};
+        use crate::config::Shortcuts;
+
+        let defaults = serde_json::to_value(Shortcuts::default()).unwrap();
+        let fields = defaults.as_object().expect("a table of shortcuts");
+        let mut listed: Vec<&str> = SHORTCUT_COMMANDS.iter().map(|(f, _)| *f).collect();
+        listed.extend(NOT_AN_ACTION);
+        listed.sort_unstable();
+        let mut keys: Vec<&str> = fields.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, listed, "a shortcut without a command, or a command for none");
+
+        let bound = crate::wm::bindings(&Shortcuts::default(), *WORKSPACES.end());
+        let mut seen = Vec::new();
+        for (field, command) in SHORTCUT_COMMANDS {
+            let request = p(command).unwrap_or_else(|e| panic!("{field}: `{command}`: {e}"));
+            // The default chord of the field: its modifiers with 1 for the workspaces.
+            let chord = match &fields[*field] {
+                serde_json::Value::String(mods) => Chord {
+                    mods: Mods::parse(mods).unwrap(),
+                    key: Key::Digit(1),
+                },
+                serde_json::Value::Array(list) => Chord::parse(list[0].as_str().unwrap()).unwrap(),
+                other => panic!("{field}: {other}"),
+            };
+            let action = bound.iter().find(|(c, _)| *c == chord).map(|(_, a)| *a);
+            match action {
+                // The window manager's: the command's action is the shortcut's.
+                Some(a) => assert_eq!(request.action(), Some(a), "{field}: `{command}`"),
+                // The bar's: one of its own commands, no window manager action.
+                None => {
+                    assert_eq!(request.action(), None, "{field}: `{command}`");
+                    assert!(
+                        matches!(
+                            request,
+                            Request::Launcher
+                                | Request::Overview
+                                | Request::Saver
+                                | Request::AppGrid
+                                | Request::KeysCard
+                        ),
+                        "{field}: `{command}` is {request:?}"
+                    );
+                }
+            }
+            assert!(!seen.contains(&request), "{field}: `{command}` used twice");
+            seen.push(request);
+        }
+    }
+
+    #[test]
+    fn the_list_of_commands_is_the_parsers() {
+        for name in COMMANDS {
+            assert!(!matches!(p(name), Err(IpcError::Unknown(_))), "{name}");
+        }
+        for (field, command) in SHORTCUT_COMMANDS {
+            let name = command.split_whitespace().next().unwrap();
+            assert!(COMMANDS.contains(&name), "{field}: `{name}` not listed");
+        }
+    }
+
+    #[test]
+    fn commands_for_the_bar_and_the_shell_have_no_window_manager_action() {
+        for command in [
+            "layout master",
+            "desktop",
+            "reload",
+            "query state",
+            "launcher",
+            "overview",
+            "saver",
+            "apps",
+            "keys",
+            "panel quick",
+            "profile Kodlama",
+            "restore",
+        ] {
+            assert_eq!(p(command).unwrap().action(), None, "{command}");
+        }
+    }
+
+    #[test]
+    fn what_opens_with_the_keyboard_lets_the_shell_come_to_the_front() {
+        for command in ["launcher", "overview", "apps", "keys", "panel network"] {
+            assert!(p(command).unwrap().takes_keyboard(), "{command}");
+        }
+        for command in ["workspace 2", "close", "desktop", "saver", "dropdown", "reload"] {
+            assert!(!p(command).unwrap().takes_keyboard(), "{command}");
+        }
+    }
+
     #[test]
     fn bad_commands_are_explained() {
         assert_eq!(p(""), Err(IpcError::Empty));
@@ -330,7 +671,12 @@ mod tests {
             assert!(matches!(p(bad), Err(IpcError::BadArgs { .. })), "{bad}");
         }
         let e = p("workspace 12").unwrap_err();
-        assert_eq!(e.to_string(), "`workspace` expects a workspace number 1-9");
+        assert_eq!(
+            e.to_string(),
+            "`workspace` expects a workspace number 1-9, next or prev"
+        );
+        let e = p("move-to 12").unwrap_err();
+        assert_eq!(e.to_string(), "`move-to` expects a workspace number 1-9");
     }
 
     #[test]

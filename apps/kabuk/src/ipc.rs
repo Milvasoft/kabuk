@@ -3,15 +3,17 @@
 //! manager's queue and the bars' control window, so a client never waits on either.
 
 use kabuk_core::instance::Instance;
-use kabuk_core::ipc::{self, QueryKind, Request, Response};
-use kabuk_core::wm::Action;
+use kabuk_core::ipc::{self, PanelName, QueryKind, Request, Response};
 use kabuk_layout::Kind;
 use kabuk_win::msgloop::{self, Msg};
 use kabuk_win::pipe::{PipeServer, Reply};
 use kabuk_win::window::Hwnd;
 use serde_json::{json, Value};
 
-use crate::bar::manager::{MSG_OPEN_APP_GRID, MSG_OPEN_LAUNCHER, MSG_OPEN_OVERVIEW, MSG_RELOAD, MSG_START_SAVER};
+use crate::bar::manager::{
+    MSG_OPEN_APP_GRID, MSG_OPEN_CALENDAR_PANEL, MSG_OPEN_KEYS_CARD, MSG_OPEN_LAUNCHER, MSG_OPEN_NETWORK_PANEL,
+    MSG_OPEN_OVERVIEW, MSG_OPEN_QUICK_PANEL, MSG_OPEN_VOLUME_PANEL, MSG_RELOAD, MSG_START_SAVER,
+};
 use crate::wm::{self, Command, SharedState, WmLink};
 
 /// Error keys the server answers with; the client shows their translation.
@@ -81,13 +83,8 @@ fn handle(line: &str, t: &Targets) -> Reply {
         _ => Response::failed(error::NO_BAR),
     };
     let r = match request {
-        Request::Workspace(n) => to_wm(Command::Action(Action::Workspace(n))),
-        Request::MoveTo(n) => to_wm(Command::Action(Action::MoveToWorkspace(n))),
-        Request::Focus(d) => to_wm(Command::Action(Action::Focus(d))),
-        Request::FloatToggle => to_wm(Command::Action(Action::ToggleFloat)),
-        Request::ScratchpadToggle => to_wm(Command::Action(Action::ToggleScratchpad)),
-        Request::ScratchpadSend => to_wm(Command::Action(Action::ToScratchpad)),
         Request::Layout(name) => to_wm(Command::SetLayout(name)),
+        Request::ShowDesktop => to_wm(Command::ToggleDesktop),
         Request::Reload => {
             if let Some(link) = &t.wm {
                 link.send(Command::ConfigChanged);
@@ -101,6 +98,13 @@ fn handle(line: &str, t: &Targets) -> Reply {
         Request::Overview => to_bar(MSG_OPEN_OVERVIEW),
         Request::Saver => to_bar(MSG_START_SAVER),
         Request::AppGrid => to_bar(MSG_OPEN_APP_GRID),
+        Request::KeysCard => to_bar(MSG_OPEN_KEYS_CARD),
+        Request::Panel(panel) => to_bar(match panel {
+            PanelName::Quick => MSG_OPEN_QUICK_PANEL,
+            PanelName::Network => MSG_OPEN_NETWORK_PANEL,
+            PanelName::Calendar => MSG_OPEN_CALENDAR_PANEL,
+            PanelName::Volume => MSG_OPEN_VOLUME_PANEL,
+        }),
         Request::Profile(name) => to_wm(Command::OpenProfile(name)),
         Request::Query(kind) => Response::with(query(kind, t)),
         Request::Restore => {
@@ -116,6 +120,11 @@ fn handle(line: &str, t: &Targets) -> Reply {
                 })),
             };
         }
+        // A shortcut's action: the window manager does it as it does for the shortcut.
+        shortcut => match shortcut.action() {
+            Some(a) => to_wm(Command::Action(a)),
+            None => Response::failed(error::BAD_REQUEST),
+        },
     };
     done(r)
 }

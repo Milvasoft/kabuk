@@ -163,11 +163,8 @@ impl Shared {
             .from_bar
             .filter(|(i, at)| at.elapsed() < FROM_BAR && *i < self.bars.len())
             .map(|(i, _)| i);
-        let front = kabuk_win::events::foreground()
-            .and_then(|h| h.monitor_handle())
-            .and_then(|m| self.bars.iter().position(|b| b.monitor.handle == m));
         let main = self.bars.iter().position(|b| b.primary);
-        let i = notify::place::monitor_in_use(from_bar, front, main)?;
+        let i = notify::place::monitor_in_use(from_bar, self.front_bar(), main)?;
         let b = &self.bars[i];
         let r = b.monitor.rect;
         let size = Size {

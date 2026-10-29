@@ -28,6 +28,9 @@ const SYNC_KEY: &str = "brightness_sync";
 /// Integration tests open (`wparam` 1) or close (0) the panel without taking the keyboard,
 /// or click its part `lparam` (2).
 pub const MSG_TEST_QUICK_PANEL: u32 = msg::APP + 68;
+/// `kabuk msg panel quick`: open or close the panel on the bar of the monitor in use, as a
+/// click on its button does (posted to the control window).
+pub const MSG_OPEN_QUICK_PANEL: u32 = msg::APP + 81;
 
 /// What the slow reads found, waiting for the bar's thread.
 #[derive(Clone, Debug, Default)]

@@ -20,6 +20,9 @@ const PANEL_CLASS: &str = "Kabuk.NetworkPanel";
 /// Integration tests open (`wparam` 1) or close (0) the panel without taking the
 /// keyboard, or click its part `lparam` (2).
 pub const MSG_TEST_NETWORK_PANEL: u32 = msg::APP + 59;
+/// `kabuk msg panel network`: open or close the panel on the bar of the monitor in use,
+/// as a click on the network's icon does (posted to the control window).
+pub const MSG_OPEN_NETWORK_PANEL: u32 = msg::APP + 82;
 /// Test `wparam`s.
 pub const TEST_CLOSE: usize = 0;
 pub const TEST_OPEN: usize = 1;

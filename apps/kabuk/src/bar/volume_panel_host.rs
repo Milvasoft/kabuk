@@ -24,6 +24,9 @@ const PANEL_CLASS: &str = "Kabuk.VolumePanel";
 /// 3: the clock's) or close (0) the panel without taking the keyboard; 4 right-clicks the
 /// first empty spot of the primary bar (its menu takes the keyboard, as a click's does).
 pub const MSG_TEST_VOLUME_PANEL: u32 = msg::APP + 35;
+/// `kabuk msg panel volume`: open or close the level and mixer on the bar of the monitor
+/// in use, as a left click on the volume does (posted to the control window).
+pub const MSG_OPEN_VOLUME_PANEL: u32 = msg::APP + 84;
 
 pub(super) struct VolumePanel {
     shown: Shown,
@@ -44,21 +47,27 @@ pub(super) struct VolumePanel {
 }
 
 impl Shared {
-    pub(super) fn toggle_volume_panel(&mut self, bar: usize, with_track: bool) {
-        self.toggle_system_menu(bar, Menu::Volume, with_track, (hit::VOLUME, 0));
+    /// The volume's panel (its level and mixer when `with_track`); with the keyboard when
+    /// `activate`.
+    pub(super) fn toggle_volume_panel(&mut self, bar: usize, with_track: bool, activate: bool) {
+        self.toggle_menu(bar, Menu::Volume, with_track, (hit::VOLUME, 0), activate);
     }
 
     /// Opens an icon's menu under `anchor` (its hit), or closes it if it was the one open.
     /// Another icon's open menu gives way to this one at once (found by the user: the
     /// click only closed it, and a second was needed).
     pub(super) fn toggle_system_menu(&mut self, bar: usize, menu: Menu, with_track: bool, anchor: (&'static str, u32)) {
+        self.toggle_menu(bar, menu, with_track, anchor, true);
+    }
+
+    fn toggle_menu(&mut self, bar: usize, menu: Menu, with_track: bool, anchor: (&'static str, u32), activate: bool) {
         let same = self
             .volume_panel
             .as_ref()
             .is_some_and(|p| p.menu == menu && p.with_track == with_track);
         self.close_volume_panel();
         if !same {
-            self.open_system_menu(bar, menu, with_track, anchor, true);
+            self.open_system_menu(bar, menu, with_track, anchor, activate);
         }
     }
 

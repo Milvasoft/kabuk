@@ -7,7 +7,7 @@ use std::time::Duration;
 use kabuk_core::cli::Common;
 use kabuk_core::config;
 use kabuk_core::instance::{exit, Instance};
-use kabuk_core::ipc::{self, IpcError, Request, Response};
+use kabuk_core::ipc::{self, IpcError, Response};
 use kabuk_core::paths::Paths;
 use kabuk_i18n::{I18n, Message};
 
@@ -62,8 +62,8 @@ pub fn main(common: &Common, words: &[String]) -> i32 {
     };
     let name = ipc::pipe_name(&sid, instance.id());
     let answer = kabuk_win::pipe::request(&name, &ipc::request_line(words), TIMEOUT, |server| {
-        // The launcher takes the keyboard: let the shell come to the front.
-        if request == Request::Launcher {
+        // The launcher, a panel… take the keyboard: let the shell come to the front.
+        if request.takes_keyboard() {
             kabuk_win::process::allow_foreground(server);
         }
     });

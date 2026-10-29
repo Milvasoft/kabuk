@@ -69,7 +69,7 @@ mod gesture_host;
 mod idle_host;
 #[path = "motion_host.rs"]
 mod motion_host;
-pub use calendar_host::MSG_TEST_CALENDAR_PANEL;
+pub use calendar_host::{MSG_OPEN_CALENDAR_PANEL, MSG_TEST_CALENDAR_PANEL};
 #[path = "keyboard_host.rs"]
 mod keyboard_host;
 #[path = "privacy_host.rs"]
@@ -78,14 +78,14 @@ mod privacy_host;
 mod quick_host;
 pub use keyboard_host::MSG_TEST_KEYBOARD_PANEL;
 pub use privacy_host::MSG_TEST_PRIVACY_PANEL;
-pub use quick_host::MSG_TEST_QUICK_PANEL;
+pub use quick_host::{MSG_OPEN_QUICK_PANEL, MSG_TEST_QUICK_PANEL};
 #[path = "network_host.rs"]
 mod network_host;
 #[path = "network_panel_host.rs"]
 mod network_panel_host;
 pub use network_panel_host::{
-    MSG_TEST_NETWORK_PANEL, TEST_CLICK as NETWORK_PANEL_CLICK, TEST_CLOSE as NETWORK_PANEL_CLOSE,
-    TEST_OPEN as NETWORK_PANEL_OPEN,
+    MSG_OPEN_NETWORK_PANEL, MSG_TEST_NETWORK_PANEL, TEST_CLICK as NETWORK_PANEL_CLICK,
+    TEST_CLOSE as NETWORK_PANEL_CLOSE, TEST_OPEN as NETWORK_PANEL_OPEN,
 };
 #[path = "notify_host.rs"]
 mod notify_host;
@@ -123,10 +123,10 @@ pub use app_menu_host::{
     TEST_FLOAT_RULE as APP_MENU_FLOAT_RULE, TEST_OPEN as APP_MENU_OPEN, TEST_PIN as APP_MENU_PIN,
     TEST_TO_FRONT as APP_MENU_TO_FRONT,
 };
-pub use keys_card_host::MSG_TEST_KEYS_CARD;
+pub use keys_card_host::{MSG_OPEN_KEYS_CARD, MSG_TEST_KEYS_CARD};
 pub use media_card_host::MSG_TEST_MEDIA_CARD;
 pub use power_menu_host::MSG_TEST_POWER_MENU;
-pub use volume_panel_host::MSG_TEST_VOLUME_PANEL;
+pub use volume_panel_host::{MSG_OPEN_VOLUME_PANEL, MSG_TEST_VOLUME_PANEL};
 /// Windows' notification centre.
 const NOTIFICATION_CENTRE: &str = "ms-actioncenter:";
 /// The notification count, counted on its thread (DECISIONS D32).
@@ -1840,6 +1840,31 @@ impl Shared {
             MSG_OPEN_OVERVIEW => {
                 let activate = self.shortcuts;
                 self.toggle_overview(activate);
+                Some(0)
+            }
+            MSG_OPEN_KEYS_CARD => {
+                let activate = self.shortcuts;
+                self.toggle_keys_card(activate);
+                Some(0)
+            }
+            MSG_OPEN_QUICK_PANEL => {
+                let (bar, activate) = (self.bar_in_use()?, self.shortcuts);
+                self.toggle_quick_panel(bar, (view::hit::QUICK_SETTINGS, 0), activate);
+                Some(0)
+            }
+            MSG_OPEN_NETWORK_PANEL => {
+                let (bar, activate) = (self.bar_in_use()?, self.shortcuts);
+                self.toggle_network_panel(bar, activate);
+                Some(0)
+            }
+            MSG_OPEN_CALENDAR_PANEL => {
+                let (bar, activate) = (self.bar_in_use()?, self.shortcuts);
+                self.clock_click(bar, (view::hit::CLOCK, 0), activate);
+                Some(0)
+            }
+            MSG_OPEN_VOLUME_PANEL => {
+                let (bar, activate) = (self.bar_in_use()?, self.shortcuts);
+                self.toggle_volume_panel(bar, true, activate);
                 Some(0)
             }
             MSG_RELOAD => {
@@ -3842,8 +3867,6 @@ impl Shared {
         }
     }
 
-    /// One of the bar's or the dock's popups is open: an auto-hiding bar stays while it
-    /// is (found by the user: it slid off as the mouse went into the panel it opened).
     /// The show-desktop corner (D88): the window manager puts every window down, or
     /// brings them back.
     fn toggle_desktop(&mut self) {
@@ -3853,6 +3876,34 @@ impl Shared {
         }
     }
 
+    /// The bar of the monitor in use (the window in front's), else the main one's: where
+    /// `kabuk msg panel …` opens a panel (DECISIONS D95).
+    fn bar_in_use(&self) -> Option<usize> {
+        let main = self.bars.iter().position(|b| b.primary);
+        crate::notify::place::monitor_in_use(None, self.front_bar(), main)
+    }
+
+    /// The bar of the window in front's monitor.
+    fn front_bar(&self) -> Option<usize> {
+        kabuk_win::events::foreground()
+            .and_then(|h| h.monitor_handle())
+            .and_then(|m| self.bars.iter().position(|b| b.monitor.handle == m))
+    }
+
+    /// A click on the clock or the bell of bar `index`: Kabuk's calendar and notifications
+    /// in place of Windows' centre (D88), or Windows' centre when the calendar is off.
+    fn clock_click(&mut self, index: usize, anchor: (&'static str, u32), activate: bool) {
+        if self.config().bar.modules.calendar {
+            self.toggle_calendar_panel(index, anchor, activate);
+            return;
+        }
+        // Windows' notification centre; the count is read again once it closes.
+        self.open_off_thread(NOTIFICATION_CENTRE.into(), crate::notify::Failure::Settings);
+        self.count_notifications();
+    }
+
+    /// One of the bar's or the dock's popups is open: an auto-hiding bar stays while it
+    /// is (found by the user: it slid off as the mouse went into the panel it opened).
     fn bar_popup_open(&self) -> bool {
         self.volume_panel.is_some()
             || self.network_panel.is_some()
@@ -4156,7 +4207,7 @@ impl Shared {
         }
         if let Some((view::hit::VOLUME, _)) = hit {
             // As Windows' taskbar: the level on a left click, the menu on a right one.
-            self.toggle_volume_panel(index, button == Click::Left);
+            self.toggle_volume_panel(index, button == Click::Left, true);
             return;
         }
         if let (Click::Left, Some((view::hit::NETWORK, _))) = (button, hit) {
@@ -4256,14 +4307,8 @@ impl Shared {
                 };
                 self.open_off_thread(target.into(), crate::notify::Failure::Open);
             }
-            Some((module @ (view::hit::NOTIF | view::hit::CLOCK), value)) if self.config().bar.modules.calendar => {
-                // Kabuk's calendar and notifications in place of Windows' centre (D88).
-                self.toggle_calendar_panel(index, (module, value), true);
-            }
-            Some((view::hit::NOTIF, _)) | Some((view::hit::CLOCK, _)) => {
-                // Windows' notification centre; the count is read again once it closes.
-                self.open_off_thread(NOTIFICATION_CENTRE.into(), crate::notify::Failure::Settings);
-                self.count_notifications();
+            Some((module @ (view::hit::NOTIF | view::hit::CLOCK), value)) => {
+                self.clock_click(index, (module, value), true);
             }
             Some((view::hit::APP, i)) => self.app_click(
                 usize::try_from(i).unwrap_or(usize::MAX),

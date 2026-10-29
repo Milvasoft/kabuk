@@ -326,6 +326,105 @@ fn reload_and_launcher_reach_the_bar_and_the_window_manager() {
     assert_eq!(sandbox.restore().0, 0);
 }
 
+/// PLAN M19 U4: the window manager's shortcut actions that had no command reach it from
+/// `kabuk msg`: `workspace next|prev`, `move`, `layout cycle`, `group toggle|next`, `close`.
+#[test]
+fn every_window_action_of_the_shortcuts_has_a_command() {
+    let sandbox = Sandbox::new();
+    let shell = Shell::start(&sandbox);
+    let a = TestWindow::open(&["--title", &title("ipc-act-a")]);
+    let b = TestWindow::open(&["--title", &title("ipc-act-b")]);
+    managed(&sandbox, &a);
+    managed(&sandbox, &b);
+    let applied = |action: &str| sandbox.log_lines(&format!("action applied action={action}"));
+
+    ok(&sandbox, &["workspace", "next"]);
+    assert!(wait_until(SETTLE, || primary_state(&sandbox)["workspace"] == 2).is_some());
+    assert!(
+        wait_until(SETTLE, || !a.hwnd.is_visible()).is_some(),
+        "workspace 1 still shown"
+    );
+    ok(&sandbox, &["workspace", "prev"]);
+    assert!(wait_until(SETTLE, || primary_state(&sandbox)["workspace"] == 1).is_some());
+    assert!(wait_until(SETTLE, || a.hwnd.is_visible()).is_some());
+    assert_eq!((applied("StepWorkspace(1)"), applied("StepWorkspace(-1)")), (1, 1));
+
+    // The focused window swaps places with its neighbour.
+    let left = |w: &TestWindow| w.hwnd.frame_rect().map(|r| r.left);
+    assert!(wait_until(SETTLE, || left(&a).is_some() && left(&a) != left(&b)).is_some());
+    shell.focus(&a);
+    let a_was_left = left(&a) < left(&b);
+    ok(&sandbox, &["move", if a_was_left { "right" } else { "left" }]);
+    assert!(
+        wait_until(SETTLE, || (left(&a) < left(&b)) != a_was_left).is_some(),
+        "the window did not move"
+    );
+
+    let layout = primary_state(&sandbox)["layout"].clone();
+    ok(&sandbox, &["layout", "cycle"]);
+    assert!(wait_until(SETTLE, || primary_state(&sandbox)["layout"] != layout).is_some());
+    ok(&sandbox, &["layout", "cycle"]);
+    assert!(wait_until(SETTLE, || primary_state(&sandbox)["layout"] == layout).is_some());
+
+    shell.focus(&a);
+    ok(&sandbox, &["group", "toggle"]);
+    assert!(wait_until(SETTLE, || applied("ToggleGroup") == 1).is_some());
+    ok(&sandbox, &["group", "next"]);
+    assert!(wait_until(SETTLE, || applied("NextTab") == 1).is_some());
+    ok(&sandbox, &["group", "toggle"]);
+    assert!(wait_until(SETTLE, || applied("ToggleGroup") == 2).is_some());
+
+    shell.focus(&b);
+    ok(&sandbox, &["close"]);
+    assert!(wait_until(SETTLE, || !b.hwnd.exists()).is_some(), "not closed");
+    assert!(a.hwnd.exists(), "the other window closed");
+    assert_eq!(sandbox.restore().0, 0);
+}
+
+/// PLAN M19 U4: `desktop`, `keys` and `panel <name>` do what the show-desktop corner, the
+/// shortcut card's chord and a click on the bar's icons do, and a second time undo it.
+#[test]
+fn the_bars_actions_and_panels_have_commands() {
+    let sandbox = Sandbox::new();
+    let shell = Shell::start(&sandbox);
+    let a = TestWindow::open(&["--title", &title("ipc-desk")]);
+    managed(&sandbox, &a);
+    ok(&sandbox, &["desktop"]);
+    assert!(wait_until(SETTLE, || a.hwnd.is_minimized()).is_some(), "not put down");
+    assert_eq!(sandbox.log_lines("desktop shown windows=1"), 1);
+    ok(&sandbox, &["desktop"]);
+    assert!(wait_until(SETTLE, || !a.hwnd.is_minimized()).is_some(), "not back");
+
+    let open = |class: &str| {
+        kabuk_win::window::windows_of_class(class)
+            .into_iter()
+            .any(|h| h.pid() == Some(shell.pid) && h.is_visible())
+    };
+    ok(&sandbox, &["keys"]);
+    assert!(wait_until(SETTLE, || open("Kabuk.KeysCard")).is_some(), "no card");
+    assert_eq!(sandbox.log_lines("keys card shown welcome=false"), 1);
+    ok(&sandbox, &["keys"]);
+    assert!(wait_until(SETTLE, || !open("Kabuk.KeysCard")).is_some(), "card stayed");
+
+    for (name, class, line) in [
+        ("quick", "Kabuk.QuickPanel", "quick settings opened"),
+        ("network", "Kabuk.NetworkPanel", "network panel opened"),
+        ("calendar", "Kabuk.CalendarPanel", "calendar panel opened"),
+        (
+            "volume",
+            "Kabuk.VolumePanel",
+            "volume panel opened menu=Volume with_track=true",
+        ),
+    ] {
+        ok(&sandbox, &["panel", name]);
+        assert!(wait_until(SETTLE, || open(class)).is_some(), "{class} did not open");
+        assert_eq!(sandbox.log_lines(line), 1, "{line}");
+        ok(&sandbox, &["panel", name]);
+        assert!(wait_until(SETTLE, || !open(class)).is_some(), "{class} did not close");
+    }
+    assert_eq!(sandbox.restore().0, 0);
+}
+
 #[test]
 fn restore_answers_then_stops_the_shell_and_shows_every_window() {
     let sandbox = Sandbox::new();
@@ -355,6 +454,8 @@ fn mistakes_are_explained_and_missing_parts_reported() {
         typo.stderr
     );
     assert_eq!(msg(&sandbox, &["workspace", "12"]).code, exit::USAGE);
+    assert_eq!(msg(&sandbox, &["panel", "tray"]).code, exit::USAGE);
+    assert_eq!(msg(&sandbox, &["group", "make"]).code, exit::USAGE);
     assert_eq!(msg(&sandbox, &["reload"]).code, exit::NOT_RUNNING);
     // A shell without the window manager says so for its commands.
     std::fs::write(sandbox.config_file(), "schema = 1\n[language]\nlanguage = \"en\"\n").unwrap();
