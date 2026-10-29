@@ -602,3 +602,6 @@ notify-restarted = Kabuk started again
 notify-restarted-s = It stopped unexpectedly; its log says why.
 notify-elevated = A program runs as administrator
 notify-elevated-s = Kabuk cannot move its windows, so they float. Start Kabuk as administrator to arrange them too.
+
+# A bar module's tooltip (PLAN M19 U15).
+tip-workspace = Workspace { $value }

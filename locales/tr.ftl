@@ -601,3 +601,6 @@ notify-restarted = Kabuk yeniden başladı
 notify-restarted-s = Beklenmedik biçimde durdu; nedeni günlüğünde.
 notify-elevated = Bir program yönetici olarak çalışıyor
 notify-elevated-s = Kabuk onun pencerelerini taşıyamaz, bu yüzden yüzerler. Onları da düzenlemesi için Kabuk'u yönetici olarak başlat.
+
+# Bar modülünün ipucu (PLAN M19 U15).
+tip-workspace = Çalışma alanı { $value }

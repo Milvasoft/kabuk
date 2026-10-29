@@ -446,6 +446,8 @@ pub const MSG_TEST_SHOW_DESKTOP: u32 = msg::APP + 65;
 /// Integration tests: an auto-hiding bar (`wparam` its place plus 1) or the dock (0)
 /// comes in (`lparam` 1) or slides off (0), as the mouse would make it.
 pub const MSG_TEST_PEEK: u32 = msg::APP + 70;
+/// Integration tests: the mouse rests on the primary bar's clock (PLAN M19 U15).
+pub const MSG_TEST_CLOCK_TIP: u32 = msg::APP + 93;
 /// Integration tests: something that cannot be opened is opened (PLAN M19 U6).
 pub const MSG_TEST_OPEN_MISSING: u32 = msg::APP + 92;
 /// Integration tests: a change made on bar `wparam` shows a notice (DECISIONS D95).
@@ -588,6 +590,13 @@ struct Dock {
     drawn_grow: (f32, f32, bool),
     /// Hidden while a full-screen program covers its monitor, as the bar is.
     aside: bool,
+}
+
+/// What the mouse rests on for a tooltip: a tray icon, or a module of the bar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Hovered {
+    Tray(IconKey),
+    Module(&'static str, u32),
 }
 
 /// The tooltip window of a tray icon, kept alive while it shows (the surface goes first).
@@ -765,7 +774,7 @@ struct Shared {
     tray_asked: Option<std::time::Instant>,
     /// The tray icon under the mouse (bar index, icon), and its tooltip once shown. By the
     /// icon's key: programs re-adding icons move the others along the bar.
-    hover: Option<(usize, IconKey)>,
+    hover: Option<(usize, Hovered)>,
     tooltip: Option<motion_host::Shown>,
     /// The auto-hiding bar (or dock) the mouse rests at, until [`REVEAL_DELAY`] passes.
     reveal: Option<Peeker>,
@@ -1681,6 +1690,13 @@ impl Shared {
             }
             MSG_PRIVACY => {
                 self.privacy_changed();
+                Some(0)
+            }
+            #[cfg(feature = "integration")]
+            MSG_TEST_CLOCK_TIP => {
+                let b = self.bars.iter().position(|b| b.primary)?;
+                self.hover = Some((b, Hovered::Module(view::hit::CLOCK, 0)));
+                self.show_tooltip();
                 Some(0)
             }
             #[cfg(feature = "integration")]
@@ -3055,7 +3071,10 @@ impl Shared {
             Some((view::hit::TRAY, i)) => usize::try_from(i)
                 .ok()
                 .and_then(|i| self.tray.visible().nth(i))
-                .map(|icon| (index, icon.key)),
+                .map(|icon| (index, Hovered::Tray(icon.key))),
+            Some((module, value)) if self.module_tip(module, value).is_some() => {
+                Some((index, Hovered::Module(module, value)))
+            }
             _ => None,
         };
         if now != self.hover {
@@ -3212,16 +3231,89 @@ impl Shared {
         })
     }
 
+    /// What a module's tooltip says (PLAN M19 U15: only tray icons had one), `None` for a
+    /// module without.
+    fn module_tip(&self, module: &str, value: u32) -> Option<String> {
+        let i18n = &self.i18n;
+        let pct = |v: u32| i18n.tr_args("bar-percent", &[("value", v.to_string().into())]);
+        let figure = |label: &str, value: String| format!("{} {value}", i18n.upper(&i18n.tr(label)));
+        match module {
+            view::hit::TITLE => self.live.title.as_ref().map(|t| {
+                if t.rest.is_empty() {
+                    t.main.clone()
+                } else {
+                    format!("{} \u{2014} {}", t.main, t.rest)
+                }
+            }),
+            view::hit::CLOCK => self.live.time.map(|t| {
+                let date = i18n.date_long(t.weekday, t.day, t.month);
+                format!("{date} {}", t.year)
+            }),
+            view::hit::WORKSPACE => Some(i18n.tr_args("tip-workspace", &[("value", value.to_string().into())])),
+            view::hit::BATTERY => self.live.battery.map(|b| {
+                let left = b.seconds_left.map(|s| {
+                    i18n.tr_args(
+                        "qs-hours-minutes",
+                        &[
+                            ("hours", (s / 3600).to_string().into()),
+                            ("minutes", (s % 3600 / 60).to_string().into()),
+                        ],
+                    )
+                });
+                match left {
+                    Some(left) => format!("{} \u{00b7} {left}", pct(u32::from(b.percent))),
+                    None => pct(u32::from(b.percent)),
+                }
+            }),
+            view::hit::NETWORK => self.live.network.as_ref().map(|l| match l {
+                kabuk_core::network::Link::Wifi { ssid, .. } => ssid.clone(),
+                kabuk_core::network::Link::Ethernet => i18n.tr("net-ethernet"),
+                kabuk_core::network::Link::None => i18n.tr("net-none"),
+            }),
+            view::hit::KEYBOARD => {
+                let now = kabuk_win::input_lang::current();
+                kabuk_win::input_lang::installed()
+                    .into_iter()
+                    .find(|l| Some(l.hkl) == now)
+                    .map(|l| l.name)
+            }
+            view::hit::STATS => match value {
+                view::hit::STAT_CPU => self.live.stats.cpu.map(|c| figure("lbl-cpu", pct(c))),
+                view::hit::STAT_RAM => self.live.stats.ram_gib.map(|r| {
+                    figure("lbl-ram", i18n.tr_args("bar-ram", &[("value", i18n.decimal(r, 2).into())]))
+                }),
+                view::hit::STAT_GPU => self
+                    .live
+                    .gpu_c
+                    .map(|g| figure("lbl-gpu", i18n.tr_args("bar-temp", &[("value", g.to_string().into())]))),
+                view::hit::STAT_NET => self.live.stats.net_mbs.map(|n| {
+                    figure("lbl-net", i18n.tr_args("bar-net-rate", &[("value", i18n.decimal(n, 2).into())]))
+                }),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     fn show_tooltip(&mut self) {
-        let Some((index, key)) = self.hover else { return };
-        let found = self.tray.visible().enumerate().find(|(_, icon)| icon.key == key);
-        let Some((i, tip)) = found.map(|(i, icon)| (i, icon.tip.clone())) else {
-            return;
+        let Some((index, hovered)) = self.hover else { return };
+        let (tip, anchor) = match hovered {
+            Hovered::Tray(key) => {
+                let found = self.tray.visible().enumerate().find(|(_, icon)| icon.key == key);
+                let Some((i, tip)) = found.map(|(i, icon)| (i, icon.tip.clone())) else {
+                    return;
+                };
+                (tip, (view::hit::TRAY, i as u32))
+            }
+            Hovered::Module(module, value) => {
+                let Some(tip) = self.module_tip(module, value) else { return };
+                (tip, (module, value))
+            }
         };
         let Some(node) = tooltip::view(&tip, self.look.style.text_scale, &tooltip::TIP) else {
             return;
         };
-        let (Some(bar), Some(icon)) = (self.bars.get(index), self.hit_rect(index, view::hit::TRAY, i as u32)) else {
+        let (Some(bar), Some(icon)) = (self.bars.get(index), self.hit_rect(index, anchor.0, anchor.1)) else {
             return;
         };
         let scale = bar.scale;
@@ -3262,7 +3354,7 @@ impl Shared {
         );
         let _ = self.gpu.commit();
         shown.window().show();
-        tracing::debug!(tip = %tip, ?rect, "tray tooltip shown");
+        tracing::debug!(tip = %tip, ?rect, "tooltip shown");
         self.tooltip = Some(shown);
     }
 

@@ -4434,3 +4434,41 @@ fn a_window_asking_for_attention_is_seen() {
     assert_eq!(sandbox.restore().0, 0);
     assert!(wait_until(SETTLE, || restored(&before)).is_some());
 }
+
+/// PLAN M19 U15: only tray icons had a tooltip. The clock's says the whole date with the
+/// year (a side bar hides the date).
+#[test]
+fn the_clock_has_a_tooltip_with_the_whole_date() {
+    use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_CLOCK_TIP};
+    use kabuk_win::msgloop::{post_message, Msg};
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
+    post_message(
+        control,
+        Msg {
+            id: MSG_TEST_CLOCK_TIP,
+            wparam: 0,
+            lparam: 0,
+        },
+    )
+    .unwrap();
+    let year = kabuk_win::system::local_time().year.to_string();
+    assert!(
+        wait_until(SETTLE, || sandbox
+            .last_log_line(&["tooltip shown"])
+            .is_some_and(|l| l.contains(&year)))
+        .is_some(),
+        "no tooltip with the date: {:?}",
+        sandbox.last_log_line(&["tooltip"])
+    );
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}

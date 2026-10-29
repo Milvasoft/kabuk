@@ -60,6 +60,8 @@ pub mod hit {
     pub const SHOW_DESKTOP: &str = "show-desktop";
     /// The quick settings button (D88).
     pub const QUICK_SETTINGS: &str = "quick-settings";
+    /// The focused window's title (its tooltip has the whole of it; PLAN M19 U15).
+    pub const TITLE: &str = "title";
 }
 
 /// Konsol names its first workspaces like tmux windows (`1:code`).
@@ -1228,7 +1230,7 @@ pub fn regions(d: &BarData, s: &Style, i18n: &I18n, thickness: f32) -> Regions {
             .into_iter()
             .collect();
         if let (true, false, true, true, Some(t)) = (s.title, v, d.primary, d.modules.title, &d.title) {
-            second.push(title(t, s, i18n));
+            second.push(title(t, s, i18n).hit(hit::TITLE, 0));
         }
         if !second.is_empty() {
             start.push(g(second));
