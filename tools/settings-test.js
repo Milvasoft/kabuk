@@ -130,8 +130,10 @@ async function main() {
     if (op === "state" && !m.partial) sizes.full.push(line.length);
     pending.push(page.evaluate((text) => window.__fromRust(text), line));
   });
+  const ops = []; // every op the page sent, in order
   await page.exposeFunction("__toRust", (text) => {
     sent++;
+    ops.push(JSON.parse(text).op);
     bridge.stdin.write(text.replace(/\n/g, " ") + "\n");
   });
   await page.addInitScript(() => {
@@ -187,6 +189,7 @@ async function main() {
   await page.click(".set-found button"); await settled();
   const corners = await page.$eval(".set-main .found", (e) => { const r = e.getBoundingClientRect(); return { text: e.textContent, seen: r.top >= 0 && r.bottom <= window.innerHeight }; }).catch(() => ({}));
   check((await page.locator(`[data-page="windows"].on`).count()) === 1 && (corners.text || "").startsWith("Sıcak köşeler") && corners.seen, `search: a click opens it, in view (${corners.text})`);
+  check(!ops.includes("gallery-previews"), "search: the pages read for it ask for no gallery previews");
   if (shots) { await search("ekran"); await page.screenshot({ path: path.join(shots, "search.png") }); await page.press("#set-search", "Escape"); await settled(); }
 
   // A short window: the menu scrolls, so its last page can be reached (found by the user:

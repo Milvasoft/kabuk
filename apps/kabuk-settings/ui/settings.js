@@ -855,11 +855,12 @@
   }
   function indexSettings() {
     if (searchIndex && searchIndex.of === S) return searchIndex.entries;
-    const kept = Object.fromEntries(Object.keys(OPENED).map((k) => [k, ui[k]]));
+    // Drawn to be read, not shown: the gallery's previews are not asked for.
+    const kept = Object.fromEntries([...Object.keys(OPENED), "previewsAsked"].map((k) => [k, ui[k]]));
     const entries = [];
     try {
       for (const [page] of navItems) {
-        Object.assign(ui, OPENED);
+        Object.assign(ui, OPENED, { previewsAsked: true });
         const tpl = document.createElement("template");
         tpl.innerHTML = PAGES[page]();
         const section = t("nav-" + page);
