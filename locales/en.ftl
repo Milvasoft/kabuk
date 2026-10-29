@@ -306,7 +306,7 @@ gal-saver-still-three-fireflies-h = A long exposure of three flights
 
 ## Notices
 
-notify-missed = { $value } notices came while it was on
+notify-missed = { $value } notices held back during game mode
 launcher-calc = { $query } = { $value }
 
 ## Settings app (what the design page does not word)

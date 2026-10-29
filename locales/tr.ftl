@@ -305,7 +305,7 @@ gal-saver-still-three-fireflies-h = Üç uçuşun uzun pozlaması
 
 ## Bildirimler
 
-notify-missed = Açıkken { $value } bildirim geldi
+notify-missed = Oyun modunda { $value } bildirim bekletildi
 launcher-calc = { $query } = { $value }
 
 ## Ayarlar uygulaması (tasarım sayfasının yazmadıkları)
