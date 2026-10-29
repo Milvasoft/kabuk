@@ -147,6 +147,9 @@ struct Entry {
 struct Workspace {
     entries: Vec<Entry>,
     kind: Kind,
+    /// The layout was switched on this workspace (Win+Y); otherwise it follows the
+    /// setting (`windows.tiling_layout`).
+    kind_chosen: bool,
     /// The last focused window, focused again when the workspace comes back.
     focus: Option<WindowId>,
     /// Floating or tiling as chosen on this workspace; `None` follows the default layout.
@@ -162,6 +165,7 @@ impl Workspace {
         Workspace {
             entries: Vec::new(),
             kind,
+            kind_chosen: false,
             focus: None,
             floating: None,
             splits: Vec::new(),
@@ -1086,6 +1090,7 @@ impl Desk {
             Kind::Dwindle => Kind::Master,
             Kind::Master => Kind::Dwindle,
         };
+        ws.kind_chosen = true;
         let before = self.visible_set();
         self.sync(&before, &[(m, active)], None)
     }
@@ -1456,6 +1461,19 @@ impl Desk {
             mon.active = mon.active.min(count - 1);
         }
         let default_changed = settings.floating_layout != self.settings.floating_layout;
+        if settings.kind != self.settings.kind {
+            // Workspaces that follow the tiling layout take the new one (PLAN M19 U11: it
+            // reached only workspaces made after the change).
+            for ws in self
+                .monitors
+                .iter_mut()
+                .flat_map(|m| m.workspaces.iter_mut())
+                .chain(std::iter::once(&mut self.scratch))
+                .filter(|ws| !ws.kind_chosen)
+            {
+                ws.kind = settings.kind;
+            }
+        }
         self.settings = settings;
         if default_changed {
             // Workspaces that follow the default layout take the new one.

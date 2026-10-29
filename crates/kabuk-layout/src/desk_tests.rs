@@ -308,6 +308,36 @@ fn layout_cycles_between_dwindle_and_master_per_workspace() {
     assert_eq!(d.layout(M1, 1), Some(Kind::Dwindle));
 }
 
+/// PLAN M19 U11: the tiling layout set in Settings reaches the workspaces open now, not
+/// only new ones; a workspace switched by hand (Win+Y) keeps its own.
+#[test]
+fn the_tiling_layout_follows_the_setting_unless_a_workspace_was_switched() {
+    let mut d = desk(false);
+    for id in 1..=3 {
+        d.add(new(id));
+    }
+    // Workspace 2 is switched to master by hand, then back to dwindle: still its own.
+    d.switch(M1, 2);
+    d.cycle_layout(M1);
+    d.cycle_layout(M1);
+    d.switch(M1, 1);
+    let master = Settings {
+        kind: Kind::Master,
+        ..settings()
+    };
+    let e = d.set_settings(master);
+    assert_eq!(d.layout(M1, 1), Some(Kind::Master), "the visible workspace follows");
+    assert_eq!(d.layout(M1, 3), Some(Kind::Master), "a hidden one too");
+    assert_eq!(
+        d.layout(M1, 2),
+        Some(Kind::Dwindle),
+        "the one switched by hand keeps its own"
+    );
+    assert_eq!(placed(&e), vec![1, 2, 3], "the visible workspace is laid out again");
+    d.set_settings(settings());
+    assert_eq!(d.layout(M1, 1), Some(Kind::Dwindle));
+}
+
 #[test]
 fn focus_and_swap_follow_the_geometry() {
     let mut d = desk(true);
