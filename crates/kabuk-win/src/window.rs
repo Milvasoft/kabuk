@@ -688,7 +688,9 @@ impl Hwnd {
 
     /// Makes the window fully transparent (`on`), so it shows nothing even while
     /// Windows has it shown, or opaque again. Only a transparency set here is taken off:
-    /// a window that was layered on its own stays so. True when the window is as asked.
+    /// a window that was layered on its own stays so, unless it was layered fully opaque
+    /// (which shows as no layering: found left so on Explorer's taskbar, it was never made
+    /// see-through again). True when the window is as asked.
     /// For Explorer's taskbars, which Explorer shows for a moment whenever a work area
     /// changes (found by the user: Windows' taskbar flashed as the auto-hiding bar came
     /// and went; DECISIONS D77).
@@ -706,13 +708,14 @@ impl Hwnd {
         let read = layered
             && unsafe { GetLayeredWindowAttributes(self.raw(), None, Some(&mut alpha), Some(&mut flags)) }.is_ok();
         let ours = read && flags.contains(LWA_ALPHA) && alpha == 0;
+        let opaque = read && flags == LWA_ALPHA && alpha == u8::MAX;
         // SAFETY: style and layering changes on a window handle; invalid ones fail.
         unsafe {
             if on {
                 if ours {
                     return true;
                 }
-                if layered {
+                if layered && !opaque {
                     // Layered by its owner: left alone.
                     return false;
                 }
@@ -1007,6 +1010,44 @@ mod tests {
         );
         assert!(h.set_see_through(false), "already opaque");
         assert!(!Hwnd(0x1234_5678).is_see_through());
+    }
+
+    /// Found by the tray tests: Explorer's taskbar was left layered at full opacity, and a
+    /// window layered on its own was left alone, so the hidden taskbar was not see-through
+    /// and flashed again at a work area change. Fully opaque layering shows as none: it is
+    /// made see-through, and opaque again without the layering.
+    #[test]
+    fn a_window_layered_fully_opaque_turns_see_through_and_back() {
+        use windows::Win32::Foundation::COLORREF;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            SetLayeredWindowAttributes, SetWindowLongPtrW, LWA_ALPHA, LWA_COLORKEY, WS_EX_LAYERED,
+        };
+        let rect = crate::msgloop::PxRect {
+            x: -30_000,
+            y: -30_000,
+            w: 50,
+            h: 50,
+        };
+        let w = crate::msgloop::Window::shell_surface("Kabuk.Test.SeeThroughOpaque", "", rect, |_| None).unwrap();
+        let h = w.hwnd();
+        let layer = |alpha: u8, flags| {
+            // SAFETY: style and layering changes on the test's own window.
+            unsafe {
+                SetWindowLongPtrW(h.raw(), GWL_EXSTYLE, (h.long(GWL_EXSTYLE) | WS_EX_LAYERED.0) as isize);
+                SetLayeredWindowAttributes(h.raw(), COLORREF(0), alpha, flags).unwrap();
+            }
+        };
+        layer(u8::MAX, LWA_ALPHA);
+        assert!(h.set_see_through(true));
+        assert!(h.is_see_through());
+        assert!(h.set_see_through(false));
+        assert!(!h.is_see_through());
+        assert_eq!(h.long(GWL_EXSTYLE) & WS_EX_LAYERED.0, 0);
+        // Layered by its owner in another way: still left alone.
+        layer(128, LWA_ALPHA);
+        assert!(!h.set_see_through(true));
+        layer(u8::MAX, LWA_ALPHA | LWA_COLORKEY);
+        assert!(!h.set_see_through(true));
     }
 
     /// D78: an ordinary window under another ordinary one is under an ordinary window; a
