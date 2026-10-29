@@ -31,6 +31,8 @@
     previews: {}, // the gallery's previews by design key (DECISIONS D58), as they come
     previewsAsked: false,
     previewsDone: false, // every preview sent: a card without one stops waiting for it
+    fileMsg: null, // what the settings file's export, import or reset said
+    confirmReset: false, // "Reset all" asks before it does
   };
 
   // The design page's keys are camelCase; the language files use kebab-case
@@ -777,7 +779,29 @@
     return head(t("navAbout"), tv("setVersion", S.version)) + `
       <div class="meter" style="grid-template-columns:repeat(4,1fr)">${meters.map(([v, n]) => `<div><b>${escapeHtml(v)}</b><span>${n}</span></div>`).join("")}</div>
       ${i.running ? row(t("setQuit"), t("setQuitH"), `<button class="set-btn ghost" type="button" data-quit>${t("setQuitBtn")}</button>`) : `<div class="note">${t("setNotRunning")}</div>`}
-      ${updateRow()}`;
+      ${updateRow()}
+      ${settingsFileGroup()}`;
+  }
+  /* The settings file (PLAN M19 U20): kabuk.toml saved to a file and read back, and every
+     setting back to its default behind a confirmation. An import or a reset keeps the file
+     as it was first, so the settings before it can be brought back. */
+  function settingsFileGroup() {
+    const m = ui.fileMsg;
+    const alert = (text, list = "") => `<div class="note" role="alert" style="color:var(--err-fg)" data-file-said>${escapeHtml(text)}${list}</div>`;
+    const said = !m ? ""
+      : m.problems ? alert(tv("setFileRefused", m.path), `<ul>${m.problems.map((p) => `<li>${escapeHtml(p)}</li>`).join("")}</ul>`)
+      : m.failed ? alert(m.text)
+      : `<div class="note" role="status" data-file-said>${escapeHtml(m.text)}${m.undo ? ` <button type="button" class="linkish" data-settings-undo>${t("setFileUndo")}</button>` : ""}</div>`;
+    const confirm = ui.confirmReset ? `<div class="note" role="alertdialog" aria-labelledby="reset-all-q" aria-describedby="reset-all-d" data-reset-confirm>
+        <b id="reset-all-q">${t("setResetAllQ")}</b><p id="reset-all-d">${t("setResetAllD")}</p>
+        <div style="display:flex;gap:8px"><button class="set-btn" type="button" data-reset-all-yes>${t("setResetAllYes")}</button><button class="set-btn ghost" type="button" data-reset-all-no>${t("setCancel")}</button></div></div>` : "";
+    const button = (attr, label, extra = "") => `<button class="set-btn ghost" type="button" ${attr} ${extra}>${label}</button>`;
+    return `<div class="set-part"><h4>${t("setFile")}</h4></div>
+      <div class="set-grp"><span class="gl">${t("setFileH")}</span>
+        ${row(t("setFileExport"), t("setFileExportH"), button(`data-settings-file="export"`, t("setFileExportBtn")))}
+        ${row(t("setFileImport"), t("setFileImportH"), button(`data-settings-file="import"`, t("setFileImportBtn")))}
+        ${row(t("setResetAll"), t("setResetAllH"), button("data-reset-all", t("setResetAllBtn"), ui.confirmReset ? "disabled" : ""))}
+        ${confirm}${said}</div>`;
   }
   /** "Check for updates" and what Kabuk's latest GitHub release said. */
   function updateRow() {
@@ -836,6 +860,7 @@
     let el;
     if ((el = on("[data-page]"))) {
       ui.page = el.dataset.page; ui.refused = null; ui.capture = null; capture(false); ui.ruleForm = null; ui.rulePicking = false; ui.dimCustom = null;
+      ui.fileMsg = null; ui.confirmReset = false;
       if (ui.page === "about" || ui.page === "wall" || ui.page === "rules") post({ op: "info" });
       render();
       document.querySelector(`[data-page="${ui.page}"]`)?.focus({ preventScroll: true });
@@ -887,6 +912,12 @@
     if ((el = on("[data-profile-open]"))) { const p = (cfg().profile || [])[Number(el.dataset.profileOpen)]; if (p) post({ op: "profile-open", name: p.name }); return; }
     if ((el = on("[data-profile-drop]"))) { const i = Number(el.dataset.profileDrop); set("profile", (cfg().profile || []).filter((_, j) => j !== i)); return; }
     if ((el = on("[data-theme-file]"))) { ui.themeMsg = ""; post({ op: "theme-" + el.dataset.themeFile }); return; }
+    // The settings file (PLAN M19 U20); "Reset all" asks first.
+    if ((el = on("[data-settings-file]"))) { ui.fileMsg = null; render(); post({ op: "settings-" + el.dataset.settingsFile }); return; }
+    if (on("[data-settings-undo]")) { ui.fileMsg = null; post({ op: "settings-import", backup: true }); return; }
+    if (on("[data-reset-all]")) { ui.confirmReset = true; ui.fileMsg = null; render(); document.querySelector("[data-reset-all-no]")?.focus(); return; }
+    if (on("[data-reset-all-no]")) { ui.confirmReset = false; render(); document.querySelector("[data-reset-all]")?.focus(); return; }
+    if (on("[data-reset-all-yes]")) { ui.confirmReset = false; render(); post({ op: "settings-reset" }); return; }
     if ((el = on("[data-grid-show]"))) { post({ op: "app-grid-show", open: el.dataset.gridShow }); return; }
     if ((el = on("[data-grid-reset]"))) { post({ op: "app-grid-reset" }); return; }
     if ((el = on("[data-pick]"))) { ui.pending = el.dataset.pick === "image" ? "wall" : "folder"; post({ op: "pick", what: el.dataset.pick }); return; }
@@ -1005,6 +1036,10 @@
         // After a change only what it can have changed comes (PLAN M19 P18).
         S = m.partial && S ? { ...S, ...m } : m;
         if (m.theme_imported != null) ui.themeMsg = tv("thImported", m.theme_imported);
+        if (m.settings_done) {
+          const said = { imported: "setFileImported", reset: "setResetDone", undone: "setFileUndone" }[m.settings_done.done];
+          ui.fileMsg = { text: tv(said, m.settings_done.backup), undo: m.settings_done.done !== "undone" };
+        }
         A = A || window.kabukDesignArt(t, escapeHtml);
         ui.refused = null;
         // A rule saved (or removed): its editor closes.
@@ -1071,6 +1106,13 @@
         break;
       case "profile":
         ui.profileMsg = m.done === "empty" ? t("pfEmpty") : m.done === "not-running" ? t("pfNotRunning") : t("pfOpened");
+        render();
+        break;
+      case "settings":
+        ui.fileMsg = m.done === "exported" ? { text: tv("setFileExported", m.path) }
+          : m.done === "failed" ? { text: m.reason, failed: true }
+          : m.done === "refused" ? { path: m.path, problems: m.problems }
+          : null;
         render();
         break;
       case "theme":

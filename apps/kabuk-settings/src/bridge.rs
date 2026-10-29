@@ -41,6 +41,21 @@
 //!   or `{"op":"theme","done":"failed","reason":…}`: `reason` says why a file could not
 //!   be read or written, in the user's language, and is `null` for a file that was read
 //!   and is no theme this Kabuk takes (PLAN M19 U20).
+//! - `{"op":"settings-export"}` and `{"op":"settings-import"}` (PLAN M19 U20): Windows' own
+//!   dialog asks where (a test passes `"path"`). The export saves `kabuk.toml` as it is
+//!   and answers `{"op":"settings","done":"exported","path":…}`. The import reads a file
+//!   as Kabuk reads `kabuk.toml`; one it refuses is not taken:
+//!   `{"op":"settings","done":"refused","path":…,"problems":[…]}`; one it takes replaces
+//!   `kabuk.toml`, kept first as `kabuk.toml.bak`, and a fresh `state` comes with
+//!   `"settings_done":{"done":"imported","backup":…}`. `"backup":true` reads that backup
+//!   instead (`"done":"undone"`), which brings back the settings before the last import
+//!   or reset. Otherwise `{"op":"settings","done":"cancelled"}` or
+//!   `{"op":"settings","done":"failed","reason":…}` (why a file could not be read or
+//!   written).
+//! - `{"op":"settings-reset"}` → every setting back to its default, shortcuts and rules
+//!   too, the layout profiles kept (PLAN M19 U20; the page asks first): `kabuk.toml` kept
+//!   as `kabuk.toml.bak` first, and a fresh `state` with
+//!   `"settings_done":{"done":"reset","backup":…}`, or the import's `failed`.
 //! - `{"op":"profile-save","name":…}` → a fresh `state` with the layout profile `name`
 //!   made of the windows the running shell manages (DECISIONS D65; a test passes
 //!   `"windows"` as `query windows` gives them), or `{"op":"profile","done":"empty"}`;
@@ -250,6 +265,12 @@ impl Bridge {
                 json!({ "op": "profile", "done": done })
             }
             "theme-import" => self.import_theme(m.get("path").and_then(Value::as_str)),
+            "settings-export" => self.export_settings(m.get("path").and_then(Value::as_str)),
+            "settings-import" => self.import_settings(
+                m.get("path").and_then(Value::as_str),
+                m.get("backup").and_then(Value::as_bool).unwrap_or(false),
+            ),
+            "settings-reset" => self.reset_settings(),
             "capture-keys" => self.capture_keys(m.get("on").and_then(Value::as_bool).unwrap_or(false)),
             "pick" => {
                 let what = m.get("what").and_then(Value::as_str)?;
@@ -442,6 +463,122 @@ impl Bridge {
             Some(i18n.tr_args("set-file-not-written", &[("value", io_reason(&e, i18n).into())]))
         })?;
         Ok(name)
+    }
+
+    /// Where an import or a reset keeps `kabuk.toml` first: beside it, as
+    /// `kabuk.toml.bak`.
+    fn backup_file(&self) -> PathBuf {
+        let mut name = self.config_file.clone().into_os_string();
+        name.push(BACKUP_SUFFIX);
+        PathBuf::from(name)
+    }
+
+    /// Every setting to a file the user picks, or `path` (PLAN M19 U20): `kabuk.toml` as it
+    /// is, its comments too; with no file yet, one holding only the defaults.
+    fn export_settings(&self, path: Option<&str>) -> Value {
+        let i18n = kabuk_win::system::i18n(Some(&self.config()));
+        let target = match path {
+            Some(p) => Some(PathBuf::from(p)),
+            None => kabuk_win::shellitems::pick_save(
+                &i18n.tr("set-file-kind"),
+                SETTINGS_PATTERNS,
+                SETTINGS_EXTENSION,
+                SETTINGS_NAME,
+                &i18n.tr("set-file-export"),
+            ),
+        };
+        let Some(target) = target else {
+            return json!({ "op": "settings", "done": "cancelled" });
+        };
+        let text = self.read();
+        let text = if text.trim().is_empty() { defaults_file() } else { text };
+        match kabuk_core::fsutil::write_atomic(&target, text.as_bytes()) {
+            Ok(()) => {
+                tracing::info!(path = %target.display(), "settings exported");
+                json!({ "op": "settings", "done": "exported", "path": target.display().to_string() })
+            }
+            Err(e) => {
+                tracing::warn!(path = %target.display(), error = %e, "settings not exported");
+                let reason = i18n.tr_args("set-file-not-saved", &[("value", io_reason(&e, &i18n).into())]);
+                json!({ "op": "settings", "done": "failed", "reason": reason })
+            }
+        }
+    }
+
+    /// A saved settings file in place of `kabuk.toml`, from `path`, where the user says, or
+    /// the backup (PLAN M19 U20). It is read as Kabuk reads `kabuk.toml`: a file it would
+    /// refuse is not taken, and its problems are said as Settings says the file's own.
+    fn import_settings(&self, path: Option<&str>, backup: bool) -> Value {
+        let i18n = kabuk_win::system::i18n(Some(&self.config()));
+        let source = match (backup, path) {
+            (true, _) => Some(self.backup_file()),
+            (false, Some(p)) => Some(PathBuf::from(p)),
+            (false, None) => kabuk_win::shellitems::pick(
+                kabuk_win::shellitems::Pick::File {
+                    kind: &i18n.tr("set-file-kind"),
+                    patterns: SETTINGS_PATTERNS,
+                },
+                &i18n.tr("set-file-import"),
+            ),
+        };
+        let Some(source) = source else {
+            return json!({ "op": "settings", "done": "cancelled" });
+        };
+        let text = match std::fs::read_to_string(&source) {
+            Ok(text) => text,
+            Err(e) => {
+                tracing::warn!(path = %source.display(), error = %e, "settings file not read");
+                let reason = i18n.tr_args("set-file-unreadable", &[("value", io_reason(&e, &i18n).into())]);
+                return json!({ "op": "settings", "done": "failed", "reason": reason });
+            }
+        };
+        if let Err(errors) = config::parse(&text) {
+            tracing::warn!(path = %source.display(), errors = errors.len(), "settings file refused");
+            let problems: Vec<String> = errors.iter().map(|e| e.describe(&i18n)).collect();
+            return json!({
+                "op": "settings",
+                "done": "refused",
+                "path": source.display().to_string(),
+                "problems": problems,
+            });
+        }
+        self.replace_settings(&text, if backup { "undone" } else { "imported" }, &i18n)
+    }
+
+    /// Every setting back to its default, shortcuts and window rules too (PLAN M19 U20).
+    /// The layout profiles are kept: saved windows rather than settings, as the app grid's
+    /// arrangement, the created wallpapers and the API keys, which are not in the file.
+    fn reset_settings(&self) -> Value {
+        let cfg = self.config();
+        let i18n = kabuk_win::system::i18n(Some(&cfg));
+        let mut text = defaults_file();
+        if !cfg.profiles.is_empty() {
+            let profiles = serde_json::to_value(&cfg.profiles).unwrap_or(Value::Null);
+            match config::edit::set(&text, "profile", &profiles) {
+                Ok(with) => text = with,
+                // Kept in the backup either way.
+                Err(e) => tracing::warn!(error = %e, "layout profiles not kept by the reset"),
+            }
+        }
+        self.replace_settings(&text, "reset", &i18n)
+    }
+
+    /// `text` in place of `kabuk.toml`, the file as it was first kept as the backup (its
+    /// former backup goes; it swaps with the backup when that is what is read); a fresh
+    /// state with what was `done` and where the backup is.
+    fn replace_settings(&self, text: &str, done: &str, i18n: &kabuk_i18n::I18n) -> Value {
+        let backup = self.backup_file();
+        let written = kabuk_core::fsutil::write_atomic(&backup, self.read().as_bytes())
+            .and_then(|()| kabuk_core::fsutil::write_atomic(&self.config_file, text.as_bytes()));
+        if let Err(e) = written {
+            tracing::error!(error = %e, done, "settings not replaced");
+            let reason = i18n.tr_args("set-file-not-written", &[("value", io_reason(&e, i18n).into())]);
+            return json!({ "op": "settings", "done": "failed", "reason": reason });
+        }
+        tracing::info!(done, backup = %backup.display(), "settings replaced");
+        let mut state = self.state();
+        state["settings_done"] = json!({ "done": done, "backup": backup.display().to_string() });
+        state
     }
 
     /// Saves layout profile `name` (DECISIONS D65) from `windows` (`query windows`' answer):
@@ -770,6 +907,18 @@ fn io_reason(e: &std::io::Error, i18n: &kabuk_i18n::I18n) -> String {
         ErrorKind::InvalidData => i18n.tr("set-io-not-text"),
         _ => e.to_string(),
     }
+}
+
+/// A settings file as the dialogs offer it: its pattern, extension and suggested name.
+const SETTINGS_PATTERNS: &str = "*.toml";
+const SETTINGS_EXTENSION: &str = "toml";
+const SETTINGS_NAME: &str = "kabuk";
+/// What an import or reset adds to `kabuk.toml`'s name for its backup.
+const BACKUP_SUFFIX: &str = ".bak";
+
+/// A settings file holding only the defaults: every key left out.
+fn defaults_file() -> String {
+    format!("schema = {}\n", config::SCHEMA_VERSION)
 }
 
 /// The image files a wallpaper may be.
@@ -1321,6 +1470,109 @@ command = \"evil.exe\"
             .strip_prefix("The theme file could not be saved: ")
             .unwrap_or_default();
         assert!(r["done"] == "failed" && !said.is_empty(), "{r}");
+    }
+
+    /// PLAN M19 U20: every setting goes out to a file as it is, comments too; a saved file
+    /// comes back in place of kabuk.toml, the file before it kept as kabuk.toml.bak; a file
+    /// Kabuk would refuse is not taken and its problems are said, one that cannot be read
+    /// says why; the backup brings the settings before the import back.
+    #[test]
+    fn every_setting_goes_out_and_comes_back_in() {
+        let from = tempfile::tempdir().unwrap();
+        let mine = "schema = 1\n# mine\n[language]\nlanguage = \"en\"\n[windows]\ngap = 12\n";
+        let a = bridge(&from, Some(mine));
+        let file = from.path().join("saved.toml");
+        let out = reply(
+            &a,
+            json!({ "op": "settings-export", "path": file.display().to_string() }),
+        );
+        assert_eq!(out["done"], "exported", "{out}");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), mine);
+
+        let to = tempfile::tempdir().unwrap();
+        let theirs = "schema = 1\n[language]\nlanguage = \"en\"\n[bar]\nautohide = true\n";
+        let b = bridge(&to, Some(theirs));
+        let backup = to.path().join("kabuk.toml.bak");
+        let s = reply(
+            &b,
+            json!({ "op": "settings-import", "path": file.display().to_string() }),
+        );
+        assert_eq!(s["op"], "state", "{s}");
+        assert_eq!(
+            s["settings_done"],
+            json!({ "done": "imported", "backup": backup.display().to_string() })
+        );
+        assert_eq!(s["config"]["windows"]["gap"], 12);
+        assert_eq!(std::fs::read_to_string(&b.config_file).unwrap(), mine);
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), theirs);
+
+        // Refused as kabuk.toml would be: not taken, why said with the line.
+        let bad = to.path().join("bad.toml");
+        std::fs::write(&bad, "schema = 1\n[bar]\nheight = 9999\n").unwrap();
+        let r = reply(
+            &b,
+            json!({ "op": "settings-import", "path": bad.display().to_string() }),
+        );
+        assert_eq!(
+            (r["op"].as_str(), r["done"].as_str()),
+            (Some("settings"), Some("refused"))
+        );
+        let problems = r["problems"].as_array().cloned().unwrap_or_default();
+        assert!(
+            problems.len() == 1 && problems[0].as_str().unwrap_or_default().contains("Line 3"),
+            "{r}"
+        );
+        let gone = to.path().join("gone.toml");
+        let r = reply(
+            &b,
+            json!({ "op": "settings-import", "path": gone.display().to_string() }),
+        );
+        assert_eq!(r["reason"], "The file could not be read: the file is not there");
+        assert_eq!(std::fs::read_to_string(&b.config_file).unwrap(), mine);
+
+        // The settings before the import come back; the imported ones are kept instead.
+        let s = reply(&b, json!({ "op": "settings-import", "backup": true }));
+        assert_eq!(s["settings_done"]["done"], "undone", "{s}");
+        assert_eq!(std::fs::read_to_string(&b.config_file).unwrap(), theirs);
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), mine);
+
+        // No file yet: the defaults go out, as a file that reads.
+        let none = tempfile::tempdir().unwrap();
+        let empty = none.path().join("defaults.toml");
+        reply(
+            &bridge(&none, None),
+            json!({ "op": "settings-export", "path": empty.display().to_string() }),
+        );
+        let text = std::fs::read_to_string(&empty).unwrap();
+        assert_eq!(config::parse(&text).unwrap().config, Config::default());
+    }
+
+    /// PLAN M19 U20: "Reset all" sets every setting back to its default, shortcuts and
+    /// rules too, and keeps the layout profiles; the file before is kept as kabuk.toml.bak
+    /// and brought back from it.
+    #[test]
+    fn every_setting_goes_back_to_its_default_and_can_come_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let mine = "schema = 1\n# mine\n[windows]\ngap = 12\n[shortcuts]\nlauncher = [\"Win+Shift+R\"]\n[[rules.rule]]\nexe = \"Discord.exe\"\nworkspace = 5\n[[profile]]\nname = \"Kodlama\"\n[[profile.window]]\nexe = \"Code.exe\"\nopen = 'C:\\Code\\Code.exe'\nmonitor = 1\nworkspace = 2\n";
+        let b = bridge(&dir, Some(mine));
+        assert_eq!(b.config().profiles.len(), 1, "the profile reads");
+        let s = reply(&b, json!({ "op": "settings-reset" }));
+        let backup = dir.path().join("kabuk.toml.bak");
+        assert_eq!(
+            s["settings_done"],
+            json!({ "done": "reset", "backup": backup.display().to_string() })
+        );
+        let now = b.config();
+        let defaults = Config::default();
+        assert_eq!(
+            (&now.windows, &now.shortcuts, &now.rules),
+            (&defaults.windows, &defaults.shortcuts, &defaults.rules)
+        );
+        assert_eq!(now.profiles.len(), 1);
+        assert_eq!(now.profiles[0].name, "Kodlama");
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), mine);
+        reply(&b, json!({ "op": "settings-import", "backup": true }));
+        assert_eq!(std::fs::read_to_string(&b.config_file).unwrap(), mine);
     }
 
     /// DECISIONS D65: a layout profile is saved from the shell's windows (here as `query

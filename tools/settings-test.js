@@ -618,6 +618,44 @@ async function main() {
   check(await until(async () => ["latest", "newer", "failed"].includes(await said()), 15000), "update: checked and answered");
   check((await page.locator("[data-update-check][disabled]").count()) === 0, "update: can be checked again");
 
+  // PLAN M19 U20: every setting out to a file and back in (the file as Windows' dialog would
+  // give it), a refused one not taken and why said, the settings before an import brought
+  // back; "Reset all" asks first, says what is kept and that kabuk.toml.bak keeps the file.
+  const toRust = async (m) => { await page.evaluate((t) => window.chrome.webview.postMessage(t), JSON.stringify(m)); await settled(); };
+  const fileSaid = () => page.locator("[data-file-said]").innerText().catch(() => "");
+  const backup = config + ".bak";
+  await restart();
+  await go("about");
+  const savedFile = path.join(dir, "saved.toml");
+  await toRust({ op: "settings-export", path: savedFile });
+  check(fs.readFileSync(savedFile, "utf8") === toml() && (await fileSaid()).includes(savedFile), `settings: exported (${await fileSaid()})`);
+  fs.writeFileSync(path.join(dir, "bad.toml"), "schema = 1\n[bar]\nheight = 9999\n");
+  const kept = toml();
+  await toRust({ op: "settings-import", path: path.join(dir, "bad.toml") });
+  const refusedSaid = await page.locator("[data-file-said][role=alert]").innerText().catch(() => "");
+  check(toml() === kept && refusedSaid.includes("bad.toml") && (await page.locator("[data-file-said] li").count()) === 1, `settings: a file Kabuk cannot read is not taken, and why (${refusedSaid.replace(/\n/g, " ")})`);
+  const other = "schema = 1\n[language]\nlanguage = \"tr\"\n[windows]\ngap = 20\n";
+  fs.writeFileSync(path.join(dir, "other.toml"), other);
+  await toRust({ op: "settings-import", path: path.join(dir, "other.toml") });
+  check(toml() === other && fs.readFileSync(backup, "utf8") === kept && (await fileSaid()).includes(backup) && (await page.locator("[data-settings-undo]").count()) === 1, `settings: imported, the earlier file kept (${await fileSaid()})`);
+  await page.click("[data-settings-undo]"); await settled();
+  check(toml() === kept && fs.readFileSync(backup, "utf8") === other, "settings: the earlier ones brought back");
+  await page.click("[data-reset-all]"); await settled();
+  const question = await page.locator("[data-reset-confirm][role=alertdialog]").innerText().catch(() => "");
+  check(question.includes("kabuk.toml.bak") && question.includes("Düzen profillerin kalır") && toml() === kept && (await page.evaluate(() => document.activeElement.hasAttribute("data-reset-all-no"))), `reset all: asks first, says what is kept (${question.replace(/\n/g, " ")})`);
+  if (shots) await page.screenshot({ path: path.join(shots, "about-reset.png") });
+  await page.click("[data-reset-all-no]"); await settled();
+  check((await page.locator("[data-reset-confirm]").count()) === 0 && toml() === kept, "reset all: Cancel changes nothing");
+  await page.click(`[data-page="windows"]`); await settled();
+  await page.click(`[data-set="windows.tiling_layout"][data-val='"master"']`); await settled();
+  const beforeReset = toml();
+  await go("about");
+  await page.click("[data-reset-all]"); await settled();
+  await page.click("[data-reset-all-yes]"); await settled();
+  check(toml().trim() === "schema = 1" && fs.readFileSync(backup, "utf8") === beforeReset && (await fileSaid()).includes(backup), `reset all: every setting back to its default (${toml().trim()})`);
+  await page.click("[data-settings-undo]"); await settled();
+  check(toml() === beforeReset, "reset all: brought back");
+
   // PLAN M19 U11: Ollama's address, in kabuk.toml alone before: one without http is
   // refused and says why, a right one is written and named in the status.
   await go("wall");

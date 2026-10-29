@@ -157,7 +157,7 @@ The 12 pages in the design, in the same order: Appearance, Wallpaper, Screen sav
 - **Shortcuts:** list of all shortcuts, each one changeable.
 - **Language & region:** language (System language, Türkçe, English), time format (24/12), date and decimal separator preview.
 - **OLED care:** bar shift, a still picture's drift and its step (1-120 min, §2.8), idle dimming, dimming delay (30 s, 1 min, 2 min, Custom: number + s/min, an integer between 10 s and 60 min; error message for an out-of-range value; the row is disabled while dimming is off).
-- **About:** version, number of running components, number of monitors, number of managed windows, RAM usage, check for updates (Kabuk's latest release on GitHub, `Milvasoft/kabuk`; a newer one is offered with a button that opens its release page, whose setup installs over the running copy and keeps the settings).
+- **About:** version, number of running components, number of monitors, number of managed windows, RAM usage, check for updates (Kabuk's latest release on GitHub, `Milvasoft/kabuk`; a newer one is offered with a button that opens its release page, whose setup installs over the running copy and keeps the settings). The settings file (PLAN M19 U20): every setting exported to a file the user picks (`kabuk.toml` as it is), a saved one imported (read as Kabuk reads `kabuk.toml`: one it would refuse is not taken and its problems are listed), and "Reset all" back to the defaults behind a confirmation, shortcuts and window rules too, the layout profiles kept. An import or reset first keeps `kabuk.toml` as `kabuk.toml.bak` beside it, and offers to bring the earlier settings back from it.
 
 ### 2.10 System theme
 
