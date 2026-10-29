@@ -189,7 +189,7 @@ mod tests {
         assert_eq!(t.get("nav-look").map(String::as_str), Some("Görünüm"));
         assert_eq!(
             t.get("pos-default").map(String::as_str),
-            Some("Bu görünümün varsayılanı: \u{1}")
+            Some("Bu temanın varsayılanı: \u{1}")
         );
         assert!(t.contains_key("cli-usage"));
         assert_eq!(t.len(), keys(TR).len() + keys(TR_DESIGN).len());

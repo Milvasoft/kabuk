@@ -138,7 +138,7 @@ pf-empty = Kaydedilecek pencere yok: Kabuk çalışmıyor ya da açık program y
 pf-not-running = Kabuk çalışmıyor
 pf-opened = Açılıyor; açık olmayan programlar başlayıp yerlerini alacak
 th = Tema dosyası
-th-h = Görünümün, renklerin, bar'ın, imleçlerin ve galeri duvar kâğıdın paylaşmak için tek dosyada; bir tema kısayollarını, kurallarını ya da programlarını asla değiştirmez
+th-h = Teman, renklerin, barın, imleçlerin ve galeri duvar kâğıdın paylaşmak için tek dosyada; bir tema dosyası kısayollarını, kurallarını ya da programlarını asla değiştirmez
 th-export = Dışa aktar…
 th-import = İçe aktar…
 th-files = Kabuk teması
@@ -386,9 +386,9 @@ keys-emergency = Acil çıkış (her zaman çalışır)
 set-key-app-grid = Tüm uygulamalar ızgarası
 set-bar-color = Bar rengi
 set-bar-color-h = Arka plan düz ya da bulanıkken barı boyar
-set-bar-color-own = Görünümün kendi rengi
+set-bar-color-own = Temanın kendi rengi
 set-bar-color-custom = İstediğin renk
-set-bar-color-low = Görünümün yazıları bu renk üstünde zor okunur
+set-bar-color-low = Temanın yazıları bu renk üstünde zor okunur
 set-key-drag = Fareyle taşı (sağ tuş boyutlandırır)
 set-key-press = Yeni kısayola bas…
 set-reset-keys = Tüm kısayolları varsayılana döndür
@@ -516,15 +516,15 @@ setup-remove-failed = Kabuk tamamen kaldırılamadı: { $error }
 setup-startup-on = Kabuk oturum açınca başlayacak.
 setup-startup-off = Kabuk oturum açınca başlamayacak.
 setup-startup-blocked = Windows ayarları Kabuk'un oturum açılınca başlamasını engelliyor; Ayarlar › Uygulamalar › Başlangıç'tan aç.
-store-description = Windows için bir masaüstü kabuğu: her monitörde bir bar, döşenen pencereler, bir başlatıcı ve kendi görünümleri. Kapanınca Windows eski hâline döner.
+store-description = Windows için bir masaüstü kabuğu: her monitörde bir bar, döşenen pencereler, bir başlatıcı ve kendi temaları. Kapanınca Windows eski hâline döner.
 store-listing-description =
-    Kabuk, Windows'a yeni bir masaüstü getirir: her monitörde kendi barı, kendiliğinden düzenlenen pencereler, hızlı bir başlatıcı ve seçilecek on görünüm. Kabuk çalışırken Windows görev çubuğu kenara çekilir; Kabuk kapanınca Windows tam olarak eski hâline döner.
+    Kabuk, Windows'a yeni bir masaüstü getirir: her monitörde kendi barı, kendiliğinden düzenlenen pencereler, hızlı bir başlatıcı ve seçilecek on tema. Kabuk çalışırken Windows görev çubuğu kenara çekilir; Kabuk kapanınca Windows tam olarak eski hâline döner.
 
     Pencerelerin yan yana döşenir ya da bıraktığın yerde yüzer; tüm monitörlerine yayılan dokuz çalışma alanı vardır. Onları klavyeden taşı, boyutlandır ve değiştir ya da Alt'a basılı tutup herhangi bir yerinden tut. Küçültülen pencereler bardaki simgelerine akar.
 
     Bar çalışma alanlarını, uygulamalarını, sistem tepsisini, bildirimleri, medyayı, sesi, ağı, pili, saati ve bilgisayarın yükünü gösterir; Wi-Fi, hızlı ayarlar, takvim ve bildirimler için kendi panelleri vardır. Başlatıcı yazdıkça uygulamaları, açık pencereleri, dosyaları ve yer imlerini bulur, hesap da yapar; uygulama ızgarası kurulu her şeyi listeler.
 
-    Her görünüm barı, panellerini ve duvar kâğıdını birlikte değiştirir; koyu ya da açık. Hareketli duvar kâğıtları OLED ekranlar için çizilir: gerçek siyah, yerinde duran parlak hiçbir şey yok. İstersen bir duvar kâğıdını anlat, seçtiğin bir yapay zekâ modeli çizsin.
+    Her tema barı, panellerini ve duvar kâğıdını birlikte değiştirir; koyu ya da açık. Hareketli duvar kâğıtları OLED ekranlar için çizilir: gerçek siyah, yerinde duran parlak hiçbir şey yok. İstersen bir duvar kâğıdını anlat, seçtiğin bir yapay zekâ modeli çizsin.
 
     Oyun modu, tam ekran bir oyun açıkken kenara çekilir. Bir şey ters giderse Ctrl+Alt+Shift+End her pencereyi ve Windows görev çubuğunu bir anda geri getirir.
 
@@ -532,7 +532,7 @@ store-listing-description =
 store-listing-feature-1 = Her monitörde bir bar: çalışma alanları, uygulamalar, tepsi, ağ, pil, bildirimler, takvim, medya, hızlı ayarlar
 store-listing-feature-2 = Monitörlerine yayılan dokuz çalışma alanında kendiliğinden döşenen ya da yüzen pencereler
 store-listing-feature-3 = Uygulamalar, pencereler, dosyalar ve yer imleri için bir başlatıcı ve uygulama ızgarası
-store-listing-feature-4 = Koyu ve açık on görünüm: bar, paneller ve duvar kâğıdı birlikte
+store-listing-feature-4 = Koyu ve açık on tema: bar, paneller ve duvar kâğıdı birlikte
 store-listing-feature-5 = OLED ekranlar için yapılmış hareketli duvar kâğıtları
 store-listing-feature-6 = Cin efekti: pencereler küçülürken simgelerine akar
 store-listing-feature-7 = Tam ekran oyunlar için kenara çekilen oyun modu

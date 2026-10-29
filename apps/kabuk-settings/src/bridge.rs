@@ -705,7 +705,7 @@ mod tests {
         assert_eq!(s["strings"]["nav-look"], "Görünüm");
         assert_eq!(
             s["strings"]["pos-default"],
-            format!("Bu görünümün varsayılanı: {VALUE_MARK}")
+            format!("Bu temanın varsayılanı: {VALUE_MARK}")
         );
         assert!(s["tokens"]["fg-s"].as_str().is_some_and(|c| c.starts_with('#')));
         assert_eq!(s["info"]["running"], false);

@@ -139,7 +139,7 @@ pf-empty = No window to save: Kabuk is not running, or no program is open
 pf-not-running = Kabuk is not running
 pf-opened = Opening; programs not open yet start and take their places
 th = Theme file
-th-h = Your look, colours, bar, cursors and gallery wallpaper in one file to share; a theme never changes shortcuts, rules or programs
+th-h = Your theme, colours, bar, cursors and gallery wallpaper in one file to share; a theme file never changes shortcuts, rules or programs
 th-export = Export…
 th-import = Import…
 th-files = Kabuk theme
@@ -387,9 +387,9 @@ keys-emergency = Emergency exit (always works)
 set-key-app-grid = Every app on a grid
 set-bar-color = Bar colour
 set-bar-color-h = Fills the bar when its background is solid or blurred
-set-bar-color-own = The look's own
+set-bar-color-own = The theme's own
 set-bar-color-custom = Any colour
-set-bar-color-low = The look's text is hard to read on this colour
+set-bar-color-low = The theme's text is hard to read on this colour
 set-key-drag = Move with the mouse (right button resizes)
 set-key-press = Press the new shortcut…
 set-reset-keys = Reset all shortcuts to their defaults
@@ -517,15 +517,15 @@ setup-remove-failed = Kabuk could not be removed completely: { $error }
 setup-startup-on = Kabuk will start when you sign in.
 setup-startup-off = Kabuk will not start when you sign in.
 setup-startup-blocked = Windows' settings keep Kabuk from starting when you sign in; turn it on in Settings › Apps › Startup.
-store-description = A desktop shell for Windows: a bar on every monitor, tiling windows, a launcher and looks of its own. When it exits, Windows is as it was.
+store-description = A desktop shell for Windows: a bar on every monitor, tiling windows, a launcher and themes of its own. When it exits, Windows is as it was.
 store-listing-description =
-    Kabuk gives Windows a new desktop: its own bar on every monitor, windows that arrange themselves, a fast launcher and ten looks to choose from. The Windows taskbar steps aside while Kabuk runs; when Kabuk exits, Windows is exactly as it was.
+    Kabuk gives Windows a new desktop: its own bar on every monitor, windows that arrange themselves, a fast launcher and ten themes to choose from. The Windows taskbar steps aside while Kabuk runs; when Kabuk exits, Windows is exactly as it was.
 
     Your windows tile themselves side by side, or float where you put them, on nine workspaces that span all your monitors. Move, resize and switch them from the keyboard, or hold Alt and grab them anywhere. Minimised windows pour into their icon on the bar.
 
     The bar shows your workspaces, your apps, the system tray, notifications, media, volume, network, battery, the clock and the computer's load, with panels of its own for Wi-Fi, quick settings, the calendar and your notifications. The launcher finds apps, open windows, files and bookmarks as you type, and counts too; the app grid lists everything you have installed.
 
-    Each look changes the bar, its panels and the wallpaper together, in dark or light. Animated wallpapers are drawn for OLED screens: true black, nothing bright that stays put. You can even describe a wallpaper and let an AI model of your choice draw it.
+    Each theme changes the bar, its panels and the wallpaper together, in dark or light. Animated wallpapers are drawn for OLED screens: true black, nothing bright that stays put. You can even describe a wallpaper and let an AI model of your choice draw it.
 
     Game mode steps aside when a game is in full screen. If anything ever goes wrong, Ctrl+Alt+Shift+End brings back every window and the Windows taskbar at once.
 
@@ -533,7 +533,7 @@ store-listing-description =
 store-listing-feature-1 = A bar on every monitor: workspaces, apps, tray, network, battery, notifications, calendar, media, quick settings
 store-listing-feature-2 = Windows that tile themselves, or float, on nine workspaces across your monitors
 store-listing-feature-3 = A launcher for apps, windows, files and bookmarks, and an app grid
-store-listing-feature-4 = Ten looks, dark and light: bar, panels and wallpaper together
+store-listing-feature-4 = Ten themes, dark and light: bar, panels and wallpaper together
 store-listing-feature-5 = Animated wallpapers made for OLED screens
 store-listing-feature-6 = The genie: windows pour into their icon as they minimise
 store-listing-feature-7 = Game mode that steps aside for full-screen games
