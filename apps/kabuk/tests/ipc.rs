@@ -134,6 +134,43 @@ fn primary_state(sandbox: &Sandbox) -> Value {
         .unwrap()
 }
 
+/// PLAN M19 U11: the tiling layout set in Settings reaches the workspaces already open
+/// (it reached only those made after the change); one switched by hand keeps its own.
+#[test]
+fn a_tiling_layout_set_in_settings_reaches_the_open_workspaces() {
+    let sandbox = Sandbox::new();
+    let _shell = Shell::start(&sandbox);
+    assert_eq!(primary_state(&sandbox)["layout"], "dwindle");
+    let set = |layout: &str, gap: i32| {
+        std::fs::write(
+            sandbox.config_file(),
+            format!(
+                "schema = 1\n[language]\nlanguage = \"en\"\n[windows]\ngap = {gap}\ntiling_layout = \"{layout}\"\n"
+            ),
+        )
+        .unwrap();
+    };
+    set("master", GAP);
+    assert!(
+        wait_until(SETTLE, || primary_state(&sandbox)["layout"] == "master").is_some(),
+        "{}",
+        primary_state(&sandbox)
+    );
+    // Switched by hand: the setting no longer moves it.
+    ok(&sandbox, &["layout", "dwindle"]);
+    assert!(wait_until(SETTLE, || primary_state(&sandbox)["layout"] == "dwindle").is_some());
+    let applied = sandbox.log_lines("window manager configuration applied");
+    // Another setting changes, the layout setting stays.
+    set("master", GAP + 1);
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("window manager configuration applied")
+            > applied)
+        .is_some()
+    );
+    assert_eq!(primary_state(&sandbox)["layout"], "dwindle");
+    assert_eq!(sandbox.restore().0, 0);
+}
+
 #[test]
 fn the_queries_describe_the_running_shell() {
     let sandbox = Sandbox::new();
