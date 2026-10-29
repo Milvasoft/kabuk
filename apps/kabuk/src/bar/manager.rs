@@ -672,7 +672,7 @@ struct Shared {
     tray_calls: Rc<RefCell<VecDeque<IconCall>>>,
     /// Where each drawn tray icon is on screen, for programs that ask
     /// (`Shell_NotifyIconGetRect`); written after every draw.
-    tray_places: Rc<RefCell<Vec<(Icon, PxRect)>>>,
+    tray_places: Rc<RefCell<Vec<(kabuk_core::tray::IconId, PxRect)>>>,
     /// Every tray icon held (hidden ones too), for `kabuk msg query tray` on the
     /// command pipe's thread; written whenever the tray changes.
     tray_list: Arc<Mutex<Vec<Icon>>>,
@@ -2893,7 +2893,7 @@ impl Shared {
                 places
                     .borrow()
                     .iter()
-                    .find(|(icon, _)| q.is_about(icon))
+                    .find(|(icon, _)| q.is_about(*icon))
                     .map(|(_, r)| *r)
             },
         );
@@ -3217,24 +3217,23 @@ impl Shared {
     /// Where each drawn tray icon is: its place on the primary bar, or, for an icon in the
     /// overflow panel, the button that opens the panel (the panel closes before the click
     /// reaches the program, so its menu opens by that button).
+    /// Written only where they changed (PLAN M19 P18: every draw copied every icon).
     fn publish_tray_places(&self) {
         let Some(b) = self.bars.iter().position(|b| b.primary) else {
             self.tray_places.borrow_mut().clear();
             return;
         };
-        let places = self
-            .tray
-            .visible()
-            .enumerate()
-            .map(|(i, icon)| {
-                let rect = self
-                    .hit_rect(b, view::hit::TRAY, u32::try_from(i).unwrap_or(u32::MAX))
-                    .or_else(|| self.hit_rect(b, view::hit::TRAY_MORE, 0))
-                    .unwrap_or(self.bars[b].rect);
-                (icon.clone(), rect)
-            })
-            .collect();
-        *self.tray_places.borrow_mut() = places;
+        let now = self.tray.visible().enumerate().map(|(i, icon)| {
+            let rect = self
+                .hit_rect(b, view::hit::TRAY, u32::try_from(i).unwrap_or(u32::MAX))
+                .or_else(|| self.hit_rect(b, view::hit::TRAY_MORE, 0))
+                .unwrap_or(self.bars[b].rect);
+            (icon.id(), rect)
+        });
+        let mut places = self.tray_places.borrow_mut();
+        if kabuk_core::tray::update_places(&mut places, now) {
+            tracing::debug!(icons = places.len(), "tray places written");
+        }
     }
 
     /// Tells the window manager where each window's app icon is (the genie pours it

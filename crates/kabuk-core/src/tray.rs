@@ -174,6 +174,51 @@ impl Icon {
     pub fn drawn(&self) -> bool {
         !self.hidden && self.icon != 0 && !DRAWN_BY_KABUK.contains(&self.key)
     }
+
+    pub fn id(&self) -> IconId {
+        IconId {
+            key: self.key,
+            hwnd: self.hwnd,
+            uid: self.uid,
+        }
+    }
+}
+
+/// What a program's question about its icon is matched by ([`RectQuery::is_about`]):
+/// the bar keeps these with its icons' places, not the whole icons (PLAN M19 P18: every
+/// draw copied each icon, its tip too).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IconId {
+    pub key: IconKey,
+    pub hwnd: u64,
+    pub uid: u32,
+}
+
+/// Brings the places kept (an icon's and where it is) up to `now`, writing only what
+/// differs; whether anything did. Nothing is allocated while they stay the same (the bar
+/// does this after every draw).
+pub fn update_places<P: PartialEq>(places: &mut Vec<(IconId, P)>, now: impl Iterator<Item = (IconId, P)>) -> bool {
+    let mut changed = false;
+    let mut count = 0;
+    for (i, place) in now.enumerate() {
+        count = i + 1;
+        match places.get_mut(i) {
+            Some(kept) if *kept == place => {}
+            Some(kept) => {
+                *kept = place;
+                changed = true;
+            }
+            None => {
+                places.push(place);
+                changed = true;
+            }
+        }
+    }
+    if places.len() > count {
+        places.truncate(count);
+        changed = true;
+    }
+    changed
 }
 
 #[derive(Clone, Debug, Default)]
@@ -344,7 +389,7 @@ pub fn parse_rect_query(bytes: &[u8]) -> Option<RectQuery> {
 impl RectQuery {
     /// Whether the question is about `icon`: by GUID when it carries one, else (and as a
     /// fallback) by window and id.
-    pub fn is_about(&self, icon: &Icon) -> bool {
+    pub fn is_about(&self, icon: IconId) -> bool {
         let by_window = self.hwnd != 0 && icon.hwnd == self.hwnd && icon.uid == self.uid;
         match self.guid {
             Some(g) => icon.key == IconKey::Guid(g) || by_window,
@@ -366,7 +411,7 @@ impl RectQuery {
 impl Tray {
     /// Where the icon a question is about is among the drawn icons.
     pub fn shown_index(&self, q: &RectQuery) -> Option<usize> {
-        self.visible().position(|i| q.is_about(i))
+        self.visible().position(|i| q.is_about(i.id()))
     }
 }
 

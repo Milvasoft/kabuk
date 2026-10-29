@@ -6,7 +6,8 @@
 //! structure without a GUID, click messages for the old and the version-4 conventions;
 //! a question about where an icon is (the corner and the size, by GUID or by window, a
 //! GUID nobody registered, a hidden icon, bad data, negative coordinates); Explorer's
-//! volume icon, held but not drawn.
+//! volume icon, held but not drawn; the icons' places kept the same, moved, more, fewer
+//! and none.
 
 use super::*;
 
@@ -394,6 +395,38 @@ fn a_question_finds_its_icon_by_guid_or_by_window() {
     }));
     assert_eq!(t.shown_index(&ask(1, 1, [0; 16])), None);
     assert_eq!(t.shown_index(&ask(4, 1, [0; 16])), Some(1));
+}
+
+/// PLAN M19 P18: after every draw the bar copied each tray icon (its tip too) into the
+/// places programs ask about. The places are written only where they changed, and
+/// nothing is allocated while they stay the same.
+#[test]
+fn the_icons_places_are_written_only_when_they_change() {
+    let mut t = Tray::default();
+    add(&mut t, 1, 1, "a");
+    add(&mut t, 2, 1, "b");
+    fn at(t: &Tray, x: i32) -> impl Iterator<Item = (IconId, i32)> + '_ {
+        t.visible().enumerate().map(move |(i, icon)| (icon.id(), x + i as i32))
+    }
+    let mut places = Vec::new();
+    assert!(update_places(&mut places, at(&t, 0)));
+    let buffer = places.as_ptr();
+    for _ in 0..10 {
+        assert!(!update_places(&mut places, at(&t, 0)), "written though nothing moved");
+    }
+    assert_eq!(places.as_ptr(), buffer, "allocated though nothing moved");
+    // The bar's icons moved, one came, one went.
+    assert!(update_places(&mut places, at(&t, 5)));
+    assert_eq!(places, vec![(t.icons()[0].id(), 5), (t.icons()[1].id(), 6)]);
+    add(&mut t, 3, 1, "c");
+    assert!(update_places(&mut places, at(&t, 5)));
+    assert_eq!(places.len(), 3);
+    assert!(update_places(&mut places, at(&t, 5).take(1)));
+    assert_eq!(places, vec![(t.icons()[0].id(), 5)]);
+    // A question finds its icon among them.
+    let q = parse_rect_query(&rect_question(1, 1, 1, [0; 16])).unwrap();
+    assert!(q.is_about(places[0].0));
+    assert!(update_places(&mut places, std::iter::empty()) && places.is_empty());
 }
 
 /// Found by the user: the second question asks for the icon's size, which the shell adds
