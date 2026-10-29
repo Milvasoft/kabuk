@@ -1,6 +1,7 @@
 //! Kabuk's drawing layer: a small node tree with layout (platform independent) and a
 //! Direct2D/DirectWrite/DirectComposition renderer (Windows).
 
+pub mod access;
 pub mod cursors;
 pub mod geom;
 pub mod icons;
