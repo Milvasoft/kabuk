@@ -1,11 +1,12 @@
 //! Process-wide GPU objects shared by every surface.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 
 use windows::core::Interface;
 use windows::Win32::Foundation::HMODULE;
 use windows::Win32::Graphics::Direct2D::{
-    D2D1CreateFactory, ID2D1Device, ID2D1DeviceContext, ID2D1Factory1, D2D1_DEBUG_LEVEL_NONE,
+    D2D1CreateFactory, ID2D1Bitmap1, ID2D1Device, ID2D1DeviceContext, ID2D1Factory1, D2D1_DEBUG_LEVEL_NONE,
     D2D1_DEVICE_CONTEXT_OPTIONS_NONE, D2D1_FACTORY_OPTIONS, D2D1_FACTORY_TYPE_SINGLE_THREADED,
 };
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP};
@@ -33,12 +34,24 @@ pub struct Gpu {
     pub(crate) icons: RefCell<IconCache>,
 }
 
-/// A stored picture: its width and height in pixels, and its pixels.
-type Picture = ((u32, u32), Vec<u8>);
+/// A stored picture: its pixels until it is first drawn, then the Direct2D bitmap made
+/// from them (the pixels are let go, so a picture is held once, not twice).
+#[derive(Debug)]
+enum Picture {
+    Pixels((u32, u32), Vec<u8>),
+    Bitmap(ID2D1Bitmap1),
+}
 
-/// Premultiplied BGRA pictures by key, shared by every surface of a [`Gpu`].
+/// Premultiplied BGRA pictures by key, shared by every surface of a [`Gpu`]. A picture
+/// becomes a bitmap of the [`Gpu`]'s device the first time it is drawn and is drawn
+/// from that bitmap afterwards; storing new pixels under its key, or forgetting it,
+/// drops the bitmap.
 #[derive(Debug, Default)]
-pub struct Images(std::cell::RefCell<std::collections::HashMap<u64, Picture>>);
+pub struct Images {
+    store: RefCell<HashMap<u64, Picture>>,
+    /// How many bitmaps were made from pixels, for tests.
+    uploads: Cell<usize>,
+}
 
 impl Images {
     /// Stores a `side`×`side` picture; `pixels` holds `side * side * 4` bytes.
@@ -48,28 +61,67 @@ impl Images {
 
     /// Stores a `w`×`h` picture; `pixels` holds `w * h * 4` bytes, top row first.
     pub fn set_sized(&self, key: u64, w: u32, h: u32, pixels: Vec<u8>) {
-        self.0.borrow_mut().insert(key, ((w, h), pixels));
+        self.store.borrow_mut().insert(key, Picture::Pixels((w, h), pixels));
     }
 
     pub fn contains(&self, key: u64) -> bool {
-        self.0.borrow().contains_key(&key)
+        self.store.borrow().contains_key(&key)
     }
 
     /// Forgets every picture whose key fails `keep`.
     pub fn retain(&self, keep: impl Fn(u64) -> bool) {
-        self.0.borrow_mut().retain(|k, _| keep(*k));
+        self.store.borrow_mut().retain(|k, _| keep(*k));
     }
 
     /// Forgets the pictures of `keys`; the others stay.
     pub fn forget(&self, keys: impl IntoIterator<Item = u64>) {
-        let mut store = self.0.borrow_mut();
+        let mut store = self.store.borrow_mut();
         for k in keys {
             store.remove(&k);
         }
     }
 
-    pub(crate) fn with<R>(&self, key: u64, f: impl FnOnce((u32, u32), &[u8]) -> R) -> Option<R> {
-        self.0.borrow().get(&key).map(|(size, px)| f(*size, px))
+    /// The bitmap of `key`, made by `make` from its pixels the first time; `None` when
+    /// the key is unknown.
+    pub(crate) fn bitmap(
+        &self,
+        key: u64,
+        make: impl FnOnce((u32, u32), &[u8]) -> Result<ID2D1Bitmap1>,
+    ) -> Result<Option<ID2D1Bitmap1>> {
+        let mut store = self.store.borrow_mut();
+        let Some(picture) = store.get_mut(&key) else {
+            return Ok(None);
+        };
+        let bitmap = match picture {
+            Picture::Bitmap(b) => return Ok(Some(b.clone())),
+            Picture::Pixels(size, px) => make(*size, px)?,
+        };
+        self.uploads.set(self.uploads.get() + 1);
+        *picture = Picture::Bitmap(bitmap.clone());
+        Ok(Some(bitmap))
+    }
+
+    /// The device was lost: its bitmaps are no use, and their pixels were let go, so
+    /// those pictures are forgotten (their owners store them again). Pictures not drawn
+    /// yet stay.
+    pub(crate) fn lose_bitmaps(&self) {
+        self.store.borrow_mut().retain(|_, p| matches!(p, Picture::Pixels(..)));
+    }
+
+    /// How many bitmaps were made from pixels so far.
+    #[cfg(test)]
+    pub(crate) fn uploads(&self) -> usize {
+        self.uploads.get()
+    }
+
+    /// How many pictures are held as bitmaps.
+    #[cfg(test)]
+    pub(crate) fn bitmaps(&self) -> usize {
+        self.store
+            .borrow()
+            .values()
+            .filter(|p| matches!(p, Picture::Bitmap(_)))
+            .count()
     }
 }
 

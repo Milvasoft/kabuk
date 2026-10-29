@@ -13,8 +13,8 @@ use windows::Win32::Graphics::DirectComposition::{
 use windows::Win32::Graphics::Dxgi::Common::*;
 use windows_numerics::Matrix3x2;
 
-use super::draw::{draw_layout, Frame, Palette};
-use super::{Context, Gpu, Result};
+use super::draw::{draw_layout, Brushes, Frame, Palette};
+use super::{Context, Gpu, RenderError, Result};
 use crate::geom::Scale;
 use crate::motion::{Cubic, Pose, Transition};
 use crate::node::Layout;
@@ -38,6 +38,9 @@ pub struct WindowSurface {
     /// The content before a change, above the new one while it fades out, and when it
     /// has faded.
     fading: Option<(IDCompositionVisual2, IDCompositionSurface, std::time::Instant)>,
+    /// Kept from frame to frame, so a redraw (the dock magnifying, the app grid
+    /// wiggling) makes no new brushes.
+    brushes: Brushes,
     width: u32,
     height: u32,
 }
@@ -82,6 +85,7 @@ impl WindowSurface {
                 effect,
                 zoom,
                 fading: None,
+                brushes: Brushes::default(),
                 width,
                 height,
             })
@@ -330,6 +334,25 @@ impl WindowSurface {
         if r.right <= r.left || r.bottom <= r.top {
             return Ok(());
         }
+        let drawn = self.draw_area(gpu, layout, palette, scale, origin, r);
+        if matches!(drawn, Err(RenderError::DeviceLost)) {
+            // The brushes and pictures' bitmaps belong to the lost device.
+            self.brushes = Brushes::default();
+            gpu.images.lose_bitmaps();
+        }
+        drawn
+    }
+
+    /// [`WindowSurface::render`] of `r`, a non-empty rectangle inside the surface.
+    fn draw_area(
+        &mut self,
+        gpu: &Gpu,
+        layout: &Layout,
+        palette: &Palette,
+        scale: Scale,
+        origin: (f32, f32),
+        r: PixelRect,
+    ) -> Result<()> {
         let update = RECT {
             left: r.left,
             top: r.top,
@@ -378,7 +401,7 @@ impl WindowSurface {
                 origin,
                 clip: Some(area),
             };
-            let drawn = draw_layout(gpu, &ctx, &frame);
+            let drawn = draw_layout(gpu, &ctx, &mut self.brushes, &frame);
             ctx.PopAxisAlignedClip();
             let ended = self.surface.EndDraw().ctx("end draw");
             drawn?;

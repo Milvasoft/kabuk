@@ -10,7 +10,7 @@ use windows::Win32::Graphics::Dxgi::Common::*;
 use windows::Win32::Graphics::Imaging::*;
 use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED};
 
-use super::draw::{draw_layout, Frame, Palette};
+use super::draw::{draw_layout, Brushes, Frame, Palette};
 use super::{Context, Gpu, Result};
 use crate::geom::Scale;
 use crate::node::Layout;
@@ -87,7 +87,28 @@ impl Gpu {
         height: u32,
         background: kabuk_theme::Color,
     ) -> Result<Pixels> {
-        self.offscreen(width, height, scale.0 * Scale::BASE_DPI, background, |ctx| {
+        self.render_pixels_with(
+            &mut Brushes::default(),
+            layout,
+            palette,
+            scale,
+            (width, height),
+            background,
+        )
+    }
+
+    /// [`Gpu::render_pixels`] with `brushes` kept by the caller, as a surface keeps them
+    /// from frame to frame.
+    pub(crate) fn render_pixels_with(
+        &self,
+        brushes: &mut Brushes,
+        layout: &Layout,
+        palette: &Palette,
+        scale: Scale,
+        (width, height): (u32, u32),
+        background: kabuk_theme::Color,
+    ) -> Result<Pixels> {
+        let drawn = self.offscreen(width, height, scale.0 * Scale::BASE_DPI, background, |ctx| {
             // SAFETY: text settings on the context drawing this canvas.
             unsafe {
                 ctx.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
@@ -96,6 +117,7 @@ impl Gpu {
             draw_layout(
                 self,
                 ctx,
+                brushes,
                 &Frame {
                     layout,
                     palette,
@@ -104,7 +126,13 @@ impl Gpu {
                     clip: None,
                 },
             )
-        })
+        });
+        if matches!(drawn, Err(super::RenderError::DeviceLost)) {
+            // The brushes and pictures' bitmaps belong to the lost device.
+            *brushes = Brushes::default();
+            self.images.lose_bitmaps();
+        }
+        drawn
     }
 
     /// Draws a frame of an animated scene (D36) over black into a `width`×`height`
