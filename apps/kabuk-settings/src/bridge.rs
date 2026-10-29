@@ -38,7 +38,9 @@
 //!   dialog asks where (a test passes `"path"` instead); the export answers
 //!   `{"op":"theme","done":"exported","path":…}`, the import a fresh `state` with
 //!   `"theme_imported"` (the theme's name), either `{"op":"theme","done":"cancelled"}`
-//!   or `{"op":"theme","done":"failed"}`.
+//!   or `{"op":"theme","done":"failed","reason":…}`: `reason` says why a file could not
+//!   be read or written, in the user's language, and is `null` for a file that was read
+//!   and is no theme this Kabuk takes (PLAN M19 U20).
 //! - `{"op":"profile-save","name":…}` → a fresh `state` with the layout profile `name`
 //!   made of the windows the running shell manages (DECISIONS D65; a test passes
 //!   `"windows"` as `query windows` gives them), or `{"op":"profile","done":"empty"}`;
@@ -366,7 +368,8 @@ impl Bridge {
             }
             Err(e) => {
                 tracing::warn!(error = %e, "theme not exported");
-                json!({ "op": "theme", "done": "failed" })
+                let reason = i18n.tr_args("th-not-saved", &[("value", io_reason(&e, &i18n).into())]);
+                json!({ "op": "theme", "done": "failed", "reason": reason })
             }
         }
     }
@@ -374,7 +377,7 @@ impl Bridge {
     /// A theme file's settings into the configuration, at `path` or where the user says;
     /// only the look's settings are read from it (DECISIONS D64).
     fn import_theme(&self, path: Option<&str>) -> Value {
-        use kabuk_core::theme_file::{import, EXTENSION};
+        use kabuk_core::theme_file::EXTENSION;
         let cfg = self.config();
         let i18n = kabuk_win::system::i18n(Some(&cfg));
         let source = match path {
@@ -390,32 +393,55 @@ impl Bridge {
         let Some(source) = source else {
             return json!({ "op": "theme", "done": "cancelled" });
         };
-        let applied = std::fs::read_to_string(&source)
-            .map_err(|e| e.to_string())
-            .and_then(|text| import(&text).map_err(|e| e.to_string()))
-            .and_then(|(name, sets)| {
-                let mut text = self.read();
-                for (path, value) in &sets {
-                    text = config::edit::set(&text, path, value).map_err(|e| e.to_string())?;
-                }
-                // The whole file must still be valid (a theme from a newer Kabuk may
-                // name a look this one lacks).
-                config::parse(&text).map_err(|e| format!("{e:?}"))?;
-                kabuk_core::fsutil::write_atomic(&self.config_file, text.as_bytes()).map_err(|e| e.to_string())?;
-                Ok(name)
-            });
-        match applied {
+        // A file that cannot be read says why (PLAN M19 U20: it was told as no theme).
+        let text = match std::fs::read_to_string(&source) {
+            Ok(text) => text,
+            Err(e) => {
+                tracing::warn!(path = %source.display(), error = %e, "theme file not read");
+                let reason = i18n.tr_args("th-unreadable", &[("value", io_reason(&e, &i18n).into())]);
+                return json!({ "op": "theme", "done": "failed", "reason": reason });
+            }
+        };
+        match self.apply_theme(&text, &i18n) {
             Ok(name) => {
                 tracing::info!(path = %source.display(), %name, "theme imported");
                 let mut state = self.state();
                 state["theme_imported"] = json!(name);
                 state
             }
-            Err(e) => {
-                tracing::warn!(path = %source.display(), error = %e, "theme not imported");
-                json!({ "op": "theme", "done": "failed" })
+            Err(reason) => {
+                tracing::warn!(path = %source.display(), ?reason, "theme not imported");
+                json!({ "op": "theme", "done": "failed", "reason": reason })
             }
         }
+    }
+
+    /// The look's settings of a theme file's `text` into `kabuk.toml`, and the theme's
+    /// name; else why not: `None` for no theme this Kabuk takes, the reason when
+    /// `kabuk.toml` could not be written.
+    fn apply_theme(&self, text: &str, i18n: &kabuk_i18n::I18n) -> Result<String, Option<String>> {
+        let (name, sets) = kabuk_core::theme_file::import(text).map_err(|e| {
+            tracing::warn!(error = %e, "not a theme");
+            None
+        })?;
+        let mut text = self.read();
+        for (path, value) in &sets {
+            text = config::edit::set(&text, path, value).map_err(|e| {
+                tracing::warn!(path, error = %e, "theme value not taken");
+                None
+            })?;
+        }
+        // The whole file must still be valid (a theme from a newer Kabuk may name a look
+        // this one lacks).
+        config::parse(&text).map_err(|e| {
+            tracing::warn!(errors = ?e, "theme refused by the configuration");
+            None
+        })?;
+        kabuk_core::fsutil::write_atomic(&self.config_file, text.as_bytes()).map_err(|e| {
+            tracing::error!(error = %e, "kabuk.toml not written");
+            Some(i18n.tr_args("set-file-not-written", &[("value", io_reason(&e, i18n).into())]))
+        })?;
+        Ok(name)
     }
 
     /// Saves layout profile `name` (DECISIONS D65) from `windows` (`query windows`' answer):
@@ -732,6 +758,18 @@ fn open_release_page(page: &str) -> Option<Value> {
         tracing::error!(error = %e, "release page not opened");
     }
     Some(json!({ "op": "update", "state": "opened" }))
+}
+
+/// Why a file could not be read or written, in the user's language: Windows' own words
+/// when Kabuk has none of its own for it.
+fn io_reason(e: &std::io::Error, i18n: &kabuk_i18n::I18n) -> String {
+    use std::io::ErrorKind;
+    match e.kind() {
+        ErrorKind::NotFound => i18n.tr("set-io-missing"),
+        ErrorKind::PermissionDenied => i18n.tr("set-io-denied"),
+        ErrorKind::InvalidData => i18n.tr("set-io-not-text"),
+        _ => e.to_string(),
+    }
 }
 
 /// The image files a wallpaper may be.
@@ -1244,6 +1282,45 @@ command = \"evil.exe\"
         let refused = reply(&b, json!({ "op": "theme-import", "path": junk.display().to_string() }));
         assert_eq!(refused["done"], "failed");
         assert_eq!(std::fs::read_to_string(to.path().join("kabuk.toml")).unwrap(), text);
+    }
+
+    /// PLAN M19 U20: a theme file that cannot be read, or written, says why in the user's
+    /// language; one that was read and is no theme says nothing more (the page says so).
+    #[test]
+    fn a_theme_file_that_cannot_be_read_says_why() {
+        let dir = tempfile::tempdir().unwrap();
+        let b = bridge(&dir, Some("schema = 1\n[language]\nlanguage = \"en\"\n"));
+        let gone = dir.path().join("gone.kabuktheme");
+        let r = reply(&b, json!({ "op": "theme-import", "path": gone.display().to_string() }));
+        assert_eq!(
+            (r["done"].as_str(), r["reason"].as_str()),
+            (
+                Some("failed"),
+                Some("The theme file could not be read: the file is not there")
+            )
+        );
+        let binary = dir.path().join("picture.kabuktheme");
+        std::fs::write(&binary, [0xFF, 0xD8, 0xFF, 0xE0]).unwrap();
+        let r = reply(
+            &b,
+            json!({ "op": "theme-import", "path": binary.display().to_string() }),
+        );
+        assert_eq!(r["reason"], "The theme file could not be read: it is not a text file");
+        let junk = dir.path().join("junk.kabuktheme");
+        std::fs::write(&junk, "hello").unwrap();
+        let r = reply(&b, json!({ "op": "theme-import", "path": junk.display().to_string() }));
+        assert_eq!((r["done"].as_str(), r["reason"].clone()), (Some("failed"), Value::Null));
+        // A folder where a file is: Windows' own words say why.
+        let nowhere = junk.join("mine.kabuktheme");
+        let r = reply(
+            &b,
+            json!({ "op": "theme-export", "path": nowhere.display().to_string() }),
+        );
+        let why = r["reason"].as_str().unwrap_or_default();
+        let said = why
+            .strip_prefix("The theme file could not be saved: ")
+            .unwrap_or_default();
+        assert!(r["done"] == "failed" && !said.is_empty(), "{r}");
     }
 
     /// DECISIONS D65: a layout profile is saved from the shell's windows (here as `query

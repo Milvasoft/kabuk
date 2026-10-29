@@ -1043,7 +1043,8 @@
         render();
         break;
       case "theme":
-        ui.themeMsg = m.done === "exported" ? tv("thExported", m.path) : m.done === "failed" ? t("thFailed") : "";
+        // A file that could not be read or written says why (PLAN M19 U20).
+        ui.themeMsg = m.done === "exported" ? tv("thExported", m.path) : m.done === "failed" ? m.reason || t("thFailed") : "";
         render();
         break;
       case "picked":

@@ -352,6 +352,13 @@ async function main() {
   await page.click(`[data-tgl="system_theme.colors"]`); await settled();
   check(/colors = false/.test(toml()) || !/colors = true/.test(toml()), "system colours: off again");
 
+  // PLAN M19 U20: a theme file that cannot be read says why, where the theme is chosen
+  // (the file as Windows' dialog would give it).
+  await page.evaluate((p) => window.chrome.webview.postMessage(JSON.stringify({ op: "theme-import", path: p })), path.join(dir, "gone.kabuktheme"));
+  await settled();
+  const themeSaid = await page.locator(".set-main .note[role=status]").last().innerText().catch(() => "");
+  check(themeSaid.includes("okunamadı") && themeSaid.includes("orada değil"), `theme file: why it could not be read (${themeSaid})`);
+
   // The minimise effect: the genie by default, Windows' own when chosen.
   await go("windows");
   check(await page.$eval(`[data-set="windows.minimize_effect"][data-val='"genie"']`, (e) => e.getAttribute("aria-pressed") === "true" || e.classList.contains("on")), "minimise: the genie by default");
