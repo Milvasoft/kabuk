@@ -75,8 +75,10 @@ pub const DOT_GAP: f32 = 4.0;
 pub const DOT_HIT: f32 = 6.0;
 pub const DOTS_BOTTOM: f32 = 44.0;
 
-/// The pages whose icons are loaded ahead, this long after Kabuk starts.
-pub const PAGES_AHEAD: usize = 2;
+/// The pages whose icons are loaded ahead, this long after Kabuk starts: the first, which
+/// an opening shows (two held about 13 MB on the user's machine, a third of the idle
+/// shell's memory; the next page's come when it is turned to).
+pub const PAGES_AHEAD: usize = 1;
 pub const AHEAD_AFTER_SECONDS: u64 = 5;
 
 /// The words shown when nothing matches the search.
