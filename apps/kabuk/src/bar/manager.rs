@@ -341,8 +341,10 @@ fn active(w: &[Workspace]) -> Vec<u32> {
     w.iter().filter(|w| w.active).map(|w| w.number).collect()
 }
 
-/// Sampling and debounce intervals (ARCHITECTURE §5 and §8).
-pub const STATS_INTERVAL: Duration = Duration::from_secs(2);
+/// Sampling and debounce intervals (ARCHITECTURE §5 and §8). The figures are read every
+/// five seconds: every two, drawing them took two thirds of the idle shell's time and put
+/// it over its 0.1 % (measured on the user's machine: 0.111 % with them, 0.033 % without).
+pub const STATS_INTERVAL: Duration = Duration::from_secs(5);
 pub const GPU_INTERVAL: Duration = Duration::from_secs(5);
 /// How often a full-screen program that keeps renaming itself is looked at again (D85).
 const GAME_RECHECK: Duration = Duration::from_secs(2);

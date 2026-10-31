@@ -75,10 +75,10 @@ Shared state is moved by messages, not locks (crossbeam channels or `PostThreadM
 | --- | --- | --- |
 | Clock / date | `GetLocalTime`, i18n format | Single timer aligned to the minute boundary |
 | Title | `EVENT_SYSTEM_FOREGROUND`, `EVENT_OBJECT_NAMECHANGE` (focused window only) | Event |
-| CPU | `GetSystemTimes` delta | 2 s (while the bar is visible; stops during dimming and in games) |
-| RAM | `GlobalMemoryStatusEx` | 2 s |
+| CPU | `GetSystemTimes` delta | 5 s (while the bar is visible; stops during dimming and in games) |
+| RAM | `GlobalMemoryStatusEx` | 5 s |
 | GPU temperature | `D3DKMTQueryAdapterInfo(KMTQAITYPE_ADAPTERPERFDATA)` → `Temperature` (WDDM 2.4+; otherwise the module is hidden) | 5 s |
-| Network | `GetIfTable2` byte delta (connected, non-loopback interfaces) | 2 s |
+| Network | `GetIfTable2` byte delta (connected, non-loopback interfaces) | 5 s |
 | Audio | Core Audio `IAudioEndpointVolume` + `IAudioEndpointVolumeCallback`, default device change via `IMMNotificationClient` | Event |
 | Media | WinRT `GlobalSystemMediaTransportControlsSessionManager` | Event |
 | Tray | §9 | Event |
