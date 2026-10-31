@@ -2818,6 +2818,34 @@ fn the_screen_saver_choice_is_set_in_windows_and_comes_back() {
     assert!(wait_until(Duration::from_secs(5), || restored(&areas)).is_some());
 }
 
+/// Asked for by the user (2026-10-31): the screen saver could not be turned off. Off,
+/// Windows gets no screen saver (the choice kept in the file); `--restore` gives the
+/// user's own settings back exactly.
+#[test]
+fn a_screen_saver_turned_off_is_not_set_in_windows() {
+    let before = kabuk_win::screensaver::current();
+    let areas = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(
+        sandbox.config_file(),
+        "schema = 1\n[screensaver]\nenabled = false\nkind = \"constellation\"\nwait_minutes = 3\n",
+    )
+    .unwrap();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(
+        wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("screen saver set on=false") == 1).is_some(),
+        "{}",
+        sandbox.last_log_line(&["screen saver"]).unwrap_or_default()
+    );
+    let (now, _) = kabuk_win::screensaver::current();
+    let value = |name: &str| now.iter().find(|(n, _)| n == name).and_then(|(_, v)| v.clone());
+    assert_eq!(value("SCRNSAVE.EXE"), None, "a saver set while turned off");
+    assert_eq!(value("ScreenSaveActive").as_deref(), Some("0"));
+    assert_eq!(sandbox.restore().0, 0);
+    assert_eq!(kabuk_win::screensaver::current(), before);
+    assert!(wait_until(Duration::from_secs(5), || restored(&areas)).is_some());
+}
+
 /// DECISIONS D66 (suggested and asked for by the user): the media card opens under the
 /// bar and closes again, whether or not something plays on the machine.
 #[test]

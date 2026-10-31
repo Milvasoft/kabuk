@@ -736,3 +736,8 @@ acc-notice = Kabuk bildirimi
 
 # Başlatıcı, girdileri toplanırken (PLAN M19 U20).
 l-searching = Aranıyor…
+
+# Ekran koruyucunun anahtarı (kullanıcı istedi, 2026-10-31).
+set-saver-on = Ekran koruyucu
+set-saver-on-h = Aşağıda seçilen bekleme süresinden sonra başlar
+set-saver-off-h = Kapalı: hiçbir ekran koruyucu kendiliğinden başlamaz. Kısayol ve sıcak köşe seçileni yine başlatır

@@ -38,10 +38,16 @@ fn shows(kind: SaverKind) -> bool {
     kind != SaverKind::None
 }
 
+/// Whether Windows gets a screen saver from these settings: one is chosen and the screen
+/// saver is not turned off.
+fn set_in_windows(s: &kabuk_core::config::Screensaver) -> bool {
+    s.enabled && shows(s.kind)
+}
+
 #[derive(Default)]
 pub(super) struct SaverState {
-    /// What was set last (kind, wait), so a reload that changes nothing writes nothing.
-    applied: Option<(SaverKind, u32)>,
+    /// What was set last (on, kind, wait), so a reload that changes nothing writes nothing.
+    applied: Option<(bool, SaverKind, u32)>,
     /// The idle time Kabuk last started the saver at, so it starts once per idle spell.
     started_at: Option<Duration>,
     /// Windows refused the settings (it does while the machine saves power or is locked):
@@ -85,7 +91,8 @@ impl Shared {
             return;
         }
         let s = self.config().screensaver.clone();
-        if self.saver.applied == Some((s.kind, s.wait_minutes)) {
+        let wanted = (s.enabled, s.kind, s.wait_minutes);
+        if self.saver.applied == Some(wanted) {
             return;
         }
         let recorded = self.state.update(|st| {
@@ -98,7 +105,7 @@ impl Shared {
             tracing::error!(error = %e, "screen saver settings not recorded; left as they are");
             return;
         }
-        let path = if shows(s.kind) {
+        let path = if set_in_windows(&s) {
             match self.install_saver() {
                 Ok(p) => Some(p),
                 Err(e) => {
@@ -111,8 +118,8 @@ impl Shared {
         };
         match kabuk_win::screensaver::apply(path.as_deref(), s.wait_minutes * 60, None) {
             Ok(()) => {
-                tracing::info!(kind = ?s.kind, wait_minutes = s.wait_minutes, "screen saver set");
-                self.saver.applied = Some((s.kind, s.wait_minutes));
+                tracing::info!(on = s.enabled, kind = ?s.kind, wait_minutes = s.wait_minutes, "screen saver set");
+                self.saver.applied = Some(wanted);
                 self.saver.refused = false;
             }
             Err(e) if !self.saver.refused => {
@@ -196,7 +203,7 @@ impl Shared {
     /// while a program keeps the display on (Windows would not); the time left otherwise.
     pub(super) fn saver_check(&mut self, idle: Duration) -> Option<Duration> {
         let s = self.config().screensaver.clone();
-        if s.respect_video || !shows(s.kind) {
+        if s.respect_video || !set_in_windows(&s) {
             return None;
         }
         // A new idle spell (input came since it started) may start it again.
@@ -220,5 +227,24 @@ impl Shared {
             }
             IdleStep::Dim => Some(wait),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Edge cases: on with a scene, on with none chosen, off with a scene.
+    use super::*;
+    use kabuk_core::config::Screensaver;
+
+    /// Asked for by the user (2026-10-31): the screen saver could not be turned off.
+    #[test]
+    fn windows_gets_a_screen_saver_only_while_it_is_on_and_one_is_chosen() {
+        let on = Screensaver::default();
+        assert!(set_in_windows(&on));
+        assert!(!set_in_windows(&Screensaver {
+            kind: SaverKind::None,
+            ..on.clone()
+        }));
+        assert!(!set_in_windows(&Screensaver { enabled: false, ..on }));
     }
 }

@@ -392,6 +392,7 @@
     // The Store's Kabuk cannot set Windows' screen saver (D89).
     if (S.store) return head(t("navSaver"), t("saverDesc")) + `<div class="note">${escapeHtml(t("setStoreMissing"))}</div>`;
     return head(t("navSaver"), t("saverDesc")) + `
+      <div class="set-grp">${tgl("screensaver.enabled", t("setSaverOn"), t(cfg().screensaver.enabled ? "setSaverOnH" : "setSaverOffH"))}</div>
       <div class="set-grp"><span class="gl">${t("saverPick")}</span><div class="savers">${savers.map(([k, a, n, h]) => `<button class="saver${kind === k ? " on" : ""}" type="button" data-set="screensaver.kind" data-val='"${k}"' aria-pressed="${kind === k}"><span class="sp">${art[a]}</span><span class="sn">${n}<span>${h}</span></span></button>`).join("")}</div></div>
       ${gallery}
       <div class="set-grp">${rowFor("screensaver.wait_minutes", t("wait"), t("waitH"), segFor("screensaver.wait_minutes", t("wait"), SAVER_WAITS.map((m) => [m, `${m} ${t("min")}`])))}

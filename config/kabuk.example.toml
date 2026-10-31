@@ -68,6 +68,7 @@ kind = "image"
 image = "D:\\Pictures\\night.png"
 
 [screensaver]
+enabled = true            # off: no screen saver (its shortcut and hot corner still start it)
 kind = "circuit"          # circuit, constellation, gallery, none (turn the display off)
 # gallery = "saver-live/comet-calligraphy"   # with kind = "gallery": saver-live/… or saver-still/…
 wait_minutes = 5          # 3, 5, 10, 15

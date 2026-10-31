@@ -828,6 +828,19 @@ fn workspaces_take_the_names_given_by_number() {
 }
 
 /// D47: a still picture drifts by default, every ten minutes; the interval has bounds.
+/// Asked for by the user (2026-10-31): the screen saver can be turned off, on by default.
+#[test]
+fn the_screen_saver_is_on_unless_turned_off() {
+    assert!(Config::default().screensaver.enabled);
+    let c = parse("schema = 1\n[screensaver]\nenabled = false\n").unwrap().config;
+    assert!(!c.screensaver.enabled);
+    assert_eq!(
+        c.screensaver.kind,
+        Config::default().screensaver.kind,
+        "the choice kept"
+    );
+}
+
 #[test]
 fn a_still_picture_drifts_unless_turned_off() {
     let d = Config::default().wallpaper;

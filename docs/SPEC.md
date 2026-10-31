@@ -131,6 +131,7 @@ Target platform: Windows 11 22H2 and later. Windows 10 22H2 is supported on a be
 ### 2.7 Screen saver
 
 - Chosen in settings: Milvasoft (circuit board eye), Constellation, None (turn the display off directly), or one of the gallery's (requested by the user on 2026-10-15; DECISIONS D58): ten live savers and ten still ones, each OLED-safe (mostly black, at most 8 % average brightness); a still one is drawn once and slowly wanders (2 % of the screen's height) and breathes (70-100 % light, 23 s), so nothing burns in.
+- A switch turns the screen saver on or off (`screensaver.enabled`, on by default; asked for by the user on 2026-10-31). Off, Windows gets no screen saver and Kabuk starts none after the wait; the chosen one is kept, and its shortcut and hot corner still start it.
 - Wait time: 3, 5, 10, 15 min. "Don't start while video is playing" (honours Windows' display-on requests). "Preview" starts the selected screen saver immediately.
 - The implementation is the existing `.scr` file in `reference/OledSaver`; Kabuk installs it and writes the Windows settings (`SCRNSAVE.EXE`, timeout, enabled).
 

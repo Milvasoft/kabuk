@@ -644,6 +644,10 @@ pub enum SaverKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Screensaver {
+    /// Kabuk sets Windows' screen saver and starts it after the wait (asked for by the
+    /// user on 2026-10-31: it could not be turned off). Off: no screen saver at all; its
+    /// shortcut and hot corner still start the one chosen.
+    pub enabled: bool,
     pub kind: SaverKind,
     /// The gallery design for `kind = "gallery"` (`saver-live/comet-calligraphy`).
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -659,6 +663,7 @@ pub const SAVER_WAIT_CHOICES: [u32; 4] = [3, 5, 10, 15];
 impl Default for Screensaver {
     fn default() -> Self {
         Screensaver {
+            enabled: true,
             kind: SaverKind::Circuit,
             gallery: String::new(),
             wait_minutes: 5,

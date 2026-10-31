@@ -737,3 +737,8 @@ acc-notice = Kabuk notice
 
 # The launcher while its entries are still gathered (PLAN M19 U20).
 l-searching = Searching…
+
+# The screen saver's switch (asked for by the user on 2026-10-31).
+set-saver-on = Screen saver
+set-saver-on-h = Starts after the wait chosen below
+set-saver-off-h = Off: no screen saver starts by itself. The shortcut and the hot corner still start the one chosen

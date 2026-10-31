@@ -300,6 +300,12 @@ async function main() {
   check(/\[screensaver\][^[]*gallery = "wall-live\/aurora-shore"/.test(toml()), "gallery: a live wallpaper chosen as the screen saver");
   check((await page.locator(`[data-saver-gal="wall-live/aurora-shore"]`).innerText()).includes("OLED"), "gallery: a live wallpaper as a saver warns about OLED");
   await page.click(`[data-set="screensaver.kind"][data-val='"circuit"']`); await settled();
+  // The screen saver turned off and on again (asked for by the user on 2026-10-31).
+  await page.click(`[data-tgl="screensaver.enabled"]`); await settled();
+  check(/\[screensaver\][^[]*enabled = false/.test(toml()) && /\[screensaver\][^[]*kind = "circuit"/.test(toml()), "screen saver: turned off, its choice kept");
+  check((await page.locator(".set-row:has([data-tgl='screensaver.enabled'])").innerText()).match(/Kısayol|shortcut/i), "screen saver: off says what still starts it");
+  await page.click(`[data-tgl="screensaver.enabled"]`); await settled();
+  check(!/enabled = false/.test(toml().split("[screensaver]")[1] || ""), "screen saver: on again");
 
   // The drop-down terminal (DECISIONS D62): its program and height written.
   await go("windows");
