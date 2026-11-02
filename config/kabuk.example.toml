@@ -9,7 +9,7 @@
 schema = 1
 
 [appearance]
-look = "rihtim"           # ada, cizgi, devre, ray, konsol, rihtim, etkinlik
+look = "rihtim"           # ada, cizgi, devre, ray, konsol, rihtim, etkinlik, pano, izgara, defter
 accent = "theme"          # "theme" (the look's own colour) or "#rrggbb"
 mode = "dark"             # dark, light, system (follow Windows), time (light 07:00-19:00)
 text_size = "normal"      # small, normal, large
@@ -107,7 +107,7 @@ calendar = true           # a click on the clock or the bell: Kabuk's calendar a
 quick_settings = true     # the quick settings button: Wi-Fi, Bluetooth, airplane mode, brightness, volume
 
 [windows]
-workspaces = 9            # per monitor, 1-9
+workspaces = 9            # across every monitor, 1-9
 shown_workspaces = 4      # always shown on the bar; occupied and active ones are shown too
 workspace_names = []      # by number from workspace 1, e.g. ["Web", "Code"]; a missing or empty one keeps its number
 default_layout = "tiling" # tiling, floating
@@ -164,25 +164,25 @@ calculator = true
 
 # Ctrl+Alt+Shift+End is the fixed emergency exit and cannot be rebound.
 [shortcuts]
-launcher = ["Alt+Space"]
-workspace = "Alt"                 # + 1..9
-move_to_workspace = "Alt+Shift"   # + 1..9
-focus_left = ["Alt+H", "Alt+Left"]
-focus_down = ["Alt+J", "Alt+Down"]
-focus_up = ["Alt+K", "Alt+Up"]
-focus_right = ["Alt+L", "Alt+Right"]
-move_left = ["Alt+Shift+H", "Alt+Shift+Left"]
-move_down = ["Alt+Shift+J", "Alt+Shift+Down"]
-move_up = ["Alt+Shift+K", "Alt+Shift+Up"]
-move_right = ["Alt+Shift+L", "Alt+Shift+Right"]
-toggle_float = ["Alt+Shift+Space"]
-close_window = ["Alt+Shift+Q"]
-cycle_layout = ["Alt+Shift+T"]
-toggle_scratchpad = ["Alt+S"]       # show or hide the hidden workspace
-to_scratchpad = ["Alt+Shift+S"]     # send the focused window there
-toggle_group = ["Alt+G"]            # make the focused window a tabbed group, or break it up
-next_tab = ["Alt+Shift+G"]          # show the group's next tab
-overview = ["Alt+O"]                # every workspace at a glance
+launcher = ["Win+R"]
+workspace = "Win"                 # + 1..9
+move_to_workspace = "Win+Shift"   # + 1..9
+focus_left = ["Win+Left"]
+focus_down = ["Win+Down"]
+focus_up = ["Win+Up"]
+focus_right = ["Win+Right"]
+move_left = ["Win+Shift+Left"]
+move_down = ["Win+Shift+Down"]
+move_up = ["Win+Shift+Up"]
+move_right = ["Win+Shift+Right"]
+toggle_float = ["Win+F"]
+close_window = ["Win+Shift+Q"]
+cycle_layout = ["Win+Y"]
+toggle_scratchpad = ["Win+Z"]       # show or hide the hidden workspace
+to_scratchpad = ["Win+Shift+Z"]     # send the focused window there
+toggle_group = ["Win+T"]            # make the focused window a tabbed group, or break it up
+next_tab = ["Win+Shift+T"]          # show the group's next tab
+overview = ["Win+Tab"]              # every workspace at a glance
 start_saver = ["Win+Shift+L"]       # the screen saver now (the display off when none is chosen)
 app_grid = ["Win+Shift+A"]          # every app on a full-screen grid, as macOS's Launchpad
 dropdown = ["Win+Enter"]            # the drop-down terminal, over every workspace
