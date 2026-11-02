@@ -1,6 +1,6 @@
 # Contributing to Kabuk
 
-Kabuk changes how Windows' desktop behaves while it runs, on a machine someone uses every day. These rules keep that safe and keep the code in one shape.
+Kabuk changes how the Windows desktop behaves while it runs, on a machine someone uses every day. The rules below keep that machine safe and keep the code looking like one person wrote it.
 
 | File | Contents |
 | --- | --- |
@@ -12,7 +12,7 @@ Kabuk changes how Windows' desktop behaves while it runs, on a machine someone u
 
 ## Environment
 
-- Windows 11. Win32 code cannot be tested in a cloud or Linux environment.
+- Windows 11. The Win32 code can't be tested on Linux or in a cloud sandbox.
 - Rust stable (`x86_64-pc-windows-msvc`), Visual Studio Build Tools (C++ workload + Windows SDK), WebView2 Runtime (part of Windows 11), Node.js (only for the design tools and the settings page test).
 
 ## Safety rules: never leave the machine locked up
@@ -30,7 +30,7 @@ Kabuk changes how Windows' desktop behaves while it runs, on a machine someone u
 - Platform-independent logic (layout, configuration, search, contrast, translation) lives in its own crates as pure functions with unit tests.
 - Code, comments, logs, commit messages and documentation are in English. Turkish appears only in `locales/tr.ftl` and in quoted Turkish UI or test examples. Every user-visible string comes from `locales/`; no UI text is hard-coded.
 - No magic numbers: sizes, durations and colours are theme or configuration values.
-- Before inventing a new pattern, look for one in the codebase that does the same job and follow its form.
+- Before you invent a new pattern, look for one in the codebase that already does the job and follow it.
 - Idle CPU stays close to zero: nothing draws on a timer, only when something changes. The clock wakes on the minute boundary.
 
 ## Done means
@@ -39,6 +39,6 @@ Kabuk changes how Windows' desktop behaves while it runs, on a machine someone u
 2. The changed behaviour was tried by running it; anything visual was compared with the design.
 3. The milestone's "done" criteria in `docs/PLAN.md` are checked off.
 4. A new setting is wired end to end: schema → reading → applying → Settings → translations (tr and en) → live reload.
-5. Anything left undone is written down, not skipped silently.
+5. Anything left undone is written down. Nothing is skipped quietly.
 
-Commits are small and single-topic, with messages in English in the imperative mood.
+Keep commits small and about one thing. Messages are in English, in the imperative mood ("Add", not "Added").
