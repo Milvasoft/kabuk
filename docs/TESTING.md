@@ -1,6 +1,6 @@
 # Kabuk: test rules
 
-Kabuk runs on the user's everyday desktop; a bug loses windows or leaves the machine unusable. That is why testing is not optional. A task is not considered done until its tests are written and pass.
+Kabuk runs on someone's everyday desktop; a bug loses windows or leaves the machine unusable. That is why testing is not optional. A task is not considered done until its tests are written and pass.
 
 ## 1. Mandatory rules
 
@@ -8,7 +8,7 @@ Kabuk runs on the user's everyday desktop; a bug loses windows or leaves the mac
 2. **Every bug is first caught by a test.** When a bug is found, first a test that reproduces it and **fails** is written, then the bug is fixed and the test passes. The test stays permanently.
 3. **Pure crates: test first, then code.** For `kabuk-layout`, `kabuk-theme`, `kabuk-search`, `kabuk-i18n` and `kabuk-core`, tests describing the expected behavior are written first.
 4. **Edge cases are listed explicitly.** At the top of every test file, a comment states which edge cases of that unit are tested (zero windows, one window, many windows, minimum size that doesn't fit, zero-area monitor, monitor with negative coordinates, mixed DPI …).
-5. **Tests are not skipped or loosened.** Marking a failing test `#[ignore]`, changing the expected value to match the actual result or widening a tolerance is not done without reporting the reason to the user in writing and getting approval.
+5. **Tests are not skipped or loosened.** Marking a failing test `#[ignore]`, changing the expected value to match the actual result or widening a tolerance is not done without writing the reason down.
 6. **No flaky tests.** Time-dependent tests are written with a fake clock (the `Clock` trait in `kabuk-core`); no test waits with `sleep`. Windows integration tests are written with a condition-waiting helper (timeout + polling).
 7. **Warning-free build.** `cargo clippy --all-targets --all-features -- -D warnings` and `cargo fmt --check` are part of the tests.
 8. **No test may disrupt the user's session.** Integration tests manage only windows opened by `kabuk-testapp` (in test mode the WM is restricted to windows with the class name `KabukTestWindow`), do not hide the taskbar, and write to a temporary directory instead of the real `kabuk.toml`. Every test does its own cleanup in `Drop`; windows are shown even on panic.
@@ -84,7 +84,7 @@ Each with `kabuk-testapp` windows:
 
 - Line coverage in pure crates ≥ 90% (`cargo llvm-cov`); ≥ 95% for `kabuk-layout` and `kabuk-theme`.
 - At the end of each milestone: all tests green, clippy clean, performance test within limits, compatibility list up to date.
-- The test count and coverage ratio are reported to the user in the milestone summary.
+- The test count and coverage ratio are written in the milestone summary.
 
 ## 6. Commands
 
@@ -101,13 +101,13 @@ All of them in one command: `tools/check.ps1` (written in M0). This script must 
 
 ### 6.1 The test VM
 
-The Windows integration tests take the tray, hide the taskbar, open windows and reserve screen space for a few seconds. On the user's own desktop that disturbs a full-screen game or video, so they can run in a Hyper-V VM instead (approved by the user on 2026-10-13):
+The Windows integration tests take the tray, hide the taskbar, open windows and reserve screen space for a few seconds. On your own desktop that disturbs a full-screen game or video, so they can run in a Hyper-V VM instead:
 
-- `tools/vm/new-vm.ps1` creates the VM `kabuk-test` once: Windows 11 Enterprise evaluation installed unattended (`tools/vm/autounattend.xml`), a local account that logs on automatically, no network (nothing updates during a run), COM1 on the host pipe `\.\pipe\kabuk-vm-com1`. Needs the user in the "Hyper-V Administrators" group; the guest's password stays in `E:\kabuk-vm\guest-password.txt`, never in the repository.
+- `tools/vm/new-vm.ps1` creates the VM `kabuk-test` once: Windows 11 Enterprise evaluation installed unattended (`tools/vm/autounattend.xml`), a local account that logs on automatically, no network (nothing updates during a run), COM1 on the host pipe `\.\pipe\kabuk-vm-com1`. Needs someone at the machine in the "Hyper-V Administrators" group; the guest's password stays in `E:\kabuk-vm\guest-password.txt`, never in the repository.
 - `tools/vm/agent.ps1` runs in the VM's desktop session at logon and takes jobs over COM1.
 - `tools/vm/run.ps1 [-Test bar,tray] [-Filter name] [-Wait]` builds on the host, copies the programs and test binaries into the VM at the same paths (`Copy-VMFile`), runs them there and prints their output. Its exit code is the tests'.
 - `tools/vm/screen.ps1 <out.png>` saves what the VM's screen shows, for visual checks.
 
-A change is done when `tools/check.ps1` passes on the host (its integration step may run on the host or be replaced by `tools/vm/run.ps1` while the user's desktop is busy; say which).
+A change is done when `tools/check.ps1` passes on the host (its integration step may run on the host or be replaced by `tools/vm/run.ps1` while my desktop is busy; say which).
 
 GitHub's CI runners have no desktop the integration tests can use (no Explorer taskbar to hide, no windows to capture) and no graphics card (Windows' Basic Render Driver stands in). There `tools/check.ps1` runs everything else and leaves the integration step to the VM (it sees `CI` set); the GPU timing tests draw without measuring, and the window genie test, which captures a real window, says it has no capture and ends. Both run in full on the host and in the VM.

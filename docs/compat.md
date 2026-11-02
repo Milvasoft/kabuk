@@ -1,6 +1,6 @@
 # Compatibility list
 
-Problematic applications tried by hand with the real window manager (ARCHITECTURE §13, PLAN M3). Each row is filled in after trying, on the user's machine, with the build named in the row.
+Problematic applications tried by hand with the real window manager (ARCHITECTURE §13, PLAN M3). Each row is filled in after trying, with the build named in the row.
 
 What is tried for each application:
 
@@ -29,4 +29,4 @@ What is tried for each application:
 | File Explorer | — | | | | | | |
 | OBS | — | | | | | | |
 
-Not tried yet: the window manager has only run in test mode (it manages `kabuk-testapp` windows and nothing else). Trying it on the real desktop needs the user present, since it moves and hides every open window.
+The table has not been filled in yet.

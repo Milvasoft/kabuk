@@ -3,7 +3,7 @@
 ## 1. Principles
 
 1. **Near-zero cost when idle.** No continuously spinning loop. Everything is event-driven; timers are set for the next real change (the clock to the minute boundary, idle dimming to the remaining time).
-2. **Never touch another process.** No DLL injection, no global (in-context) hooks. Only documented Win32/WinRT APIs. This is the foundation of both anti-cheat compatibility and stability. The single exception, chosen by the user (DECISIONS D42): the opt-in Explorer theme layer loads `kabuk-explorer.dll` into `explorer.exe` and nowhere else (§11c).
+2. **Never touch another process.** No DLL injection, no global (in-context) hooks. Only documented Win32/WinRT APIs. This is the foundation of both anti-cheat compatibility and stability.
 3. **Never hang because of another process.** A hung window cannot make Kabuk wait: windows are moved with `SWP_ASYNCWINDOWPOS`, messages are sent with `SendMessageTimeout`.
 4. **Always reversible.** Everything Kabuk changes in Windows (hidden windows, taskbar, work area, registry) is saved first and written back on exit, or by the watchdog process after a crash.
 5. **Platform-independent core.** Layout, configuration, search, contrast and translation are pure Rust and can be tested on Linux too. Win32 only at the edges.
@@ -13,8 +13,7 @@
 | Process | Role | Lifetime |
 | --- | --- | --- |
 | `kabuk-watchdog.exe` | Starts at sign-in, launches `kabuk.exe` and waits on its process handle, asking the bar's and the window manager's windows every 5 s whether they answer; a shell silent for 15 s is ended (DECISIONS D55). On abnormal exit it restores from the state file (shows windows, brings back the taskbar, resets the work area), then restarts Kabuk (at most 3 times in 60 s; beyond that it stops and notifies the user). | Always; very small (a few hundred KB, ~1 MB RAM) |
-| `kabuk.exe` | Bar, window manager, launcher, notifications, OSD, idle dimming, IPC server. The `kabuk.exe msg …` subcommand is the IPC client (writes output via `AttachConsole(ATTACH_PARENT_PROCESS)`). `kabuk.exe --restore` is the emergency restore. | Always; one per desk: a shell or watchdog starting makes the one there give way (the emergency stop and restore of `--restore`), whatever its state directory, then takes over (asked for by the user on 2026-10-14; `kabuk-win::takeover`, the desk's owner in a session-wide named block) |
-| `kabuk-explorer.dll` | The Explorer theme layer (§11c), loaded into `explorer.exe` by `kabuk.exe` only while `system_theme.explorer` is on. | While Kabuk runs; unloads itself when `kabuk.exe` ends |
+| `kabuk.exe` | Bar, window manager, launcher, notifications, OSD, idle dimming, IPC server. The `kabuk.exe msg …` subcommand is the IPC client (writes output via `AttachConsole(ATTACH_PARENT_PROCESS)`). `kabuk.exe --restore` is the emergency restore. | Always; one per desk: a shell or watchdog starting makes the one there give way (the emergency stop and restore of `--restore`), whatever its state directory, then takes over (`kabuk-win::takeover`, the desk's owner in a session-wide named block) |
 | `kabuk-settings.exe` | Settings app. Runs the settings screen from the design inside WebView2; writes `kabuk.toml`, uses IPC for live information. | Only while open (see DECISIONS D3) |
 
 Run at startup: only the watchdog, under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. Not added without user consent.
@@ -37,7 +36,6 @@ kabuk/
     kabuk/                   main application (bar, wm, launcher, notifications, ipc)
     kabuk-watchdog/
     kabuk-settings/          WebView2 shell + web/ (settings UI, derived from the design HTML)
-    kabuk-explorer/          cdylib loaded into explorer.exe for the Explorer theme layer (§11c)
     kabuk-testapp/           test app that mimics problematic window behaviors (see §13)
   assets/
     fonts/                   OFL fonts (Geist, Geist Mono, IBM Plex Sans Condensed, IBM Plex Mono, Chakra Petch, JetBrains Mono, Manrope, Martian Mono, Figtree, Cantarell) and their licenses
@@ -163,19 +161,10 @@ A working open-source reference for this approach: **ManagedShell** (C#, MIT; th
 
 ## 11c. System theme
 
-The layers and their rules are in DECISIONS D42; this is how they are built.
+Only the colour layer exists (DECISIONS D42 says why the others were dropped).
 
 - **Recording:** every layer goes through the existing state-file record (as the cursors, the screen saver and the wallpaper do): the old value, or its absence, is written to `state.json` before Kabuk writes its own, and the restore path (exit, switch off, `--restore`, watchdog) writes it back. The value lists (which keys, which ProgIDs, which icon indexes) are pure data in `kabuk-core` with unit tests.
 - **Colours:** `kabuk-win::personalize` reads and writes the `Personalize`, `Accent` and `DWM` values and broadcasts `WM_SETTINGCHANGE` with `SendMessageTimeout` (principle 3). The accent palette Windows expects (`AccentPalette`, eight shades) is computed in `kabuk-theme` from the look's accent.
-- **Icons:** `kabuk-ui` renders each look's icons from `assets/icons` into `.ico` files (16 to 256 px) in the state folder. Per-user values (`HKCU\Software\Classes\<ProgID>\DefaultIcon`, the per-user `CLSID` icons) are written by `kabuk.exe`; the machine-wide `Shell Icons` values by a short elevated run of `kabuk.exe --system-icons apply|restore` started with `ShellExecuteExW` ("runas"), which records before it writes like everything else. A `RegNotifyChangeKeyValue` wait on the touched keys (on a worker thread, no polling) sets Kabuk's icon again when a program writes its own back. Refresh: `SHChangeNotify(SHCNE_ASSOCCHANGED)`.
-- **Sounds:** a scheme under `HKCU\AppEvents\Schemes` with the files in the state folder (D44 open).
-- **Explorer layer:**
-  - Loading: `kabuk-win::inject` opens the target with only the rights it needs, checks that its image is `%WINDIR%\explorer.exe` in the user's session (anything else is refused, tested), writes the DLL's path and starts `LoadLibraryW` with `CreateRemoteThread`, then closes every handle. Kabuk loads it after Explorer's windows exist and again after Explorer restarts (the same `TaskbarCreated` path the bar already uses).
-  - Inside Explorer: the DLL checks the versions of `explorer.exe`, `uxtheme.dll` and `Windows.UI.Xaml.dll` against the tried list and hooks nothing otherwise. Win32 drawing: hooks on the theme functions Explorer imports (`DrawThemeBackground`, `DrawThemeText`, `GetThemeColor`, `GetSysColor` and their kin), choosing the look's colour for each part and state and calling the original for everything else. XAML (Windows 11's toolbar, address bar, tabs, Home): `InitializeXamlDiagnosticsEx` with a small visual tree watcher that sets brushes and resources on the elements as they appear. Every hook is wrapped in `catch_unwind`; a failure turns that hook off and calls the original.
-  - Tokens: a named, read-only file mapping made by `kabuk.exe` holds the look's tokens and mode; a named event signals a change, and the DLL repaints Explorer's windows. The DLL reads nothing else.
-  - Unloading: a thread in the DLL waits on Kabuk's process handle and on an "unload" event; on either it removes its hooks, repaints and leaves with `FreeLibraryAndExitThread`. `--restore` sets the event and, if the DLL is still loaded after the timeout, restarts Explorer.
-  - Crash guard: the time of every load is recorded; two abnormal Explorer exits within a minute of a load turn the layer off and say so.
-- **Game mode:** the DLL is unloaded while game mode is on (unless `system_theme.explorer_in_game` is set) and loaded again after.
 
 ## 12. Configuration, translation, IPC
 
@@ -206,8 +195,5 @@ The layers and their rules are in DECISIONS D42; this is how they are built.
 | `SW_HIDE` confuses some applications | A window gets lost in a workspace | State file + watchdog; compatibility list; if needed, the alternative of moving off-screen |
 | The low-level mouse hook is frowned upon by some anti-cheats | The game does not start | The hook is removed in game mode; "Hold Alt to grab anywhere" can be turned off |
 | The animated wallpaper method (`WorkerW`) breaks with a Windows update | Animated wallpaper is not visible | Both window structures are supported; on failure falls back to the static counterpart, the user is notified |
-| A Windows update changes Explorer's drawing or XAML tree | The Explorer layer draws wrongly or crashes Explorer | Hooks only on tried builds; every hook falls back to the original; the crash guard turns the layer off; Explorer is restarted by Windows and comes back unthemed |
-| An anti-cheat dislikes a modified Explorer | A game refuses to start or flags the user | Explorer only, never a game process; unloaded in game mode by default; tried by hand with Vanguard before the layer leaves experimental |
 | A program writes its own file icon back | Some files show the old icon | Change notification on the keys, Kabuk's icon set again |
-| The machine-wide folder icons need administrator rights | They cannot come back silently after a crash | They come back at the next start or `--restore` with the UAC prompt; the per-user layers come back at once |
 | After Alt+drag, releasing Alt focuses the application menu | Annoying | Prevent menu activation by sending an unassigned virtual key when Alt is released (AutoHotkey's "mask key" method; `SendInput`, documented) |
