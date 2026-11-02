@@ -8,6 +8,8 @@ It's for people who like how Hyprland, i3 and waybar feel but stay on Windows fo
 
 Kabuk is at version 1.0.9 and runs on my machine every day. It speaks Turkish and English.
 
+Get it from the [Microsoft Store](https://apps.microsoft.com/detail/9NGK4T6XHF34) or the [latest release](https://github.com/Milvasoft/kabuk/releases/latest).
+
 ## If something goes wrong
 
 You should know how to get out before you install. Kabuk hides windows (that's how workspaces work), hides the taskbar and changes the work area. It writes each of those changes to a state file before it makes them, so it can always undo them:
