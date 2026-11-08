@@ -61,9 +61,11 @@ const TRACK_H: f32 = 4.0;
 const FIGURE_ICON: f32 = 16.0;
 const FIGURE_SIZE: f32 = 17.0;
 const FIGURE_LABEL: f32 = 11.0;
-const FIGURE_W: f32 = 104.0;
+const FIGURE_GAP: f32 = 6.0;
+const FIGURES: f32 = 4.0;
 const LEVEL_ICON: f32 = 17.0;
 const LEVEL_VALUE_W: f32 = 30.0;
+const INNER_PAD: f32 = 20.0;
 
 /// Spare room around the largest island in its window, for a spring's overshoot (DIPs).
 pub const ROOM: f32 = 12.0;
@@ -85,8 +87,8 @@ pub const LEAVE_MS: u32 = 260;
 // fade on a stiffer, critically damped one.
 const SIZE_STIFFNESS: f32 = 420.0;
 const SIZE_DAMPING: f32 = 30.0;
-const FADE_STIFFNESS: f32 = 900.0;
-const FADE_DAMPING: f32 = 60.0;
+const FADE_STIFFNESS: f32 = 2200.0;
+const FADE_DAMPING: f32 = 94.0;
 /// The contents change once the old ones have faded this far.
 const SWAP_AT: f32 = 0.06;
 
@@ -365,7 +367,7 @@ fn lines(title: &str, sub: &str, width: f32) -> Node {
     if !sub.is_empty() {
         kids.push(words(sub, Role::Dim, 400, SUB_SIZE, Some(width), FontRole::Ui));
     }
-    Node::column(kids).gap(2.0).size(Some(width), None)
+    Node::column(kids).gap(2.0).align(Align::Start).size(Some(width), None)
 }
 
 fn page_dots(page: usize) -> Node {
@@ -424,9 +426,9 @@ fn now_page(d: &Data) -> Node {
 
 fn media_page(d: &Data, nothing: &str) -> Node {
     let controls: [(&'static str, &'static str); 3] = [
-        ("left", hit::TRACK_PREV),
-        (if d.playing { "x" } else { "right" }, hit::TRACK_PLAY),
-        ("right", hit::TRACK_NEXT),
+        ("prev", hit::TRACK_PREV),
+        (if d.playing { "pause" } else { "play" }, hit::TRACK_PLAY),
+        ("next", hit::TRACK_NEXT),
     ];
     let count = controls.len() as f32;
     let width = page_room() - BADGE - 2.0 * TITLE_GAP - count * BUTTON - (count - 1.0) * BUTTON_GAP;
@@ -460,11 +462,11 @@ fn system_page(d: &Data) -> Node {
                 ])
                 .gap(8.0)
                 .align(Align::Center)
-                .size(Some(FIGURE_W), None)
+                .size(Some((page_room() - (FIGURES - 1.0) * FIGURE_GAP) / FIGURES), None)
             })
             .collect(),
     )
-    .gap(6.0)
+    .gap(FIGURE_GAP)
     .align(Align::Center)
 }
 
@@ -495,7 +497,13 @@ pub fn view(content: &Content, page: usize, d: &Data, nothing_plays: &str) -> No
             dot(DOT_SIZE, DOT_SIZE, Role::White),
         ])
         .gap(DOTS_GAP)
-        .align(Align::Center),
+        .align(Align::Center)
+        .padding(Insets {
+            left: (w - 2.0 * DOT_SIZE - DOTS_GAP) / 2.0,
+            top: 0.0,
+            right: 0.0,
+            bottom: 0.0,
+        }),
         Content::Page(p) => {
             let body = match *p {
                 0 => now_page(d),
@@ -522,7 +530,7 @@ pub fn view(content: &Content, page: usize, d: &Data, nothing_plays: &str) -> No
             Node::icon(level.icon(), LEVEL_ICON, Role::Fg),
             level_track(
                 f32::from(*percent) / 100.0,
-                w - 2.0 * (SIDE_PAD + 4.0) - LEVEL_ICON - LEVEL_VALUE_W - 2.0 * TITLE_GAP,
+                w - 2.0 * INNER_PAD - LEVEL_ICON - LEVEL_VALUE_W - 2.0 * TITLE_GAP,
             ),
             Node::row(vec![words(
                 percent.to_string(),
@@ -543,7 +551,7 @@ pub fn view(content: &Content, page: usize, d: &Data, nothing_plays: &str) -> No
                 Role::Fg,
                 600,
                 TITLE_SIZE,
-                Some(w - 2.0 * SIDE_PAD - LEVEL_ICON - TITLE_GAP - 8.0),
+                Some(w - 2.0 * INNER_PAD - LEVEL_ICON - TITLE_GAP),
                 FontRole::Ui,
             ),
         ])
@@ -551,12 +559,25 @@ pub fn view(content: &Content, page: usize, d: &Data, nothing_plays: &str) -> No
         .align(Align::Center),
         Content::Notice { title, sub, icon } => Node::row(vec![
             Node::icon(icon, BADGE_ICON, Role::Accent),
-            lines(title, sub, w - 2.0 * SIDE_PAD - BADGE_ICON - TITLE_GAP - 8.0),
+            lines(title, sub, w - 2.0 * INNER_PAD - BADGE_ICON - TITLE_GAP),
         ])
         .gap(TITLE_GAP)
         .align(Align::Center),
     };
-    Node::row(vec![inner]).align(Align::Center).size(Some(w), Some(h))
+    let pad = if matches!(content, Content::Idle) {
+        0.0
+    } else {
+        INNER_PAD
+    };
+    Node::row(vec![inner])
+        .align(Align::Center)
+        .padding(Insets {
+            left: pad,
+            top: 0.0,
+            right: pad,
+            bottom: 0.0,
+        })
+        .size(Some(w), Some(h))
 }
 
 /// The island drawn at its size now: the black pill centred in a window `window` wide,

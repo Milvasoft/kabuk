@@ -72,6 +72,7 @@ mod gesture_host;
 mod idle_host;
 #[path = "island_host.rs"]
 mod island_host;
+pub use island_host::MSG_TEST_ISLAND;
 #[path = "motion_host.rs"]
 mod motion_host;
 pub use calendar_host::{MSG_OPEN_CALENDAR_PANEL, MSG_TEST_CALENDAR_PANEL};
@@ -578,6 +579,8 @@ pub const TRAY_START_DELAY: Duration = Duration::from_secs(1);
 const ANNOUNCE_DEBOUNCE: Duration = Duration::from_millis(100);
 
 struct Bar {
+    /// The shapes its window is cut to (Damla's capsules; empty: the whole window).
+    cut: Vec<(PxRect, i32)>,
     window: Window,
     surface: Option<WindowSurface>,
     appbar: Option<AppBar>,
@@ -1987,6 +1990,11 @@ impl Shared {
                     t.taken();
                 }
                 self.step_bar_slides();
+                Some(0)
+            }
+            #[cfg(feature = "integration")]
+            MSG_TEST_ISLAND => {
+                self.test_island(m.wparam);
                 Some(0)
             }
             island_host::MSG_ISLAND_FRAME => {
@@ -3955,7 +3963,8 @@ impl Shared {
     /// The blur behind a bar window when `bar.background = "blur"`, tinted with the
     /// desk colour of the mode in use (D28).
     fn set_backdrop(&self, hwnd: Hwnd) {
-        let tint = (self.config().bar.background == BarBackground::Blur).then(|| {
+        // Damla's capsules are glass whatever the bar's background says (D99).
+        let tint = (self.config().bar.background == BarBackground::Blur || self.look.style.glass).then(|| {
             let alpha = (BLUR_TINT_ALPHA * f32::from(u8::MAX)).round() as u8;
             // The colour the user chose (D57), else the look's desk colour; black is the
             // desk of the dark modes.
@@ -4032,6 +4041,7 @@ impl Shared {
         tracing::info!(device = %monitor.device, dpi = monitor.dpi, ?rect, "bar placed");
         let drag = drag_watch(window.hwnd());
         Ok(Bar {
+            cut: Vec::new(),
             _drag: drag,
             window,
             surface,
@@ -4911,6 +4921,14 @@ impl Shared {
             };
             if strip {
                 view::backdrop(&mut layout, Rect::new(-origin.x, -origin.y, window.w, window.h));
+            }
+            if style.glass {
+                let shapes = geometry::glass_shapes(&layout, origin, scale);
+                if shapes != self.bars[i].cut {
+                    tracing::debug!(capsules = shapes.len(), "bar cut to its capsules");
+                    self.bars[i].window.hwnd().set_shapes(&shapes);
+                    self.bars[i].cut = shapes;
+                }
             }
             let layout_us = started.elapsed().as_micros() as u64;
             // What screen readers find on it, read only when one asks (D97).

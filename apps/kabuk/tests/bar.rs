@@ -2846,6 +2846,62 @@ fn a_screen_saver_turned_off_is_not_set_in_windows() {
     assert!(wait_until(Duration::from_secs(5), || restored(&areas)).is_some());
 }
 
+/// DECISIONS D99: Damla's bar is cut to its three capsules and an island stands on each
+/// monitor: at rest two dots; the mouse opens it, its pages turn, leaving closes it, and a
+/// level grows it for a moment.
+#[test]
+fn damlas_island_opens_under_the_mouse_and_goes_back() {
+    use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_ISLAND};
+    use kabuk_win::msgloop::{post_message, Msg};
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n[appearance]\nlook = \"damla\"\n").unwrap();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(
+        wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("bar cut to its capsules") > 0).is_some(),
+        "the bar was not cut"
+    );
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let islands = kabuk_win::window::windows_of_class("Kabuk.Island")
+        .into_iter()
+        .filter(|h| h.pid() == Some(pid) && h.is_visible())
+        .count();
+    assert_eq!(islands, kabuk_win::shell::monitors().len());
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
+    let island = |what: usize| {
+        post_message(
+            control,
+            Msg {
+                id: MSG_TEST_ISLAND,
+                wparam: what,
+                lparam: 0,
+            },
+        )
+        .unwrap()
+    };
+    let main = kabuk_win::shell::monitors()
+        .into_iter()
+        .find(|m| m.primary)
+        .unwrap()
+        .device;
+    let rest = || sandbox.last_log_line(&["island at rest", &main]);
+    let at_rest = |shown: &str| wait_until(SETTLE, || rest().is_some_and(|l| l.contains(shown))).is_some();
+    island(1);
+    assert!(at_rest("Page(0)"), "{:?}", rest());
+    island(4);
+    assert!(at_rest("Page(1)"), "{:?}", rest());
+    island(2);
+    assert!(at_rest("Idle"), "{:?}", rest());
+    island(3);
+    assert!(at_rest("Level"), "{:?}", rest());
+    assert!(at_rest("Idle"), "the level stayed");
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}
+
 /// DECISIONS D66 (suggested and asked for by the user): the media card opens under the
 /// bar and closes again, whether or not something plays on the machine.
 #[test]

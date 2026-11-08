@@ -17,6 +17,9 @@ use crate::notify::view::Level;
 const ISLAND_CLASS: &str = "Kabuk.Island";
 /// A frame of the screen while an island moves ([`kabuk_win::ticker`]).
 pub(super) const MSG_ISLAND_FRAME: u32 = msg::APP + 127;
+/// Integration tests: on the main monitor's island, the mouse arrives (`wparam` 1) or
+/// has left (2), a level is shown (3), the page turns (4).
+pub const MSG_TEST_ISLAND: u32 = msg::APP + 128;
 /// The longest a frame counts for (seconds): after a stall the spring goes on from where
 /// it was instead of jumping to its end.
 const LONGEST_FRAME: f32 = 1.0 / 20.0;
@@ -56,7 +59,7 @@ pub(super) struct Islands {
 
 /// Whether `code`'s look has the island.
 pub(super) fn shown(look: kabuk_core::config::Look) -> bool {
-    look.code() == "l"
+    look == kabuk_core::config::Look::Damla
 }
 
 fn cut_rect(scale: Scale, window_w: f32, (w, h): (f32, f32)) -> PxRect {
@@ -348,10 +351,40 @@ impl Shared {
                         .ok()
                 });
             }
-        } else {
-            self.islands.ticker = None;
+        } else if self.islands.ticker.take().is_some() || self.islands.last.is_some() {
             self.islands.last = None;
+            for w in &self.islands.windows {
+                tracing::debug!(device = %w.device, shown = ?w.model.shown(), size = ?w.model.size(), "island at rest");
+            }
         }
+    }
+
+    #[cfg(feature = "integration")]
+    pub(super) fn test_island(&mut self, what: usize) {
+        let Some(i) = self
+            .bars
+            .iter()
+            .find(|b| b.primary)
+            .and_then(|b| self.islands.windows.iter().position(|w| w.device == b.monitor.device))
+        else {
+            return;
+        };
+        match what {
+            1 => self.islands.windows[i].model.set_hover(true),
+            2 => self.islands.windows[i].model.set_hover(false),
+            3 => {
+                self.islands.windows[i].model.event(Content::Level {
+                    level: Level::Volume,
+                    percent: 40,
+                });
+                if let Some(c) = &self.control {
+                    c.set_timer(timer::ISLAND_EVENT, Duration::from_millis(u64::from(island::LEVEL_MS)));
+                }
+            }
+            _ => self.islands.windows[i].model.turn(1),
+        }
+        self.schedule_figures();
+        self.island_moved();
     }
 
     /// The window procedure of the island on `device`.
