@@ -3,6 +3,9 @@ html, body { margin: 0; height: 100%; overflow: hidden; }
 body { background: var(--desk, #000); }
 #app { height: 100%; }
 #app > .screen.settings-screen { width: 100%; height: 100%; }
+/* The design page's picture of Damla's island belongs on its stage, not on this screen
+   (found by the user: a black pill over the page's title). */
+#app > .screen.settings-screen[data-dir="l"]::after { content: none; }
 /* The window can be smaller than the design's screen: the page scrolls. */
 .set-main { overflow-y: auto; }
 /* So does the menu on the left when it does not fit (found by the user: the last pages
