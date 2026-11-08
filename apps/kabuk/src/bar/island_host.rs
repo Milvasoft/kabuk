@@ -40,6 +40,7 @@ pub(super) struct IslandWindow {
     device: String,
     scale: Scale,
     model: Island,
+    gesture: island::Gesture,
     layout: Layout,
     /// The mouse left: it closes when [`island::LEAVE_MS`] is up, unless it comes back.
     leaving: bool,
@@ -126,6 +127,7 @@ impl Shared {
                 model,
                 layout: Layout::default(),
                 leaving: false,
+                gesture: island::Gesture::default(),
                 aside: false,
                 cut,
                 drawn: None,
@@ -398,15 +400,38 @@ impl Shared {
                 let w = &mut self.islands.windows[i];
                 msgloop::track_mouse_leave(w.window.hwnd());
                 w.leaving = false;
-                if !w.model.hovered() {
+                let opens = !w.model.hovered();
+                if opens {
                     tracing::debug!(device, "island opens");
                     w.model.set_hover(true);
+                }
+                let x = w.scale.dips(msg::point(m.lparam).0);
+                let turn = w.gesture.moved(x);
+                tracing::trace!(x, ?turn, "island mouse");
+                if opens {
                     self.schedule_figures();
                     self.island_moved();
                 }
+                if let Some(by) = turn {
+                    self.island_turn(i, by);
+                }
                 None
             }
+            msg::LBUTTONDOWN => {
+                let w = &mut self.islands.windows[i];
+                let x = w.scale.dips(msg::point(m.lparam).0);
+                w.gesture.press(x);
+                tracing::debug!(x, "island pressed");
+                Some(0)
+            }
             msg::MOUSELEAVE => {
+                // Its shape changes as it grows, and Windows then reports the mouse as gone.
+                let hwnd = self.islands.windows[i].window.hwnd();
+                if hwnd.under_cursor() {
+                    msgloop::track_mouse_leave(hwnd);
+                    return None;
+                }
+                self.islands.windows[i].gesture.release();
                 self.islands.windows[i].leaving = true;
                 if let Some(c) = &self.control {
                     c.set_timer(timer::ISLAND_LEAVE, Duration::from_millis(u64::from(island::LEAVE_MS)));
@@ -414,6 +439,9 @@ impl Shared {
                 None
             }
             msg::LBUTTONUP => {
+                if self.islands.windows[i].gesture.release() {
+                    return Some(0);
+                }
                 let (x, y) = msg::point(m.lparam);
                 let w = &self.islands.windows[i];
                 let p = Point {
@@ -427,15 +455,24 @@ impl Shared {
                 }
                 Some(0)
             }
-            msg::MOUSEWHEEL => {
-                let notches = (m.wparam >> 16) as u16 as i16;
-                self.islands.windows[i].model.turn(if notches > 0 { -1 } else { 1 });
-                self.schedule_figures();
-                self.island_moved();
+            msg::MOUSEWHEEL | msg::MOUSEHWHEEL => {
+                // Up or left goes back; down or right goes on.
+                let delta = msg::wheel(m.wparam);
+                let amount = if m.id == msg::MOUSEWHEEL { -delta } else { delta };
+                let turn = self.islands.windows[i].gesture.wheeled(amount, Instant::now());
+                if let Some(by) = turn {
+                    self.island_turn(i, by);
+                }
                 Some(0)
             }
             _ => None,
         }
+    }
+
+    fn island_turn(&mut self, i: usize, by: isize) {
+        self.islands.windows[i].model.turn(by);
+        self.schedule_figures();
+        self.island_moved();
     }
 
     fn island_click(&mut self, i: usize, module: &str, value: u32) {

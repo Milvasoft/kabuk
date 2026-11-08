@@ -4235,6 +4235,67 @@ fn damlas_apps_grow_under_the_mouse_and_settle() {
     assert!(wait_until(SETTLE, || restored(&before)).is_some());
 }
 
+/// Asked for by the user: dragging across Damla's island turns its page, and is not a click.
+#[test]
+fn a_drag_across_damlas_island_turns_its_page() {
+    use kabuk_win::msgloop::{msg, post_message, Msg};
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n[appearance]\nlook = \"damla\"\n").unwrap();
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("bar cut to its capsules") > 0).is_some());
+    sandbox.wait_started();
+    std::thread::sleep(Duration::from_millis(1000));
+    let pid = sandbox.state().kabuk_pid.unwrap();
+    let island = primary_window_of("Kabuk.Island", pid);
+    let r = kabuk_win::dpi::physical(|| island.window_rect().unwrap());
+    let main = kabuk_win::shell::monitors()
+        .into_iter()
+        .find(|m| m.primary)
+        .unwrap()
+        .device;
+    let rest = || sandbox.last_log_line(&["island at rest", &main]);
+    let at_rest = |shown: &str| wait_until(SETTLE, || rest().is_some_and(|l| l.contains(shown))).is_some();
+    let put = |x: i32, y: i32| kabuk_win::dpi::physical(|| kabuk_win::input::set_cursor_pos(x, y));
+    let m = kabuk_win::shell::monitors().into_iter().find(|m| m.primary).unwrap();
+    let primary_middle = ((m.rect.left + m.rect.right) / 2, (m.rect.top + m.rect.bottom) / 2);
+    let middle = (r.left + r.right) / 2;
+    assert!(put(middle, r.top + 20));
+    std::thread::sleep(Duration::from_millis(60));
+    assert!(put(middle + 2, r.top + 20));
+    assert!(at_rest("Page(0)"), "{:?}", rest());
+    let x0 = (r.right - r.left) / 2;
+    let send = |id: u32, x: i32| {
+        kabuk_win::dpi::physical(|| {
+            post_message(
+                island,
+                Msg {
+                    id,
+                    wparam: 0,
+                    lparam: (20isize << 16) | (x as isize & 0xFFFF),
+                },
+            )
+            .unwrap()
+        })
+    };
+    send(msg::LBUTTONDOWN, x0);
+    std::thread::sleep(Duration::from_millis(40));
+    send(msg::MOUSEMOVE, x0 - 120);
+    std::thread::sleep(Duration::from_millis(40));
+    send(msg::LBUTTONUP, x0 - 120);
+    let turned = at_rest("Page(1)");
+    assert!(put(primary_middle.0, primary_middle.1));
+    assert!(
+        turned,
+        "{:?} pressed {:?}",
+        rest(),
+        sandbox.last_log_line(&["island pressed"])
+    );
+    assert_eq!(sandbox.log_lines("island click"), 0, "the swipe was also a click");
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}
+
 /// The bar of Monitor 1 (main) of shell `pid`, and a sender of the shell's
 /// ABN_FULLSCREENAPP to it, as Explorer sends it (`true`: a program went full screen).
 fn main_bar_and_notify(pid: u32) -> (kabuk_win::window::Hwnd, impl Fn(bool)) {

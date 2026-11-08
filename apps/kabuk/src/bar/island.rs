@@ -8,6 +8,8 @@ use kabuk_ui::geom::{Insets, Point, Rect};
 use kabuk_ui::motion::{Level as MotionLevel, Spring};
 use kabuk_ui::node::{layout, Align, Draw, FontRole, Layout, Node, Paint, Role, Span, TextMeasure, TextSpec};
 
+use std::time::{Duration, Instant};
+
 use crate::notify::view::Level;
 
 /// What a press on the island lands on.
@@ -66,6 +68,14 @@ const FIGURES: f32 = 4.0;
 const LEVEL_ICON: f32 = 17.0;
 const LEVEL_VALUE_W: f32 = 30.0;
 const INNER_PAD: f32 = 20.0;
+
+/// How far the mouse is dragged, button down, for the page to turn (DIPs).
+const SWIPE: f32 = 36.0;
+/// One notch of a wheel; a touchpad sends the same in many small steps.
+const WHEEL_NOTCH: i32 = 120;
+/// How long a wheel has to be still before it can turn the page again: a touchpad's swipe
+/// runs on for a moment after the fingers have left.
+const WHEEL_PAUSE: Duration = Duration::from_millis(320);
 
 /// Spare room around the largest island in its window, for a spring's overshoot (DIPs).
 pub const ROOM: f32 = 12.0;
@@ -361,13 +371,18 @@ fn badge(inner: Node) -> Node {
         })
 }
 
-/// A title over the line under it, cut to `width`.
-fn lines(title: &str, sub: &str, width: f32) -> Node {
+/// A title over the line under it, as wide as they are, at most `width`.
+fn snug_lines(title: &str, sub: &str, width: f32) -> Node {
     let mut kids = vec![words(title, Role::Fg, 600, TITLE_SIZE, Some(width), FontRole::Ui)];
     if !sub.is_empty() {
         kids.push(words(sub, Role::Dim, 400, SUB_SIZE, Some(width), FontRole::Ui));
     }
-    Node::column(kids).gap(2.0).align(Align::Start).size(Some(width), None)
+    Node::column(kids).gap(2.0).align(Align::Start)
+}
+
+/// A title over the line under it, cut to `width` and filling it.
+fn lines(title: &str, sub: &str, width: f32) -> Node {
+    snug_lines(title, sub, width).size(Some(width), None)
 }
 
 fn page_dots(page: usize) -> Node {
@@ -453,7 +468,8 @@ fn system_page(d: &Data) -> Node {
         d.figures
             .iter()
             .map(|(icon, value, label)| {
-                Node::row(vec![
+                // A layer centres what is aligned to the centre: each in the middle of its cell.
+                Node::layer(vec![Node::row(vec![
                     Node::icon(icon, FIGURE_ICON, Role::Accent),
                     Node::column(vec![
                         words(value.clone(), Role::Fg, 600, FIGURE_SIZE, None, FontRole::Num),
@@ -461,7 +477,7 @@ fn system_page(d: &Data) -> Node {
                     ]),
                 ])
                 .gap(8.0)
-                .align(Align::Center)
+                .align(Align::Center)])
                 .size(Some((page_room() - (FIGURES - 1.0) * FIGURE_GAP) / FIGURES), None)
             })
             .collect(),
@@ -488,6 +504,57 @@ fn level_track(share: f32, width: f32) -> Node {
     })
 }
 
+/// Turning the pages with the mouse: a drag with the button down, or a wheel or a
+/// touchpad's two fingers.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Gesture {
+    pressed_at: Option<f32>,
+    swiped: bool,
+    wheel: i32,
+    wheel_last: Option<Instant>,
+}
+
+impl Gesture {
+    pub fn press(&mut self, x: f32) {
+        self.pressed_at = Some(x);
+        self.swiped = false;
+    }
+
+    /// The mouse is at `x`: the pages to turn, once a drag (a drag to the left goes on to
+    /// the next page, as a finger would).
+    pub fn moved(&mut self, x: f32) -> Option<isize> {
+        let from = self.pressed_at?;
+        if self.swiped || (x - from).abs() < SWIPE {
+            return None;
+        }
+        self.swiped = true;
+        Some(if x < from { 1 } else { -1 })
+    }
+
+    /// The button came up (or the mouse left): true if it was a swipe, not a click.
+    pub fn release(&mut self) -> bool {
+        self.pressed_at = None;
+        std::mem::take(&mut self.swiped)
+    }
+
+    /// The wheel moved by `amount` (positive: on to the next page): the pages to turn.
+    pub fn wheeled(&mut self, amount: i32, now: Instant) -> Option<isize> {
+        if self.wheel_last.is_some_and(|t| now.duration_since(t) < WHEEL_PAUSE) {
+            self.wheel_last = Some(now);
+            self.wheel = 0;
+            return None;
+        }
+        self.wheel += amount;
+        if self.wheel.abs() < WHEEL_NOTCH {
+            return None;
+        }
+        let by = self.wheel.signum() as isize;
+        self.wheel = 0;
+        self.wheel_last = Some(now);
+        Some(by)
+    }
+}
+
 /// The contents of `content`, the size of its pill.
 pub fn view(content: &Content, page: usize, d: &Data, nothing_plays: &str) -> Node {
     let (w, h) = content.size();
@@ -497,13 +564,7 @@ pub fn view(content: &Content, page: usize, d: &Data, nothing_plays: &str) -> No
             dot(DOT_SIZE, DOT_SIZE, Role::White),
         ])
         .gap(DOTS_GAP)
-        .align(Align::Center)
-        .padding(Insets {
-            left: (w - 2.0 * DOT_SIZE - DOTS_GAP) / 2.0,
-            top: 0.0,
-            right: 0.0,
-            bottom: 0.0,
-        }),
+        .align(Align::Center),
         Content::Page(p) => {
             let body = match *p {
                 0 => now_page(d),
@@ -518,8 +579,7 @@ pub fn view(content: &Content, page: usize, d: &Data, nothing_plays: &str) -> No
             .align(Align::Center);
             return Node::layer(vec![
                 // A layer centres what is aligned to the centre: both move from there.
-                Node::row(vec![row])
-                    .align(Align::Center)
+                Node::layer(vec![row])
                     .size(Some(w), Some(h - PAGE_DOTS_FROM_BOTTOM))
                     .offset(0.0, -PAGE_DOTS_FROM_BOTTOM / 2.0),
                 page_dots(page).offset(0.0, h / 2.0 - PAGE_DOTS_FROM_BOTTOM),
@@ -532,7 +592,8 @@ pub fn view(content: &Content, page: usize, d: &Data, nothing_plays: &str) -> No
                 f32::from(*percent) / 100.0,
                 w - 2.0 * INNER_PAD - LEVEL_ICON - LEVEL_VALUE_W - 2.0 * TITLE_GAP,
             ),
-            Node::row(vec![words(
+            // At the cell's end, so one digit or three end level with the pill's padding.
+            Node::column(vec![words(
                 percent.to_string(),
                 Role::Fg,
                 600,
@@ -540,6 +601,7 @@ pub fn view(content: &Content, page: usize, d: &Data, nothing_plays: &str) -> No
                 None,
                 FontRole::Num,
             )])
+            .align(Align::End)
             .size(Some(LEVEL_VALUE_W), None),
         ])
         .gap(TITLE_GAP)
@@ -559,25 +621,12 @@ pub fn view(content: &Content, page: usize, d: &Data, nothing_plays: &str) -> No
         .align(Align::Center),
         Content::Notice { title, sub, icon } => Node::row(vec![
             Node::icon(icon, BADGE_ICON, Role::Accent),
-            lines(title, sub, w - 2.0 * INNER_PAD - BADGE_ICON - TITLE_GAP),
+            snug_lines(title, sub, w - 2.0 * INNER_PAD - BADGE_ICON - TITLE_GAP),
         ])
         .gap(TITLE_GAP)
         .align(Align::Center),
     };
-    let pad = if matches!(content, Content::Idle) {
-        0.0
-    } else {
-        INNER_PAD
-    };
-    Node::row(vec![inner])
-        .align(Align::Center)
-        .padding(Insets {
-            left: pad,
-            top: 0.0,
-            right: pad,
-            bottom: 0.0,
-        })
-        .size(Some(w), Some(h))
+    Node::layer(vec![inner]).size(Some(w), Some(h))
 }
 
 /// The island drawn at its size now: the black pill centred in a window `window` wide,
@@ -795,6 +844,115 @@ mod tests {
             }
         }
         assert!(seen > 0, "nothing was ever drawn in it");
+    }
+
+    #[test]
+    fn a_drag_turns_one_page_and_is_not_a_click() {
+        let mut g = Gesture::default();
+        assert_eq!(g.moved(0.0), None, "no button, no swipe");
+        g.press(300.0);
+        assert_eq!(g.moved(300.0 - SWIPE + 1.0), None, "not far enough");
+        assert_eq!(g.moved(300.0 - SWIPE), Some(1), "to the left: the next page");
+        assert_eq!(g.moved(100.0), None, "once a drag");
+        assert!(g.release());
+        g.press(300.0);
+        assert_eq!(g.moved(300.0 + SWIPE), Some(-1));
+        assert!(g.release());
+        g.press(300.0);
+        assert!(!g.release(), "a press and a release are a click");
+    }
+
+    #[test]
+    fn a_wheel_turns_by_the_notch_and_a_touchpad_once() {
+        let t = Instant::now();
+        let later = |ms| t + Duration::from_millis(ms);
+        let mut g = Gesture::default();
+        assert_eq!(g.wheeled(WHEEL_NOTCH, t), Some(1));
+        assert_eq!(g.wheeled(WHEEL_NOTCH, later(10)), None, "still running on");
+        assert_eq!(g.wheeled(-WHEEL_NOTCH, later(1000)), Some(-1));
+        // A touchpad: small steps add up, and what runs on after the page has turned is lost.
+        let mut g = Gesture::default();
+        let mut turns = Vec::new();
+        for i in 0..40 {
+            turns.extend(g.wheeled(20, later(i * 10)));
+        }
+        assert_eq!(turns, vec![1]);
+    }
+
+    /// How far off the pill's middle the contents' middle is.
+    fn off_middle(l: &Layout, keep: &dyn Fn(&Rect) -> bool) -> f32 {
+        let Draw::Panel { rect: pill, .. } = l.draws[0] else {
+            panic!("the pill comes first")
+        };
+        let rects: Vec<Rect> = l.draws[1..]
+            .iter()
+            .map(|d| match d {
+                Draw::Panel { rect, .. }
+                | Draw::Text { rect, .. }
+                | Draw::Icon { rect, .. }
+                | Draw::Image { rect, .. } => *rect,
+            })
+            .filter(|r| keep(r))
+            .collect();
+        let from = rects.iter().map(|r| r.x).fold(f32::MAX, f32::min);
+        let to = rects.iter().map(|r| r.x + r.w).fold(f32::MIN, f32::max);
+        (from + to) / 2.0 - (pill.x + pill.w / 2.0)
+    }
+
+    /// Found by the user: the island's contents were not in its middle.
+    #[test]
+    fn its_contents_stand_in_the_middle_of_the_pill() {
+        let window = window_size().0;
+        let d = Data {
+            figures: (0..4).map(|_| ("cpu", "12%".to_string(), "CPU".to_string())).collect(),
+            ..data()
+        };
+        let drawn = |i: &Island| compose(i, &view(i.shown(), i.page(), &d, "-"), window, &Fake);
+        let idle = Island::new();
+        assert!(off_middle(&drawn(&idle), &|_| true).abs() < 1.0);
+        for p in 0..PAGES {
+            let mut i = Island::new();
+            i.go(p);
+            i.set_hover(true);
+            settle(&mut i);
+            let l = drawn(&i);
+            assert!(
+                off_middle(&l, &|_| true).abs() < 1.0,
+                "page {p}: {}",
+                off_middle(&l, &|_| true)
+            );
+            // Between the arrows too.
+            let side = (window - OPEN.0) / 2.0 + SIDE_PAD + ARROW_BOX;
+            let between = |r: &Rect| r.x >= side && r.x + r.w <= window - side;
+            assert!(
+                off_middle(&l, &between).abs() < 8.0,
+                "page {p}: {}",
+                off_middle(&l, &between)
+            );
+        }
+        for content in [
+            Content::Track { title: "Short".into() },
+            Content::Notice {
+                title: "Short".into(),
+                sub: "Line".into(),
+                icon: "tile",
+            },
+            Content::Level {
+                level: Level::Volume,
+                percent: 50,
+            },
+        ] {
+            let mut i = Island::new();
+            i.event(content);
+            settle(&mut i);
+            let l = drawn(&i);
+            assert!(
+                off_middle(&l, &|_| true).abs() < 1.0,
+                "{:?}: {}",
+                i.shown(),
+                off_middle(&l, &|_| true)
+            );
+        }
     }
 
     #[test]
