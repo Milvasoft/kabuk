@@ -332,9 +332,12 @@ fn rihtims_dock_auto_hides_with_the_bar() {
         (primary.rect.top + primary.rect.bottom) / 2,
     );
     assert!(kabuk_win::input::set_cursor_pos(away.0, away.1));
-    let _shell = sandbox.shell_with_bar(&[]);
+    // As for the user, with Windows' taskbar hidden: shown, it takes the screen's last row.
+    let _shell = sandbox.shell_as_for_the_user("debug");
     assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("dock placed") == 1).is_some());
-    std::thread::sleep(Duration::from_millis(500));
+    // The apps arrive in the first moments and the dock's size follows them.
+    sandbox.wait_started();
+    std::thread::sleep(Duration::from_millis(1000));
     assert_eq!(work_areas(), before, "space reserved");
     let pid = sandbox.state().kabuk_pid.unwrap();
     let dock = primary_window_of("Kabuk.Dock", pid);
@@ -349,16 +352,15 @@ fn rihtims_dock_auto_hides_with_the_bar() {
     );
     let hidden = rect();
     let at = ((hidden.left + hidden.right) / 2, bottom - 1);
-    assert!(kabuk_win::input::set_cursor_pos(at.0, at.1));
-    kabuk_win::msgloop::post_message(
-        dock,
-        kabuk_win::msgloop::Msg {
-            id: kabuk_win::msgloop::msg::MOUSEMOVE,
-            wparam: 0,
-            lparam: 0,
-        },
-    )
-    .unwrap();
+    assert!(kabuk_win::dpi::physical(|| kabuk_win::input::set_cursor_pos(
+        at.0, at.1
+    )));
+    // The mouse really moves: the window takes it only on the dock itself.
+    std::thread::sleep(Duration::from_millis(60));
+    assert!(kabuk_win::dpi::physical(|| kabuk_win::input::set_cursor_pos(
+        at.0 + 2,
+        at.1
+    )));
     assert!(
         wait_until(SETTLE, || rect().bottom < bottom).is_some(),
         "not shown: {:?}\n{}",
@@ -378,7 +380,9 @@ fn rihtims_dock_auto_hides_with_the_bar() {
         rect()
     );
     assert_eq!(sandbox.log_lines("auto-hiding dock gives its room back"), 0);
-    assert!(kabuk_win::input::set_cursor_pos(away.0, away.1));
+    assert!(kabuk_win::dpi::physical(|| kabuk_win::input::set_cursor_pos(
+        away.0, away.1
+    )));
     assert!(
         wait_until(SETTLE, || rect() == hidden).is_some(),
         "not hidden again: {:?}",
@@ -894,8 +898,11 @@ fn rihtim_docks_on_the_primary_monitor_and_leaves_with_the_look() {
     let m = kabuk_win::shell::monitors().into_iter().find(|m| m.primary).unwrap();
     let frame = docks[0].frame_rect().unwrap();
     assert!(m.rect.contains(&frame), "{frame:?} not on {:?}", m.rect);
+    // The window has room above the dock for the tiles to grow into; the dock is in the strip.
+    let across = kabuk::bar::dock::rest_box(kabuk_core::config::Edge::Bottom, &kabuk::bar::dock::STYLE, 0).1;
+    let dock_h = (f64::from(across) * f64::from(m.dpi) / 96.0).ceil() as i32 + 2 * kabuk_core::oled::MAX_SHIFT;
     assert!(
-        frame.top >= m.work_area.bottom,
+        frame.bottom - dock_h >= m.work_area.bottom,
         "{frame:?} above the strip {:?}",
         m.work_area
     );
@@ -2416,8 +2423,14 @@ fn rihtims_dock_holds_the_apps_and_opens_the_launcher() {
     let inner = (f64::from(kabuk::bar::dock::STYLE.border + kabuk::bar::dock::STYLE.padding)
         + f64::from(kabuk::bar::dock::STYLE.tile) / 2.0)
         * scale;
-    let x = (r.right - r.left) - kabuk_core::oled::MAX_SHIFT - inner.round() as i32;
-    let y = (r.bottom - r.top) / 2;
+    // The dock at rest is centred at the bottom of its window, which has room to grow.
+    let (rest_w, _) = kabuk::bar::dock::rest_box(
+        kabuk_core::config::Edge::Bottom,
+        &kabuk::bar::dock::STYLE,
+        apps_in_dock().unwrap(),
+    );
+    let x = (r.right - r.left) / 2 + (f64::from(rest_w) * scale / 2.0).round() as i32 - inner.round() as i32;
+    let y = (r.bottom - r.top) - kabuk_core::oled::MAX_SHIFT - inner.round() as i32;
     // Posted in physical pixels: Windows scales a DPI-unaware sender's mouse coordinates.
     kabuk_win::dpi::physical(|| {
         post_message(
@@ -4000,6 +4013,224 @@ position = \"bottom\"
     );
     look("pano");
     assert!(wait_until(SETTLE, || cut() == 0).is_some(), "a bar stayed cut");
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}
+
+/// Found by the user with a video: the dock showed double for a moment as the mouse came
+/// and went. Its window changed size at those two moments, and a window's move and its new
+/// picture do not reach the screen together. Now the window keeps its size under the mouse;
+/// at rest only the dock itself takes the mouse.
+#[test]
+fn the_docks_window_keeps_its_size_under_the_mouse() {
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(
+        sandbox.config_file(),
+        "schema = 1
+[appearance]
+look = \"rihtim\"
+",
+    )
+    .unwrap();
+    let primary = kabuk_win::shell::monitors().into_iter().find(|m| m.primary).unwrap();
+    let scale = f64::from(primary.dpi) / 96.0;
+    let away = (
+        (primary.rect.left + primary.rect.right) / 2,
+        (primary.rect.top + primary.rect.bottom) / 2,
+    );
+    let put = |at: (i32, i32)| kabuk_win::dpi::physical(|| kabuk_win::input::set_cursor_pos(at.0, at.1));
+    assert!(put(away));
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("dock drawn") >= 1).is_some());
+    std::thread::sleep(Duration::from_millis(800));
+    let pid = sandbox.state().kabuk_pid.unwrap();
+    let dock = primary_window_of("Kabuk.Dock", pid);
+    let rect = || kabuk_win::dpi::physical(|| dock.window_rect().unwrap());
+    let rest = rect();
+    let tile = (f64::from(kabuk::bar::dock::STYLE.tile) / 2.0 * scale).round() as i32;
+    let on_it = (
+        (rest.left + rest.right) / 2,
+        rest.bottom - kabuk_core::oled::MAX_SHIFT - tile,
+    );
+    let seen = std::cell::RefCell::new(vec![rest]);
+    let watch = |until: &dyn Fn() -> bool| {
+        wait_until(SETTLE, || {
+            seen.borrow_mut().push(rect());
+            until()
+        })
+        .is_some()
+    };
+    let drawn = |grown: &str| {
+        sandbox
+            .last_log_line(&["dock drawn"])
+            .is_some_and(|l| l.contains(grown))
+    };
+    assert!(put(on_it));
+    kabuk_win::dpi::physical(|| {
+        kabuk_win::msgloop::post_message(
+            dock,
+            kabuk_win::msgloop::Msg {
+                id: kabuk_win::msgloop::msg::MOUSEMOVE,
+                wparam: 0,
+                lparam: (((on_it.1 - rest.top) as isize) << 16) | ((on_it.0 - rest.left) as isize & 0xFFFF),
+            },
+        )
+        .unwrap()
+    });
+    assert!(
+        watch(&|| drawn("(1.0,")),
+        "{:?}",
+        sandbox.last_log_line(&["dock drawn"])
+    );
+    assert!(put(away));
+    assert!(
+        watch(&|| drawn("false)")),
+        "{:?}",
+        sandbox.last_log_line(&["dock drawn"])
+    );
+    std::thread::sleep(Duration::from_millis(200));
+    seen.borrow_mut().push(rect());
+    let changed: Vec<_> = seen.borrow().iter().filter(|r| **r != rest).copied().collect();
+    assert!(
+        changed.is_empty(),
+        "the window moved: {rest:?} became {:?}",
+        changed.first()
+    );
+    assert!(
+        wait_until(SETTLE, || dock.has_shapes()).is_some(),
+        "at rest the empty room above the dock takes the mouse"
+    );
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}
+
+/// Found by the user: with auto-hide on, Damla's bar did not come back under the mouse.
+/// Its window is cut to the capsules, and the sliver left on the screen is not one of them.
+/// The mouse is really moved: a posted message would reach the window whatever its shape.
+#[test]
+fn damlas_hidden_bar_comes_back_under_the_mouse() {
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(
+        sandbox.config_file(),
+        "schema = 1\n[appearance]\nlook = \"damla\"\n[bar]\nautohide = true\nposition = \"bottom\"\n",
+    )
+    .unwrap();
+    let primary = kabuk_win::shell::monitors().into_iter().find(|m| m.primary).unwrap();
+    let away = (
+        (primary.rect.left + primary.rect.right) / 2,
+        (primary.rect.top + primary.rect.bottom) / 2,
+    );
+    let put = |at: (i32, i32)| kabuk_win::dpi::physical(|| kabuk_win::input::set_cursor_pos(at.0, at.1));
+    assert!(put(away));
+    // As for the user, with Windows' taskbar hidden: shown, it takes the screen's last row.
+    let _shell = sandbox.shell_as_for_the_user("debug");
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("bar cut to its capsules") > 0).is_some());
+    let pid = sandbox.state().kabuk_pid.unwrap();
+    sandbox.wait_started();
+    std::thread::sleep(Duration::from_millis(1000));
+    let bar = primary_window_of("Kabuk.Bar", pid);
+    let rect = || kabuk_win::dpi::physical(|| bar.window_rect().unwrap());
+    let bottom = primary.rect.bottom;
+    assert!(
+        wait_until(SETTLE, || rect().top >= bottom - 8).is_some(),
+        "not hidden: {:?}",
+        rect()
+    );
+    // At the very edge, off to the side, where no capsule stands.
+    assert!(put((primary.rect.left + 40, bottom - 1)));
+    std::thread::sleep(Duration::from_millis(60));
+    assert!(put((primary.rect.left + 42, bottom - 1)));
+    let shown = wait_until(SETTLE, || rect().bottom <= bottom).is_some();
+    assert!(
+        shown,
+        "not shown: {:?} cursor {:?} rested {:?} slides {:?} moves {:?}",
+        rect(),
+        kabuk_win::dpi::physical(kabuk_win::input::cursor_pos),
+        sandbox.last_log_line(&["mouse rested"]),
+        sandbox.last_log_line(&["bar slides"]),
+        sandbox.log_lines("bar slides")
+    );
+    assert!(put(away));
+    assert!(
+        wait_until(SETTLE, || rect().top >= bottom - 8).is_some(),
+        "not hidden again: {:?}",
+        rect()
+    );
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}
+
+/// Asked for by the user: the dock can hide while the bar stays.
+#[test]
+fn the_dock_can_hide_alone() {
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(
+        sandbox.config_file(),
+        "schema = 1\n[appearance]\nlook = \"rihtim\"\n[bar]\nautohide = false\ndock_autohide = true\n",
+    )
+    .unwrap();
+    let primary = kabuk_win::shell::monitors().into_iter().find(|m| m.primary).unwrap();
+    let away = (
+        (primary.rect.left + primary.rect.right) / 2,
+        (primary.rect.top + primary.rect.bottom) / 2,
+    );
+    assert!(kabuk_win::dpi::physical(|| kabuk_win::input::set_cursor_pos(
+        away.0, away.1
+    )));
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("dock placed") == 1).is_some());
+    let pid = sandbox.state().kabuk_pid.unwrap();
+    let dock = primary_window_of("Kabuk.Dock", pid);
+    let bar = primary_window_of("Kabuk.Bar", pid);
+    let rect = |w: kabuk_win::window::Hwnd| kabuk_win::dpi::physical(|| w.window_rect().unwrap());
+    assert!(
+        wait_until(SETTLE, || rect(dock).bottom > primary.rect.bottom).is_some(),
+        "the dock did not hide: {:?}",
+        rect(dock)
+    );
+    assert!(rect(bar).top >= primary.rect.top, "the bar hid: {:?}", rect(bar));
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}
+
+/// Damla's apps grow under the mouse as the dock's tiles do: the whole window takes the
+/// mouse meanwhile, and once it has gone the window is cut to its capsules again.
+#[test]
+fn damlas_apps_grow_under_the_mouse_and_settle() {
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n[appearance]\nlook = \"damla\"\n").unwrap();
+    let primary = kabuk_win::shell::monitors().into_iter().find(|m| m.primary).unwrap();
+    let away = (
+        (primary.rect.left + primary.rect.right) / 2,
+        (primary.rect.top + primary.rect.bottom) / 2,
+    );
+    let put = |at: (i32, i32)| kabuk_win::dpi::physical(|| kabuk_win::input::set_cursor_pos(at.0, at.1));
+    assert!(put(away));
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("bar cut to its capsules") > 0).is_some());
+    sandbox.wait_started();
+    std::thread::sleep(Duration::from_millis(1000));
+    let pid = sandbox.state().kabuk_pid.unwrap();
+    let bar = primary_window_of("Kabuk.Bar", pid);
+    let r = kabuk_win::dpi::physical(|| bar.window_rect().unwrap());
+    assert!(bar.has_shapes());
+    let middle = ((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+    assert!(put(middle));
+    std::thread::sleep(Duration::from_millis(60));
+    assert!(put((middle.0 + 2, middle.1)));
+    assert!(
+        wait_until(SETTLE, || !bar.has_shapes()).is_some(),
+        "the apps did not start to grow"
+    );
+    assert!(put(away));
+    assert!(
+        wait_until(SETTLE, || bar.has_shapes()).is_some(),
+        "the apps did not settle"
+    );
     assert_eq!(sandbox.restore().0, 0);
     assert!(wait_until(SETTLE, || restored(&before)).is_some());
 }

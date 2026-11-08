@@ -1045,6 +1045,11 @@ const APP_MARK_GAP: f32 = 2.0;
 /// slot that large, so the others do not move.
 pub const APP_HOVER: f32 = 1.18;
 
+/// How many times its size an app of Damla's is, `grow` of the way (0-1) to the dock's most.
+fn capsule_scale(grow: f32) -> f32 {
+    1.0 + (crate::bar::dock::STYLE.magnify - 1.0) * grow.clamp(0.0, 1.0)
+}
+
 /// The apps' icons, one node each.
 fn app_icons(d: &BarData, s: &Style) -> Option<Vec<Node>> {
     // In Rıhtım the apps live in the dock (DECISIONS D17).
@@ -1073,12 +1078,30 @@ fn app_icons(d: &BarData, s: &Style) -> Option<Vec<Node>> {
             } else {
                 mark
             };
-            let slot = s.app_icon * APP_HOVER;
-            let size = s.app_icon * (1.0 + (APP_HOVER - 1.0) * a.grow.clamp(0.0, 1.0));
-            // Only the picture moves; the place, which clicks and drags find, stays.
-            let picture = Node::layer(vec![app_picture(a.image, size, s.mod_icon_color)
-                .padding(Insets::all((slot - size) / 2.0))
-                .offset(a.shift.0, a.shift.1)]);
+            let picture = if s.arrangement == Arrangement::Capsules {
+                // Damla's grow as the dock's tiles do: they take more room along the row, so
+                // the capsule widens with them, and keep one depth across it.
+                let k = capsule_scale(a.grow);
+                let slot = s.app_icon * APP_HOVER;
+                let deepest = slot * crate::bar::dock::STYLE.magnify;
+                let size = s.app_icon * k;
+                let (along, across) = ((slot * k - size) / 2.0, (deepest - size) / 2.0);
+                let padding = if d.vertical() {
+                    Insets::symmetric(across, along)
+                } else {
+                    Insets::symmetric(along, across)
+                };
+                Node::layer(vec![app_picture(a.image, size, s.mod_icon_color)
+                    .padding(padding)
+                    .offset(a.shift.0, a.shift.1)])
+            } else {
+                let slot = s.app_icon * APP_HOVER;
+                let size = s.app_icon * (1.0 + (APP_HOVER - 1.0) * a.grow.clamp(0.0, 1.0));
+                // Only the picture moves; the place, which clicks and drags find, stays.
+                Node::layer(vec![app_picture(a.image, size, s.mod_icon_color)
+                    .padding(Insets::all((slot - size) / 2.0))
+                    .offset(a.shift.0, a.shift.1)])
+            };
             Node::column(vec![picture, mark])
                 .gap(APP_MARK_GAP)
                 .align(Align::Center)
@@ -1160,6 +1183,9 @@ pub struct AppsGroup {
     pub lead: Option<Node>,
     pub icons: Vec<Node>,
     pub more: Vec<Node>,
+    /// How much longer than at rest each icon is under the mouse (DIPs): how many fit is
+    /// decided at rest, so a "+n" does not come and go as the icons grow.
+    pub grown: Vec<f32>,
 }
 
 impl AppsGroup {
@@ -1275,6 +1301,12 @@ fn drawn_regions(d: &BarData, s: &Style, i18n: &I18n, thickness: f32) -> Regions
             lead,
             icons,
             more,
+            grown: if capsules {
+                let slot = s.app_icon * APP_HOVER;
+                d.apps.iter().map(|a| slot * (capsule_scale(a.grow) - 1.0)).collect()
+            } else {
+                Vec::new()
+            },
         }
     });
     if s.second_start_group {
@@ -1632,7 +1664,10 @@ fn apps_in_the_middle(
     let room = main - 2.0 * (s.bar_pad + s.group_gap) - outer(&r.start) - outer(&r.end);
     let shown = (0..=apps.icons.len())
         .rev()
-        .find(|n| along(&apps.node(*n, s, vertical, thickness)) <= room)
+        .find(|n| {
+            let grown: f32 = apps.grown.iter().take(*n).sum();
+            along(&apps.node(*n, s, vertical, thickness)) - grown <= room
+        })
         .unwrap_or(0);
     Regions {
         start: r.start.clone(),
@@ -2001,6 +2036,56 @@ mod tests {
     /// DECISIONS D99: with more apps than fit, the three capsules fill the bar a gap
     /// apart, the outer ones whole, and the rest go behind the "+n"; without apps or the
     /// button the two others still stand together in the middle.
+    #[test]
+    fn damlas_apps_grow_as_the_docks_do_and_their_capsule_makes_room() {
+        let tr = I18n::new(Lang::Tr);
+        let icon = AppIcon {
+            label: String::new(),
+            image: Some(31),
+            running: true,
+            focused: false,
+            attention: false,
+            grow: 0.0,
+            shift: (0.0, 0.0),
+        };
+        let with = |grown: f32, count: usize| {
+            let mut apps = vec![icon.clone(); count];
+            apps[1].grow = grown;
+            render_look(
+                Look::Damla,
+                &BarData {
+                    edge: Edge::Bottom,
+                    apps,
+                    ..data(&tr)
+                },
+                &tr,
+            )
+        };
+        let (rest, grown) = (with(0.0, 5), with(1.0, 5));
+        let (c, g) = (glass_capsules(&rest), glass_capsules(&grown));
+        let s = Style::of(Look::Damla);
+        let wider = s.app_icon * APP_HOVER * (crate::bar::dock::STYLE.magnify - 1.0);
+        assert!((g[1].w - c[1].w - wider).abs() < 0.5, "{c:?} {g:?}");
+        // The middle capsule keeps its middle and the bar its height.
+        assert!(
+            ((g[1].x + g[1].right()) - (c[1].x + c[1].right())).abs() < 0.5,
+            "{c:?} {g:?}"
+        );
+        assert!((g[1].h - c[1].h).abs() < 0.01, "{c:?} {g:?}");
+        let app = |l: &Layout, i: u32| {
+            l.hits
+                .iter()
+                .find(|(_, h)| h.module == hit::APP && h.value == i)
+                .unwrap()
+                .0
+        };
+        assert!((app(&grown, 1).w - app(&rest, 1).w - wider).abs() < 0.5);
+        // How many are shown does not change as one grows.
+        let shown = |l: &Layout| l.hits.iter().filter(|(_, h)| h.module == hit::APP).count();
+        let (many_rest, many_grown) = (with(0.0, 90), with(1.0, 90));
+        assert_eq!(shown(&many_rest), shown(&many_grown));
+    }
+
     #[test]
     fn damlas_apps_that_do_not_fit_go_behind_more() {
         let tr = I18n::new(Lang::Tr);

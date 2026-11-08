@@ -689,6 +689,14 @@ impl Hwnd {
     /// Cuts the window to `shapes` (client pixels, each a rectangle and its corner radius),
     /// so the rest of it neither shows nor takes the mouse; empty gives the whole window
     /// back. Windows' blur behind follows the cut (Damla's glass, DECISIONS D99).
+    /// Whether the mouse is over this window now (its shape counted).
+    pub fn under_cursor(self) -> bool {
+        use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, WindowFromPoint};
+        let mut at = windows::Win32::Foundation::POINT::default();
+        // SAFETY: `at` is a valid out pointer; the second call only reads a point.
+        unsafe { GetCursorPos(&mut at).is_ok() && WindowFromPoint(at) == self.raw() }
+    }
+
     /// Whether the window is cut to shapes ([`Hwnd::set_shapes`]).
     pub fn has_shapes(self) -> bool {
         use windows::Win32::Foundation::RECT;

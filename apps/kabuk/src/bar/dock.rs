@@ -262,6 +262,13 @@ pub fn centers(s: &DockStyle, apps: usize) -> Vec<f32> {
         .collect()
 }
 
+/// The middles of `count` tiles `pitch` apart, from the row's middle (a row of equal tiles
+/// somewhere else than the dock: Damla's apps).
+pub fn even_centers(count: usize, pitch: f32) -> Vec<f32> {
+    let first = -(count.saturating_sub(1) as f32) * pitch / 2.0;
+    (0..count).map(|i| first + i as f32 * pitch).collect()
+}
+
 /// How much each tile grows with the mouse at `pointer` along the dock (DIPs from its
 /// middle, as [`centers`]), `amount` of the way in (0 none, 1 all): the tile under the
 /// mouse the most, its neighbours less the further they are, none past
@@ -298,6 +305,29 @@ pub fn grown_room(dock_edge: Edge, s: &DockStyle, apps: usize) -> (f32, f32) {
         (across, along)
     } else {
         (along, across)
+    }
+}
+
+/// The box (DIPs) of the dock at rest: the panel with no tile grown.
+pub fn rest_box(dock_edge: Edge, s: &DockStyle, apps: usize) -> (f32, f32) {
+    let c = centers(s, apps);
+    let along = 2.0 * (c.last().copied().unwrap_or(0.0) + s.tile / 2.0 + s.padding + s.border);
+    if vertical(dock_edge) {
+        (s.thickness(), along)
+    } else {
+        (along, s.thickness())
+    }
+}
+
+/// Where the window goes for the dock at rest (`rest`, a part of `window`) to have slid
+/// `shown` of the way in: it is the dock that slides to the sliver, not the window's empty
+/// room.
+pub fn slid_window(dock_edge: Edge, window: PxRect, rest: PxRect, mon: PxRect, peek: i32, shown: f32) -> PxRect {
+    let slid = kabuk_win::appbar::slid_to_edge(dock_edge, rest, mon, peek, shown);
+    PxRect {
+        x: window.x + slid.x - rest.x,
+        y: window.y + slid.y - rest.y,
+        ..window
     }
 }
 
@@ -521,6 +551,53 @@ mod tests {
             hits.iter().all(|r| (r.right() - (room.0 - 9.0)).abs() < 1e-3),
             "{hits:?} in {room:?}"
         );
+    }
+
+    #[test]
+    fn the_box_at_rest_is_what_the_view_takes() {
+        for edge in [Edge::Bottom, Edge::Top, Edge::Left, Edge::Right] {
+            for count in [0usize, 1, 9] {
+                let apps = vec![
+                    DockApp {
+                        image: None,
+                        running: true,
+                    };
+                    count
+                ];
+                let l = layout(&view(edge, &STYLE, &apps), Point::default(), &NoText);
+                let (w, h) = rest_box(edge, &STYLE, count);
+                assert!(
+                    (l.size.w - w).abs() < 0.01 && (l.size.h - h).abs() < 0.01,
+                    "{edge:?} {count}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_dock_not_its_room_slides_to_the_sliver() {
+        let mon = PxRect {
+            x: 0,
+            y: 0,
+            w: 2000,
+            h: 1000,
+        };
+        let window = PxRect {
+            x: 500,
+            y: 800,
+            w: 1000,
+            h: 190,
+        };
+        let rest = PxRect {
+            x: 600,
+            y: 900,
+            w: 800,
+            h: 90,
+        };
+        assert_eq!(slid_window(Edge::Bottom, window, rest, mon, 2, 1.0), window);
+        let hidden = slid_window(Edge::Bottom, window, rest, mon, 2, 0.0);
+        assert_eq!((hidden.x, hidden.w, hidden.h), (500, 1000, 190));
+        assert_eq!(hidden.y + (rest.y - window.y), 998, "two pixels of the dock on screen");
     }
 
     #[test]

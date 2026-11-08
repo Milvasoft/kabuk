@@ -78,6 +78,16 @@ pub fn shift_toward_edge(edge: Edge, (sx, sy): (i32, i32)) -> (i32, i32) {
 
 /// The window shapes of a layout's glass capsules: each in client pixels with its corner
 /// radius (Damla's bar is cut to them, so only they are blurred and take the mouse).
+pub fn sliver(edge: Edge, (w, h): (i32, i32), peek: i32) -> PxRect {
+    let (x, y, sw, sh) = match edge {
+        Edge::Bottom => (0, 0, w, peek),
+        Edge::Top => (0, h - peek, w, peek),
+        Edge::Right => (0, 0, peek, h),
+        Edge::Left => (w - peek, 0, peek, h),
+    };
+    PxRect { x, y, w: sw, h: sh }
+}
+
 pub fn glass_shapes(layout: &kabuk_ui::node::Layout, origin: Point, scale: Scale) -> Vec<(PxRect, i32)> {
     layout
         .draws
@@ -162,6 +172,19 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_sliver_is_the_side_left_on_the_screen() {
+        let size = (1000, 60);
+        let at = |edge| {
+            let r = sliver(edge, size, 3);
+            (r.x, r.y, r.w, r.h)
+        };
+        assert_eq!(at(Edge::Bottom), (0, 0, 1000, 3));
+        assert_eq!(at(Edge::Top), (0, 57, 1000, 3));
+        assert_eq!(at(Edge::Right), (0, 0, 3, 60));
+        assert_eq!(at(Edge::Left), (997, 0, 3, 60));
     }
 
     #[test]

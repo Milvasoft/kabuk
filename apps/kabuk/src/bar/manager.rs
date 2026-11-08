@@ -45,7 +45,7 @@ use kabuk_win::window::Hwnd;
 
 use super::dock;
 use super::geometry::{self, BarSize};
-use super::style::{Style, BLUR_TINT_ALPHA};
+use super::style::{Arrangement, Style, BLUR_TINT_ALPHA};
 use super::theme;
 use super::tooltip;
 use super::view::{self, BarData, Title, Volume, Workspace};
@@ -579,6 +579,12 @@ pub const TRAY_START_DELAY: Duration = Duration::from_secs(1);
 /// How long the copies of one `TaskbarCreated` broadcast take to reach every window.
 const ANNOUNCE_DEBOUNCE: Duration = Duration::from_millis(100);
 
+/// A dock box (DIPs) as a window size: pixels and the room of the OLED shift.
+fn dock_px((w, h): (f32, f32), scale: Scale) -> (i32, i32) {
+    let room = 2 * kabuk_core::oled::MAX_SHIFT;
+    ((w * scale.0).ceil() as i32 + room, (h * scale.0).ceil() as i32 + room)
+}
+
 struct Bar {
     /// The shapes its window is cut to (Damla's capsules; empty: the whole window).
     cut: Vec<(PxRect, i32)>,
@@ -586,6 +592,9 @@ struct Bar {
     glass: Option<Glass>,
     /// The colour last laid over `glass`.
     tint: [u8; 4],
+    /// Whether only `cut` (and a hidden bar's sliver) takes the mouse; while Damla's apps
+    /// grow the whole window does, as the capsule changes every frame.
+    region_cut: bool,
     window: Window,
     surface: Option<WindowSurface>,
     appbar: Option<AppBar>,
@@ -658,6 +667,10 @@ struct Dock {
     apps: Vec<dock::DockApp>,
     layout: Layout,
     origin: Point,
+    /// Where the dock at rest is on the screen, inside the window (`rect`).
+    rest: PxRect,
+    /// The part of the window taking the mouse at rest; `None`: all of it, as it grows.
+    cut: Option<(PxRect, i32)>,
     /// With `bar.autohide` the dock hides too (D70): how much of it is on screen.
     peek: Option<Peek>,
     /// Where the mouse is along the dock, in DIPs from its middle (the last place while
@@ -837,6 +850,11 @@ struct Shared {
     app_menu: Option<app_menu_host::AppMenu>,
     app_drag: Option<AppDrag>,
     app_slides: Vec<AppSlide>,
+    /// How far Damla's apps have grown under the mouse, where it is along their row (DIPs
+    /// from its middle) and on which bar (as the dock's `grow` and `pointer`).
+    capsule_grow: Peek,
+    capsule_pointer: f32,
+    capsule_bar: Option<usize>,
     app_hover: AppHover,
     /// Where the window manager was last told the apps' icons are.
     icons_sent: Vec<(u64, kabuk_core::state::Rect)>,
@@ -1154,6 +1172,9 @@ impl BarManager {
                 preview_bar: 0,
                 preview_held: None,
                 drag_rest: None,
+                capsule_grow: Peek::hidden(),
+                capsule_pointer: 0.0,
+                capsule_bar: None,
                 app_hover: AppHover {
                     app: None,
                     leaving: None,
@@ -2628,6 +2649,7 @@ impl Shared {
             || after.bar.monitors != before.bar.monitors
             || after.bar.background != before.bar.background
             || after.bar.autohide != before.bar.autohide
+            || after.bar.dock_hides() != before.bar.dock_hides()
             || after.appearance.look != before.appearance.look;
         if layout_changed {
             self.look = resolve_look(
@@ -2717,16 +2739,13 @@ impl Shared {
     }
 
     /// The dock's size in physical pixels, with room for the OLED shift on every side.
-    fn dock_window_size(&self, edge: Edge, scale: Scale) -> (i32, i32) {
-        let l = kabuk_ui::node::layout(
-            &dock::view(edge, &dock::STYLE, &self.dock_apps()),
-            Point::default(),
-            &self.gpu.text,
-        );
-        let room = 2 * kabuk_core::oled::MAX_SHIFT;
+    /// The dock window's size, and the size of the dock at rest inside it: the window is as
+    /// big as the tiles can grow, so it never changes under the mouse.
+    fn dock_sizes(&self, edge: Edge, scale: Scale) -> ((i32, i32), (i32, i32)) {
+        let apps = self.dock_apps().len();
         (
-            (l.size.w * scale.0).ceil() as i32 + room,
-            (l.size.h * scale.0).ceil() as i32 + room,
+            dock_px(dock::grown_room(edge, &dock::STYLE, apps), scale),
+            dock_px(dock::rest_box(edge, &dock::STYLE, apps), scale),
         )
     }
 
@@ -2744,7 +2763,7 @@ impl Shared {
         );
         let window = Window::shell_surface(DOCK_CLASS, "Kabuk", appbar::strip(edge, mon, thickness), proc)?;
         // Auto-hiding (D70), it reserves nothing and waits off its edge as the bar does.
-        let autohide = self.config().bar.autohide;
+        let autohide = self.config().bar.dock_hides();
         let (appbar, strip) = if autohide {
             self.record_work_area(&monitor);
             (None, appbar::strip(edge, mon, thickness))
@@ -2763,10 +2782,12 @@ impl Shared {
             (None, appbar::strip(edge, mon, thickness))
         };
         let distance = scale.px(dock::STYLE.distance) - kabuk_core::oled::MAX_SHIFT;
-        let rect = dock::window_rect(edge, mon, strip, self.dock_window_size(edge, scale), distance);
+        let (size, rest_size) = self.dock_sizes(edge, scale);
+        let rect = dock::window_rect(edge, mon, strip, size, distance);
+        let rest = dock::window_rect(edge, mon, strip, rest_size, distance);
         let peek = autohide.then(Peek::hidden);
         window.set_rect(match peek {
-            Some(_) => appbar::slid_to_edge(edge, rect, mon, peek_px(scale), 0.0),
+            Some(_) => dock::slid_window(edge, rect, rest, mon, peek_px(scale), 0.0),
             None => rect,
         });
         window.show();
@@ -2790,6 +2811,8 @@ impl Shared {
             thickness,
             strip,
             rect,
+            rest,
+            cut: None,
             drawn: None,
             apps: Vec::new(),
             layout: Layout::default(),
@@ -3745,6 +3768,11 @@ impl Shared {
                 None
             }
             msg::MOUSELEAVE => {
+                // Changing a window's shape reports the mouse as gone though it has not moved.
+                if d.window.hwnd().under_cursor() {
+                    kabuk_win::msgloop::track_mouse_leave(d.window.hwnd());
+                    return None;
+                }
                 self.edge_left(Peeker::Dock);
                 self.dock_hover(None);
                 None
@@ -3800,8 +3828,8 @@ impl Shared {
     }
 
     fn reposition_dock(&mut self) {
-        let size = match &self.dock {
-            Some(d) => self.dock_window_size(d.edge, d.scale),
+        let (size, rest_size) = match &self.dock {
+            Some(d) => self.dock_sizes(d.edge, d.scale),
             None => return,
         };
         let Some(d) = self.dock.as_mut() else { return };
@@ -3816,6 +3844,7 @@ impl Shared {
         tracing::info!(?strip, ?rect, "dock moved by the shell");
         d.strip = strip;
         d.rect = rect;
+        d.rest = dock::window_rect(d.edge, mon, strip, rest_size, distance);
         d.window.set_rect(rect);
     }
 
@@ -3845,14 +3874,83 @@ impl Shared {
         self.tick_dock();
     }
 
-    /// Keeps the frames coming while the dock's tiles grow or settle; once they are done
-    /// the dock is drawn at rest (at its own size when they settled) and the frames stop.
-    fn tick_dock(&mut self) {
-        let Some(d) = self.dock.as_ref() else {
-            self.dock_ticker = None;
+    /// The mouse moved on bar `index` (`at`, in its window) or left it (`None`): Damla's apps
+    /// grow under it as the dock's tiles do, their capsule widening with them.
+    fn capsule_hover(&mut self, index: usize, at: Option<(i32, i32)>) {
+        if self.look.style.arrangement != Arrangement::Capsules {
             return;
+        }
+        let bar = &self.bars[index];
+        let vertical = geometry::vertical(bar.edge);
+        let row = bar
+            .layout
+            .hits
+            .iter()
+            .filter(|(_, h)| h.module == view::hit::APP)
+            .map(|(r, _)| if vertical { (r.y, r.y + r.h) } else { (r.x, r.x + r.w) })
+            .reduce(|a, b| (a.0.min(b.0), a.1.max(b.1)));
+        let pointer = at.zip(row).and_then(|((x, y), (from, to))| {
+            let place = if vertical {
+                bar.scale.dips(y) - bar.origin.y
+            } else {
+                bar.scale.dips(x) - bar.origin.x
+            };
+            (place >= from && place <= to).then_some(place - (from + to) / 2.0)
+        });
+        let full = self.motion_level() == kabuk_ui::motion::Level::Full && self.app_drag.is_none();
+        let to = if pointer.is_some() && full { 1.0 } else { 0.0 };
+        if to == 0.0 && self.capsule_grow.to == 0.0 && self.capsule_grow.done() {
+            return;
+        }
+        if let Some(p) = pointer {
+            self.capsule_pointer = p;
+            self.capsule_bar = Some(index);
+        }
+        if self.capsule_grow.to != to {
+            self.capsule_grow = Peek {
+                from: self.capsule_grow.now(),
+                to,
+                since: std::time::Instant::now(),
+            };
+        }
+        self.render_all(false);
+        self.tick_dock();
+    }
+
+    /// The apps as the bar on `device` draws them: in Damla how far each has grown under the
+    /// mouse, on the bar the mouse is on.
+    fn app_icons_on(&self, device: &str) -> Vec<view::AppIcon> {
+        let mut apps = self.app_icons();
+        let s = &self.look.style;
+        if s.arrangement != Arrangement::Capsules {
+            return apps;
+        }
+        let bar = self.capsule_bar.and_then(|b| self.bars.get(b));
+        let amount = self.capsule_grow.now();
+        let on_it = bar.filter(|b| b.monitor.device == device && amount > 0.0);
+        let shown = on_it.map_or(0, |b| {
+            b.layout.hits.iter().filter(|(_, h)| h.module == view::hit::APP).count()
+        });
+        let pitch = s.app_icon * view::APP_HOVER + s.tray_gap;
+        let style = dock::DockStyle {
+            tile: pitch,
+            ..dock::STYLE
         };
-        if d.grow.done() {
+        let k = dock::magnifications(&dock::even_centers(shown, pitch), self.capsule_pointer, &style, amount);
+        for (i, a) in apps.iter_mut().enumerate() {
+            a.grow = k.get(i).map_or(0.0, |k| (k - 1.0) / (style.magnify - 1.0));
+        }
+        apps
+    }
+
+    /// Keeps the frames coming while the dock's tiles or Damla's apps grow or settle; once
+    /// they are done they are drawn at rest and the frames stop.
+    fn tick_dock(&mut self) {
+        let docked = self.dock.as_ref().is_some_and(|d| !d.grow.done());
+        if !docked && self.dock.is_none() && self.capsule_grow.done() && self.dock_ticker.is_none() {
+            return;
+        }
+        if !docked && self.capsule_grow.done() {
             if self.dock_ticker.take().is_some() {
                 self.render_all(false);
             }
@@ -3891,33 +3989,37 @@ impl Shared {
         if !force && d.drawn == Some(shift) && d.apps == apps && d.drawn_grow == grown {
             return Ok(false);
         }
-        let node = if grown.2 {
-            let k = dock::magnifications(
+        let k = if grown.2 {
+            dock::magnifications(
                 &dock::centers(&dock::STYLE, apps.len()),
                 d.pointer,
                 &dock::STYLE,
                 amount,
-            );
-            let room = dock::grown_room(d.edge, &dock::STYLE, apps.len());
-            dock::view_grown(d.edge, &dock::STYLE, &apps, &k, Some(room))
+            )
         } else {
-            dock::view(d.edge, &dock::STYLE, &apps)
+            Vec::new()
         };
+        let box_room = dock::grown_room(d.edge, &dock::STYLE, apps.len());
+        let node = dock::view_grown(d.edge, &dock::STYLE, &apps, &k, Some(box_room));
+        // While the tiles grow the whole window is the dock's, first of all.
+        if grown.2 && d.cut.take().is_some() {
+            d.window.hwnd().set_shapes(&[]);
+        }
         let layout = kabuk_ui::node::layout(&node, Point::default(), &self.gpu.text);
         let room = kabuk_core::oled::MAX_SHIFT;
-        let size = (
-            (layout.size.w * d.scale.0).ceil() as i32 + 2 * room,
-            (layout.size.h * d.scale.0).ceil() as i32 + 2 * room,
-        );
+        let size = dock_px(box_room, d.scale);
         // The window moves once its new size is drawn, just before the commit (found by
         // the user with a video: the dock blinked and jumped as its tiles began to grow).
         let mut moved = None;
         if size != (d.rect.w, d.rect.h) {
             let distance = d.scale.px(dock::STYLE.distance) - room;
-            let rect = dock::window_rect(d.edge, px_rect(d.monitor.rect), d.strip, size, distance);
+            let mon = px_rect(d.monitor.rect);
+            let rect = dock::window_rect(d.edge, mon, d.strip, size, distance);
+            let rest_size = dock_px(dock::rest_box(d.edge, &dock::STYLE, apps.len()), d.scale);
             d.rect = rect;
+            d.rest = dock::window_rect(d.edge, mon, d.strip, rest_size, distance);
             moved = Some(match d.peek {
-                Some(p) => appbar::slid_to_edge(d.edge, rect, px_rect(d.monitor.rect), peek_px(d.scale), p.now()),
+                Some(p) => dock::slid_window(d.edge, rect, d.rest, mon, peek_px(d.scale), p.now()),
                 None => rect,
             });
             if let Some(s) = d.surface.as_mut() {
@@ -3948,6 +4050,20 @@ impl Shared {
         )?;
         if let Some(r) = moved {
             d.window.set_rect(r);
+        }
+        // At rest only the dock takes the mouse, not the empty room above it.
+        let shape = (
+            PxRect {
+                x: d.rest.x - d.rect.x,
+                y: d.rest.y - d.rect.y,
+                w: d.rest.w,
+                h: d.rest.h,
+            },
+            0,
+        );
+        if !grown.2 && d.cut != Some(shape) {
+            d.window.hwnd().set_shapes(&[shape]);
+            d.cut = Some(shape);
         }
         tracing::debug!(apps = apps.len(), rect = ?d.rect, grown = ?grown, "dock drawn");
         let parts = super::access::bar_parts(&layout, origin, d.scale, |p| match p.hit.module {
@@ -3990,7 +4106,7 @@ impl Shared {
     }
 
     /// Cuts bar `i` to the capsules and frosts them (D99). Only what changed is touched.
-    fn frost_bar(&mut self, i: usize, shapes: Vec<(PxRect, i32)>, tint: [u8; 4]) {
+    fn frost_bar(&mut self, i: usize, shapes: Vec<(PxRect, i32)>, tint: [u8; 4], growing: bool) {
         let bar = &mut self.bars[i];
         if bar.glass.is_none() {
             match Glass::new(bar.window.hwnd()) {
@@ -4009,14 +4125,30 @@ impl Shared {
                 frost(glass.set_tint(tint));
             }
         }
-        if shapes != bar.cut {
-            tracing::debug!(capsules = shapes.len(), "bar cut to its capsules");
-            bar.window.hwnd().set_shapes(&shapes);
+        let changed = shapes != bar.cut;
+        if changed {
             if let Some(glass) = &bar.glass {
                 frost(glass.set_shapes(&shapes));
             }
-            bar.cut = shapes;
         }
+        if growing {
+            if bar.region_cut {
+                bar.window.hwnd().set_shapes(&[]);
+                bar.region_cut = false;
+            }
+        } else if changed || !bar.region_cut {
+            tracing::debug!(capsules = shapes.len(), "bar cut to its capsules");
+            // Hidden, what is left on the screen is its side, not a capsule: the mouse has to
+            // be able to find it there.
+            let mut taking_the_mouse = shapes.clone();
+            if bar.peek.is_some() {
+                let size = (bar.rect.w, bar.rect.h);
+                taking_the_mouse.push((geometry::sliver(bar.edge, size, peek_px(bar.scale)), 0));
+            }
+            bar.window.hwnd().set_shapes(&taking_the_mouse);
+            bar.region_cut = true;
+        }
+        bar.cut = shapes;
     }
 
     fn create_bar(&mut self, monitor: Monitor, edge: Edge, size: &BarSize) -> std::io::Result<Bar> {
@@ -4082,6 +4214,7 @@ impl Shared {
             cut: Vec::new(),
             glass: None,
             tint: [0; 4],
+            region_cut: false,
             _drag: drag,
             window,
             surface,
@@ -4364,8 +4497,14 @@ impl Shared {
         if let Some(d) = self.dock.as_mut() {
             if let Some(p) = d.peek {
                 let mon = px_rect(d.monitor.rect);
-                d.window
-                    .set_rect(appbar::slid_to_edge(d.edge, d.rect, mon, peek_px(d.scale), p.now()));
+                d.window.set_rect(dock::slid_window(
+                    d.edge,
+                    d.rect,
+                    d.rest,
+                    mon,
+                    peek_px(d.scale),
+                    p.now(),
+                ));
                 moving |= !p.done();
             }
         }
@@ -4434,7 +4573,7 @@ impl Shared {
             .dock
             .as_ref()
             .filter(|d| d.peek.is_some())
-            .map(|d| reach(d.edge, d.rect, &d.monitor))
+            .map(|d| reach(d.edge, d.rest, &d.monitor))
         {
             if over(r) {
                 still = true;
@@ -4566,11 +4705,19 @@ impl Shared {
                     return Some(0);
                 }
                 self.hovering(index, self.hit(index, x, y));
+                self.capsule_hover(index, Some((x, y)));
                 Some(0)
             }
             msg::MOUSELEAVE => {
+                // Changing a window's shape reports the mouse as gone though it has not moved.
+                let hwnd = self.bars[index].window.hwnd();
+                if hwnd.under_cursor() {
+                    kabuk_win::msgloop::track_mouse_leave(hwnd);
+                    return Some(0);
+                }
                 self.hovering(index, None);
                 self.edge_left(Peeker::Bar(index));
+                self.capsule_hover(index, None);
                 Some(0)
             }
             msg::MOUSEWHEEL => {
@@ -4884,7 +5031,7 @@ impl Shared {
             } else {
                 0
             },
-            apps: self.app_icons(),
+            apps: self.app_icons_on(device),
             notif_count: if primary { self.notif_count } else { None },
             network: self.live.network.clone(),
             battery: self.live.battery,
@@ -4965,12 +5112,14 @@ impl Shared {
             if style.glass {
                 let shapes = geometry::glass_shapes(&layout, origin, scale);
                 let tint = self.blur_tint();
-                self.frost_bar(i, shapes, tint);
+                let growing = self.capsule_bar == Some(i) && (self.capsule_grow.to > 0.0 || !self.capsule_grow.done());
+                self.frost_bar(i, shapes, tint, growing);
             } else if !self.bars[i].cut.is_empty() {
                 // A look without glass took over without the bar being made again.
                 self.bars[i].window.hwnd().set_shapes(&[]);
                 self.bars[i].cut.clear();
                 self.bars[i].glass = None;
+                self.bars[i].region_cut = false;
             }
             let layout_us = started.elapsed().as_micros() as u64;
             // What screen readers find on it, read only when one asks (D97).
