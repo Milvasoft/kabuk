@@ -8,6 +8,10 @@ No open decisions.
 
 ## Decided and proposed
 
+### D100 · The dock's window keeps its size; the dock can hide on its own — Decided (2026-11-09)
+Found in daily use with a video: Rıhtım's dock showed double for a moment as the mouse came and left. Its window changed size at those two moments, and a window's move and its new picture do not reach the screen together. The window is now as big as the tiles can grow, from the start, and never changes under the mouse; at rest it is cut to the dock so the empty room above takes no clicks. Changing a window's shape makes Windows report the mouse as gone, so a "mouse left" is believed only if the mouse really is off the window. A hidden bar or dock is cut so that the sliver left on the screen still takes the mouse. Alternative: moving the window and committing its picture in one step, which Windows does not offer across these two.
+`bar.dock_autohide` lets the dock hide or stay on its own; unset it does as the bar does, so a configuration written before keeps working. Alternative: a plain switch defaulting to off (a dock that used to hide with the bar would stop hiding).
+
 ### D99 · Damla: glass capsules and a dynamic island — Decided (2026-11-08)
 An eleventh look (`damla`, code `l`; `k` is Piksel on the design page), drawn from the same style tables as the others and its tokens from the page (176 contrast cases now), in a neutral glass with a green accent. I chose:
 - **Three capsules, together in the middle** of a bottom bar, 56 px apart, with empty desktop around them, not spread to the ends: the workspaces; the all-apps button and the apps (icons only); the tray, the volume's icon, the indicators, the bell and a two-line clock, stacked as in Pano. So in this look alone the all-apps button leads the apps rather than the bar (D56). Apps that do not fit go behind the "+n", as on the other bars; the three capsules then move apart only as far as the bar allows.
@@ -15,6 +19,7 @@ An eleventh look (`damla`, code `l`; `k` is Piksel on the design page), drawn fr
 - **The top is for a dynamic island.** The window's title, the media and the CPU, RAM, temperature and network figures leave the bar for it, through the switches the other looks use (`title`, `media_group`, `volume_icon_only`); the volume keeps its icon, the same one Etkinlik keeps. Notices rise above the bar at the bottom corner, as in Pano.
 - The launcher is a frosted panel in the middle. Alternatives: capsules at the bar's ends, as Ada's (the screen's corners stay empty this way); the clock on the island (the bar keeps what Windows' taskbar corner has).
 - **The blur comes from the composition layer** (`Compositor::CreateHostBackdropBrush`, clipped to each capsule, under the bar's own DirectComposition content). The acrylic of the other looks ignores a window's region: tried with the region before and after it, with the older blur, with and without a redirection surface and with the system backdrop, it frosted the whole rectangle every time.
+- **Its apps grow as the dock's tiles do**, by the same curve and timing, the capsule widening and the outer capsules moving aside. How many apps fit is decided at rest, so a "+n" does not come and go. While they grow the whole window takes the mouse and the glass pieces are moved in place, not made again.
 - **The island takes no room:** it stands over the windows, as a maximised window would otherwise lose a strip for a pill of 32 px. The window's size is fixed and it is cut once per move, because resizing a window every frame is what stutters.
 
 ### D98 · The keyboard on the bar: Win+B, as Windows — Taken (2026-10-29)

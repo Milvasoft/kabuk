@@ -539,4 +539,26 @@ Glass capsules and a dynamic island (DECISIONS D99).
 - The look: `Look::Damla` (`damla`, code `l`), the design page's block, a collapsed island pill there, `themes/l.toml`, 16 more contrast cases, the bar, launcher, notice and OSD styles, three capsules together in the middle of the bottom bar (`Arrangement::Capsules`, `Group::Glass`), the Settings card, both languages. Tests: `damla_stands_in_three_capsules_in_the_middle`, `damla_leaves_the_title_the_media_and_the_figures_to_the_island`, `damlas_apps_that_do_not_fit_go_behind_more`, `damlas_capsules_have_nothing_behind_them`, the look's lines in the style, place and config tests, `tools/settings-test.js`. Drawn by `bar_shot --look l` in both modes and at the side, and compared with the design page.
 - The island: one per monitor at the top, a window of fixed size cut to the pill once per move (`Hwnd::set_shapes`), a spring for the size (`kabuk_ui::motion::Spring`) and a cross-fade for the contents, no work at rest. At rest two dots; the mouse opens three pages (the window and the buttons, the media, the system figures); levels, tracks and notices grow it for a moment. Tests: the model's in `island.rs`, `damlas_island_opens_under_the_mouse_and_goes_back`; drawn by `island_shot`, tried on the real desktop on all three monitors.
 - The glass: the bar's window is cut to its capsules so the mouse passes between them, and each capsule has a real blur of its own (`kabuk_win::glass`). Tests: `the_glass_has_exactly_the_shapes_it_is_given`, `damlas_glass_stays_inside_its_capsules` (failed before, with the acrylic), `a_look_without_glass_takes_the_bar_back_whole`. Measured over a window of black and white stripes: the gaps stay sharp black and white, a capsule's inside is one even colour, the expected blend of the blur, the tint and the fill.
+- The apps grow under the mouse as the dock's tiles do. Tests: `damlas_apps_grow_as_the_docks_do_and_their_capsule_makes_room`, `damlas_apps_grow_under_the_mouse_and_settle`, `a_shape_that_moves_keeps_its_piece`.
+- Hidden, the bar still takes the mouse on its sliver (DECISIONS D100): `the_sliver_is_the_side_left_on_the_screen`, `damlas_hidden_bar_comes_back_under_the_mouse`.
 - *Left out: banners for devices connecting (Windows gives no such event without a watcher of its own), and the island reserves no room at the top, so a maximised window runs under it.*
+
+## M21 · Saved desktops `[ ]`
+
+Save the windows on screen as a named set and bring the whole set back later, in the manner of PowerToys Workspaces. Not started.
+
+**What matters most:** a program comes back as it was at the moment of the snapshot, not merely started. Chrome showing `localhost:6179` when the snapshot was taken opens at `localhost:6179`; a program started with arguments starts with those arguments.
+
+**To do**
+- Snapshot: for every managed window its executable, its command-line arguments, its working directory, its monitor, workspace, tiled or floating state and place.
+- What the snapshot cannot read from the command line: a browser's address is not an argument of a browser opened by hand. Read the address the window is showing and start the browser with it (with the same profile, `--profile-directory`); to settle first: how to read it without injecting anything (UI Automation on the address bar is the first candidate), and what to do with a window of several tabs.
+- Launch: start each program with what was saved, wait for its window, put the window where it was; a program already running is reused or started again, a choice per set. A program that is gone is reported, not skipped silently.
+- Elevated programs, packaged apps (started by their app id, as the launcher does) and programs whose window appears late (a splash screen first).
+- Settings page, launcher entry, `kabuk msg` command, both languages.
+
+**Done criteria**
+- [ ] A browser saved at a local address comes back at that address, with its profile (integration test with a local page, and tried by hand).
+- [ ] A program saved with arguments starts with exactly those arguments (test app).
+- [ ] Windows return to their monitor, workspace and place; a missing monitor falls back to Monitor 1 (main).
+- [ ] A missing program is reported, the rest still open.
+- [ ] Wired end to end: configuration, settings screen, both languages, live reload.
