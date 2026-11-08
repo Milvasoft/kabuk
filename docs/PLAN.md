@@ -531,3 +531,10 @@ Failing on this machine while the screens sleep (Windows shows a "WinDisc" monit
 - [x] Each item above done or stated as not done with its reason.
 - [x] Before/after measurements written here for every performance item.
 - [ ] `tools/check.ps1` clean; the perf suite run. *fmt, clippy and every unit test clean but for the tests that read the screen while it sleeps; the integration tests run on the desktop (failures above, all of the sleeping screens). The perf suite ran once validly and was over its limits (above); memory's cause is fixed, the CPU's is not found: left for a run with the machine alone. A lead to measure then: the window manager hears every object's name change in every program (`EVENT_OBJECT_NAMECHANGE`, for titles), which programs writing text as it streams send many times a second.*
+
+## M20 · Damla `[~]`
+
+Glass capsules and a dynamic island (DECISIONS D99).
+
+- The look: `Look::Damla` (`damla`, code `l`), the design page's block, a collapsed island pill there, `themes/l.toml`, 16 more contrast cases, the bar, launcher, notice and OSD styles, three capsules together in the middle of the bottom bar (`Arrangement::Capsules`, `Group::Glass`), the Settings card, both languages. Tests: `damla_stands_in_three_capsules_in_the_middle`, `damla_leaves_the_title_the_media_and_the_figures_to_the_island`, `damlas_apps_that_do_not_fit_go_behind_more`, `damlas_capsules_have_nothing_behind_them`, the look's lines in the style, place and config tests, `tools/settings-test.js`. Drawn by `bar_shot --look l` in both modes and at the side, and compared with the design page.
+- *Not done: the island itself and blurring the bar's window behind the capsules (`Style::glass` says which look wants it; nothing reads it yet).*

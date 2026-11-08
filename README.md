@@ -54,9 +54,9 @@ A workspace covers all your monitors: Win+2 switches every screen to workspace 2
 
 Windows' own Win+L, Win+E, Win+V, Win+Shift+S and Win+Space keep working. You can change any of the other keys in Settings › Shortcuts.
 
-## Ten looks
+## Eleven looks
 
-A look changes more than colours. Konsol is a tmux status line at the bottom with an fzf-style launcher coming up from below. Ray is a solid rail on the left. Defter is set in a serif with Roman numerals for workspaces. Rıhtım has a dock. The others are Ada, Çizgi, Devre, Etkinlik, Pano and Izgara. Each comes in dark and light, and you can change the accent colour. Every text, in every look, mode and accent, is held to a 4.5:1 contrast ratio. If you pick an accent that wouldn't be readable, Kabuk adjusts its shade instead of using it as is.
+A look changes more than colours. Konsol is a tmux status line at the bottom with an fzf-style launcher coming up from below. Ray is a solid rail on the left. Defter is set in a serif with Roman numerals for workspaces. Rıhtım has a dock. Damla floats three glass capsules at the bottom. The others are Ada, Çizgi, Devre, Etkinlik, Pano and Izgara. Each comes in dark and light, and you can change the accent colour. Every text, in every look, mode and accent, is held to a 4.5:1 contrast ratio. If you pick an accent that wouldn't be readable, Kabuk adjusts its shade instead of using it as is.
 
 <p>
   <img src="docs/images/look-konsol-en.jpg" width="32%" alt="Konsol: a tmux-style status line along the bottom">

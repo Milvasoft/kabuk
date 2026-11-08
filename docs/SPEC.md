@@ -12,7 +12,7 @@ How we differ from the competition on Windows (komorebi, GlazeWM, Seelen UI, YAS
 
 - One package: bar, window manager, launcher, notifications, screen saver and settings ship together.
 - There is a settings screen; the text file is still fully authoritative and is live-reloaded.
-- Looks good out of the box (10 built-in looks, light/dark mode).
+- Looks good out of the box (11 built-in looks, light/dark mode).
 - Crash-safe: under no circumstances is a window left hidden or the taskbar left missing.
 - Works with games and anti-cheat without issues.
 
@@ -25,7 +25,7 @@ Target platform: Windows 11.
 ### 2.1 Bar
 
 - A separate bar on every monitor. Settings offer "All" or "Main only".
-- Position: top, bottom, left, right. Every look has a default position (Ada, Çizgi, Devre, Rıhtım, Etkinlik, Izgara, Defter: top; Ray: left; Konsol, Pano: bottom). If the user changes it, "Use default" restores it.
+- Position: top, bottom, left, right. Every look has a default position (Ada, Çizgi, Devre, Rıhtım, Etkinlik, Izgara, Defter: top; Ray: left; Konsol, Pano, Damla: bottom). If the user changes it, "Use default" restores it.
 - The bar reserves space from the Windows work area on the chosen edge; maximised windows do not go under the bar.
 - In vertical positions (left, right) the clock is written stacked; the window title, date, media text and network speed are hidden.
 - Modules (each can be turned on and off individually in settings; a disabled module leaves the bar immediately):
@@ -101,7 +101,7 @@ Target platform: Windows 11.
 
 ### 2.5 Launcher
 
-- Default shortcut `Win+R`. Depending on the look it opens centred (Ada, Devre, Rıhtım, Etkinlik, Defter), full-width under the bar (Çizgi), beside the rail (Ray), from the bottom like fzf (Konsol), at the bar's start corner like a start menu (Pano) or against the bar at its start corner (Izgara).
+- Default shortcut `Win+R`. Depending on the look it opens centred (Ada, Devre, Rıhtım, Etkinlik, Defter, Damla), full-width under the bar (Çizgi), beside the rail (Ray), from the bottom like fzf (Konsol), at the bar's start corner like a start menu (Pano) or against the bar at its start corner (Izgara).
 - Layout profiles (DECISIONS D65): the windows open now saved under a name (Settings › Windows), opened again in one go from the settings, the launcher or `kabuk msg profile <name>`: open programs go to their places, the rest start and their windows go there.
 - Sources: open windows on all workspaces (selecting one switches to that workspace and focuses it; stands in for Alt+Tab), installed applications (Start menu shortcuts and Store apps), recent files, files and folders in indexed folders, browser bookmarks, system commands (lock, sleep, start screen saver, restart, shut down), calculator (`12*8` → result, Enter copies to the clipboard).
 - Fuzzy search; matched letters are highlighted. Turkish case handling works correctly: searching "EKRANI" finds "Ekranı kilitle" (Lock screen), and the "ı/I" and "i/İ" distinction is preserved.
@@ -153,7 +153,7 @@ Target platform: Windows 11.
 
 The 12 pages in the design, in the same order: Appearance, Wallpaper, Screen saver, Bar, Windows, Window rules, Game mode, Launcher, Shortcuts, Language & region, OLED care, About. Every change applies without a restart. A search field above the pages (PLAN M19 U20) finds a setting by its label, its hint or its page in the language in use and opens its page at it, marked and focused; Enter opens the first found, Esc empties the field. Details are on the design page; page contents:
 
-- **Appearance:** theme (10 cards with mini previews), accent colour (the theme's own colour + 7 colours: Ice blue `#8fd3ff`, Milva yellow `#fbc419`, Mint `#7fe0b5`, Coral `#ff8f6b`, Lilac `#b9a7ff`, Pink `#ff7eb6`, Off-white `#ecebe7`), mode (Dark, Light, Follow Windows, By time of day: light 07:00-19:00), text size (Small, Normal, Large), mouse cursors (the user's own; Kabuk's set in the theme's style and colour; or Kabuk's set in a style picked apart from the theme: Round, Slim, Circuit, Bold, Block, Cartoon, Comic, in Light, Dark or the accent colour, each card previewed; with Kabuk's sets a size, Normal, Large or Very large, which is Windows' own pointer size; requested and 2026-10-14, not on the design page, see DECISIONS D20 and D41). An OLED warning in light mode; if the accent colour was adapted for readability, it states which shade is used. The chosen cursors apply to the whole system while Kabuk runs; the user's previous cursors and pointer size are recorded first and come back when Kabuk exits or crashes. System theme: a switch per layer of §2.10, the icon layer with its set previewed for the theme in use, the Explorer layer with "On in game mode too" and, on a Windows version it was not tried on, "Try anyway" (drawn on the design page on 2026-10-14, waiting for a decision). A theme file exports these looks' settings to share and imports one (DECISIONS D64).
+- **Appearance:** theme (11 cards with mini previews), accent colour (the theme's own colour + 7 colours: Ice blue `#8fd3ff`, Milva yellow `#fbc419`, Mint `#7fe0b5`, Coral `#ff8f6b`, Lilac `#b9a7ff`, Pink `#ff7eb6`, Off-white `#ecebe7`), mode (Dark, Light, Follow Windows, By time of day: light 07:00-19:00), text size (Small, Normal, Large), mouse cursors (the user's own; Kabuk's set in the theme's style and colour; or Kabuk's set in a style picked apart from the theme: Round, Slim, Circuit, Bold, Block, Cartoon, Comic, in Light, Dark or the accent colour, each card previewed; with Kabuk's sets a size, Normal, Large or Very large, which is Windows' own pointer size; requested and 2026-10-14, not on the design page, see DECISIONS D20 and D41). An OLED warning in light mode; if the accent colour was adapted for readability, it states which shade is used. The chosen cursors apply to the whole system while Kabuk runs; the user's previous cursors and pointer size are recorded first and come back when Kabuk exits or crashes. System theme: a switch per layer of §2.10, the icon layer with its set previewed for the theme in use, the Explorer layer with "On in game mode too" and, on a Windows version it was not tried on, "Try anyway" (drawn on the design page on 2026-10-14, waiting for a decision). A theme file exports these looks' settings to share and imports one (DECISIONS D64).
 - **Wallpaper:** §2.8.
 - **Screen saver:** §2.7.
 - **Bar:** position, monitors, auto-hide, background (solid, blur, off), colour (the look's own, a swatch or any colour; it fills the solid bar and tints the blur, with a note when the look's text would be hard to read on it; DECISIONS D57), height, tray icons shown on the bar, modules (§2.1).
@@ -178,7 +178,7 @@ Everything a layer changes is recorded first and comes back when the layer is tu
 
 ## 3. Looks
 
-Ten looks; each in dark and light mode. All colours are tokens (the `.screen[data-dir="x"]` and `.screen[data-mode="light"][data-dir="x"]` blocks on the design page). Detailed visuals: the design page.
+Eleven looks; each in dark and light mode. All colours are tokens (the `.screen[data-dir="x"]` and `.screen[data-mode="light"][data-dir="x"]` blocks on the design page). Detailed visuals: the design page.
 
 | Code | Name | Essence | Default bar | Accent (dark / light) |
 | --- | --- | --- | --- | --- |
@@ -192,8 +192,9 @@ Ten looks; each in dark and light mode. All colours are tokens (the `.screen[dat
 | h | Pano (Panel) | A task-list panel: the apps as buttons with their names, the time over the date, a start-menu launcher | Bottom | `#4fd1c5` / `#0f766e` |
 | i | Izgara (Grid) | Swiss grid: heavy capitals, workspace blocks the bar's height, a 3 px rule, square corners | Top | `#ff4b3e` / `#d4231b` |
 | j | Defter (Notebook) | Editorial serif: Roman numerals, italics, small capitals, a double rule, a `·` between groups | Top | `#a8d5a2` / `#2f6b3a` |
+| l | Damla (Drop) | Three floating glass capsules: workspaces; the all-apps button and the apps; the tray, the indicators and a two-line clock. The window's title, the media and the system figures leave the bar | Bottom | `#34d158` / `#15803d` |
 
-The design page's eleventh look, Piksel (`k`), is not part of Kabuk (2026-10-15; `DECISIONS.md` D67).
+The design page's Piksel (`k`) is not part of Kabuk (2026-10-15; `DECISIONS.md` D67).
 
 Default look: Rıhtım (`DECISIONS.md` D2).
 
@@ -276,7 +277,7 @@ Each is measurable; each is verified in every release with the tests in PLAN.
 13. **Floating windows** (§2.2).
 14. **Bar position** works on all four edges, and the work area is updated accordingly.
 15. **Multilingual interface** (§7).
-16. **Light and dark mode** in all ten looks, with the four mode options.
+16. **Light and dark mode** in all eleven looks, with the four mode options.
 17. **Bar modules** turn on and off individually, reflected instantly.
 18. **Readability** (§4).
 19. **Fluid feel.** Kabuk's own surfaces (bar, launcher, notification, OSD) animate at 60 fps or more without dropping frames; window layout transitions do not stutter (see ARCHITECTURE §Animation). Animation setting Full/Reduced/Off; off if Windows' "Animation effects" is off.
