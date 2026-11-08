@@ -1,7 +1,8 @@
 //! Where a bar goes on its monitor, in physical pixels and DIPs. Pure.
 
 use kabuk_core::config::Edge;
-use kabuk_ui::geom::{Rect, Scale, Size};
+use kabuk_ui::geom::{Point, Rect, Scale, Size};
+use kabuk_win::msgloop::PxRect;
 
 /// Sizes of a bar from the look's tokens (DIPs).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -75,6 +76,28 @@ pub fn shift_toward_edge(edge: Edge, (sx, sy): (i32, i32)) -> (i32, i32) {
     }
 }
 
+/// The window shapes of a layout's glass capsules: each in client pixels with its corner
+/// radius (Damla's bar is cut to them, so only they are blurred and take the mouse).
+pub fn glass_shapes(layout: &kabuk_ui::node::Layout, origin: Point, scale: Scale) -> Vec<(PxRect, i32)> {
+    layout
+        .draws
+        .iter()
+        .filter_map(|d| match d {
+            kabuk_ui::node::Draw::Panel { rect, paint } if paint.fill == kabuk_ui::node::Role::Glass => {
+                let r = PxRect {
+                    x: scale.px(rect.x + origin.x),
+                    y: scale.px(rect.y + origin.y),
+                    w: scale.px(rect.w),
+                    h: scale.px(rect.h),
+                };
+                let radius = scale.px(paint.radius.min(rect.h / 2.0).min(rect.w / 2.0));
+                Some((r, radius))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     //! Edge cases: each edge, 100 % and 125 % scale, shifts on every edge stay inside
@@ -139,5 +162,50 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn only_the_glass_capsules_cut_the_window() {
+        use kabuk_ui::node::{Draw, Layout, Paint, Role};
+        let panel = |x: f32, fill: Role| Draw::Panel {
+            rect: kabuk_ui::geom::Rect::new(x, 4.0, 100.0, 40.0),
+            paint: Paint {
+                fill,
+                border: None,
+                radius: 999.0,
+            },
+        };
+        let l = Layout {
+            draws: vec![
+                panel(10.0, Role::Glass),
+                panel(200.0, Role::Accent),
+                panel(300.0, Role::Glass),
+            ],
+            ..Layout::default()
+        };
+        let shapes = glass_shapes(&l, Point { x: 2.0, y: 1.0 }, Scale(2.0));
+        assert_eq!(
+            shapes,
+            vec![
+                (
+                    PxRect {
+                        x: 24,
+                        y: 10,
+                        w: 200,
+                        h: 80
+                    },
+                    40
+                ),
+                (
+                    PxRect {
+                        x: 604,
+                        y: 10,
+                        w: 200,
+                        h: 80
+                    },
+                    40
+                ),
+            ]
+        );
     }
 }
