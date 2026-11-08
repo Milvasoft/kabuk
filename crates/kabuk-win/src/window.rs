@@ -686,6 +686,39 @@ impl Hwnd {
         unsafe { ShowWindowAsync(self.raw(), SW_HIDE) }.as_bool()
     }
 
+    /// Cuts the window to `shapes` (client pixels, each a rectangle and its corner radius),
+    /// so the rest of it neither shows nor takes the mouse; empty gives the whole window
+    /// back. Windows' blur behind follows the cut (Damla's glass, DECISIONS D99).
+    pub fn set_shapes(self, shapes: &[(crate::msgloop::PxRect, i32)]) -> bool {
+        use windows::Win32::Graphics::Gdi::{CombineRgn, CreateRoundRectRgn, DeleteObject, SetWindowRgn, HRGN, RGN_OR};
+        if shapes.is_empty() {
+            // SAFETY: no region means the whole window; Windows owns nothing of ours.
+            return unsafe { SetWindowRgn(self.raw(), None, true) } != 0;
+        }
+        let round = |(r, radius): &(crate::msgloop::PxRect, i32)| {
+            let d = radius * 2;
+            // SAFETY: plain call; the region is handed on or deleted below.
+            unsafe { CreateRoundRectRgn(r.x, r.y, r.x + r.w + 1, r.y + r.h + 1, d, d) }
+        };
+        let all: HRGN = round(&shapes[0]);
+        for shape in &shapes[1..] {
+            let next = round(shape);
+            // SAFETY: both regions are live; the result goes into the first.
+            unsafe {
+                CombineRgn(Some(all), Some(all), Some(next), RGN_OR);
+                let _ = DeleteObject(next.into());
+            }
+        }
+        // SAFETY: on success Windows owns the region; on failure it is ours to delete.
+        unsafe {
+            if SetWindowRgn(self.raw(), Some(all), true) == 0 {
+                let _ = DeleteObject(all.into());
+                return false;
+            }
+        }
+        true
+    }
+
     /// Makes the window fully transparent (`on`), so it shows nothing even while
     /// Windows has it shown, or opaque again. Only a transparency set here is taken off:
     /// a window that was layered on its own stays so, unless it was layered fully opaque

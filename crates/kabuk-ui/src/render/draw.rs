@@ -23,6 +23,8 @@ pub const ICON_VIEWBOX: f32 = 24.0;
 pub struct Palette {
     colors: HashMap<Role, Color>,
     gradients: HashMap<Role, (Color, Color)>,
+    /// How far pictures are faded, 0-1 (0, the default: opaque).
+    image_fade: f32,
 }
 
 impl Palette {
@@ -30,7 +32,21 @@ impl Palette {
         Palette {
             colors: colors.into_iter().collect(),
             gradients: HashMap::new(),
+            image_fade: 0.0,
         }
+    }
+
+    /// This palette with everything but `kept` at `opacity`, pictures too (the contents
+    /// of Damla's island fading while its pill stays).
+    pub fn faded(&self, opacity: f32, kept: Role) -> Palette {
+        let mut p = self.clone();
+        for (role, c) in &mut p.colors {
+            if *role != kept {
+                c.a *= opacity;
+            }
+        }
+        p.image_fade = 1.0 - opacity;
+        p
     }
 
     /// Adds top-to-bottom gradients; a panel filled with one of these roles uses its gradient.
@@ -398,7 +414,14 @@ pub(crate) fn draw_layout(gpu: &Gpu, ctx: &ID2D1DeviceContext, brushes: &mut Bru
                 unsafe { ctx.DrawTextLayout(at, &text_layout, &default, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT) };
             }
             Draw::Icon { rect, spec } => icon(gpu, &mut paints, rect.offset(ox, oy), spec)?,
-            Draw::Image { rect, spec } => image(gpu, ctx, rect.offset(ox, oy), spec.key, spec.turn)?,
+            Draw::Image { rect, spec } => image(
+                gpu,
+                ctx,
+                rect.offset(ox, oy),
+                spec.key,
+                spec.turn,
+                1.0 - palette.image_fade,
+            )?,
         }
     }
     Ok(())
@@ -448,7 +471,7 @@ fn panel(paints: &mut Paints, rect: Rect, paint: &Paint, scale: Scale) -> Result
 }
 
 /// A stored picture, scaled into `rect`; nothing when the key is unknown.
-fn image(gpu: &Gpu, ctx: &ID2D1DeviceContext, rect: Rect, key: u64, turn: f32) -> Result<()> {
+fn image(gpu: &Gpu, ctx: &ID2D1DeviceContext, rect: Rect, key: u64, turn: f32, opacity: f32) -> Result<()> {
     use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
     let made = gpu.images.bitmap(key, |(w, h), px| {
         let props = D2D1_BITMAP_PROPERTIES1 {
@@ -500,7 +523,7 @@ fn image(gpu: &Gpu, ctx: &ID2D1DeviceContext, rect: Rect, key: u64, turn: f32) -
         ctx.DrawBitmap(
             &bitmap,
             Some(&rect_f(rect)),
-            1.0,
+            opacity,
             D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
             None,
             None,
