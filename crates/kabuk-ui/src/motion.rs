@@ -233,6 +233,63 @@ pub const APP_GRID_BACKDROP: Entrance = Entrance {
 /// (seconds).
 pub const PAGE_SLIDE: f32 = 0.22;
 
+/// A value following its target on a damped spring, stepped frame by frame: retargeted
+/// on the way it keeps its speed, so a change of mind bends the motion instead of
+/// restarting it (Damla's island, DECISIONS D99).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Spring {
+    pub value: f32,
+    pub velocity: f32,
+    pub target: f32,
+    stiffness: f32,
+    damping: f32,
+}
+
+/// Longest step of a spring's integration (seconds): a late frame is cut up, so it stays
+/// stable however long the frame took.
+const SPRING_STEP: f32 = 1.0 / 240.0;
+/// How near, and how slow, counts as arrived.
+const SPRING_NEAR: f32 = 0.02;
+const SPRING_SLOW: f32 = 0.2;
+
+impl Spring {
+    /// A spring at rest at `value`.
+    pub fn at(value: f32, stiffness: f32, damping: f32) -> Spring {
+        Spring {
+            value,
+            velocity: 0.0,
+            target: value,
+            stiffness,
+            damping,
+        }
+    }
+
+    /// Moves on by `dt` seconds; once it has arrived it stays exactly on its target.
+    pub fn step(&mut self, dt: f32) {
+        let mut left = dt.max(0.0);
+        while left > 0.0 {
+            let h = left.min(SPRING_STEP);
+            let accel = self.stiffness * (self.target - self.value) - self.damping * self.velocity;
+            self.velocity += accel * h;
+            self.value += self.velocity * h;
+            left -= h;
+        }
+        if (self.value - self.target).abs() < SPRING_NEAR && self.velocity.abs() < SPRING_SLOW {
+            self.snap();
+        }
+    }
+
+    /// Jumps to its target.
+    pub fn snap(&mut self) {
+        self.value = self.target;
+        self.velocity = 0.0;
+    }
+
+    pub fn settled(&self) -> bool {
+        self.value == self.target && self.velocity == 0.0
+    }
+}
+
 /// The transitions started on one surface, so the next starts from where the last is.
 #[derive(Clone, Copy, Debug)]
 pub struct Motion {
@@ -305,6 +362,34 @@ mod tests {
 
     fn close(a: f32, b: f32) -> bool {
         (a - b).abs() < 1e-4
+    }
+
+    #[test]
+    fn a_spring_arrives_exactly_and_stays() {
+        let mut s = Spring::at(0.0, 420.0, 30.0);
+        s.target = 100.0;
+        let mut most = 0.0f32;
+        for _ in 0..600 {
+            s.step(1.0 / 60.0);
+            most = most.max(s.value);
+        }
+        assert!(s.settled() && s.value == 100.0, "{s:?}");
+        assert!(most > 100.0 && most < 112.0, "overshoot {most}");
+    }
+
+    #[test]
+    fn a_spring_keeps_its_speed_when_retargeted_and_survives_a_late_frame() {
+        let mut s = Spring::at(0.0, 420.0, 30.0);
+        s.target = 100.0;
+        s.step(0.05);
+        let speed = s.velocity;
+        s.target = 0.0;
+        assert_eq!(s.velocity, speed);
+        s.step(0.002);
+        assert!(s.value > 0.0 && s.velocity > 0.0, "{s:?}");
+        s.target = 50.0;
+        s.step(5.0);
+        assert!((s.value - 50.0).abs() < 0.1, "{s:?}");
     }
 
     #[test]
