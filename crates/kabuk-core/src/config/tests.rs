@@ -862,3 +862,19 @@ fn a_still_picture_drifts_unless_turned_off() {
     );
     assert_eq!(errors("schema = 1\n[wallpaper]\ndrift_minutes = 121\n").len(), 1);
 }
+
+#[test]
+fn the_dock_hides_with_the_bar_unless_it_is_told_otherwise() {
+    let hides = |autohide, dock_autohide| {
+        Bar {
+            autohide,
+            dock_autohide,
+            ..Bar::default()
+        }
+        .dock_hides()
+    };
+    assert!(!hides(false, None));
+    assert!(hides(true, None));
+    assert!(hides(false, Some(true)));
+    assert!(!hides(true, Some(false)));
+}

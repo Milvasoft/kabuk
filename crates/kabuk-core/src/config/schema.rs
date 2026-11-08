@@ -735,6 +735,9 @@ pub struct Bar {
     pub position: BarPosition,
     pub monitors: BarMonitors,
     pub autohide: bool,
+    /// Whether Rıhtım's dock hides; unset, it does as the bar does.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dock_autohide: Option<bool>,
     /// What fills the bar's whole reserved edge over the wallpaper (DECISIONS D28).
     pub background: BarBackground,
     /// The bar's thickness in DIPs (its height on the top or bottom edge, its width on
@@ -752,12 +755,20 @@ pub struct Bar {
 pub const TRAY_SHOWN_RANGE: (u32, u32) = (0, 12);
 pub const BAR_HEIGHT_RANGE: (u32, u32) = (24, 72);
 
+impl Bar {
+    /// Whether Rıhtım's dock hides.
+    pub fn dock_hides(&self) -> bool {
+        self.dock_autohide.unwrap_or(self.autohide)
+    }
+}
+
 impl Default for Bar {
     fn default() -> Self {
         Bar {
             position: BarPosition::Default,
             monitors: BarMonitors::All,
             autohide: false,
+            dock_autohide: None,
             background: BarBackground::Solid,
             height: None,
             tray_shown: 3,

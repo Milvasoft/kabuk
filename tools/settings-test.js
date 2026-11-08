@@ -386,6 +386,13 @@ async function main() {
     await page.click(`[data-set="appearance.look"][data-val='"${name}"']`); await settled();
     check(new RegExp(`look = "${name}"`).test(toml()) && (await page.getAttribute(".screen", "data-dir")) === dir, `look ${name}, page restyled`);
   }
+  // Found by the user: the design page's picture of Damla's island lay over this screen.
+  check((await page.evaluate(() => getComputedStyle(document.querySelector(".screen"), "::after").content)) === "none", "Damla: no island drawn on the settings screen");
+  await page.click(`[data-set="appearance.look"][data-val='"rihtim"']`); await settled();
+  await go("bar");
+  await page.click(`[data-set="bar.dock_autohide"]`); await settled();
+  check(/dock_autohide = (true|false)/.test(toml()), "dock auto-hide on its own");
+  await go("look");
   await page.click(`[data-set="appearance.look"][data-val='"cizgi"']`); await settled();
   await page.click(`[data-set="appearance.accent"][data-val='"#fbc419"']`); await settled();
   check(/accent = "#fbc419"/.test(toml()), "accent Milva yellow");

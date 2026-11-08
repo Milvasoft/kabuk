@@ -455,6 +455,7 @@
       <div class="set-grp">${row(t("pos"), posHint, seg(t("pos"), choice("bar.position", current, ["top", "bottom", "left", "right"].map((p) => [p, t("positions-" + p)]))))}
       ${rowFor("bar.monitors", t("monitors"), t("monitorsH"), segFor("bar.monitors", t("monitors"), [["all", t("allMon")], ["main", t("mainMon")]]))}
       ${tgl("bar.autohide", t("autohide"), t("autohideH"))}
+      ${get("appearance.look") === "rihtim" ? (() => { const hides = get("bar.dock_autohide") ?? !!get("bar.autohide"); return row(t("setDockAutohide"), t("setDockAutohideH") + resetIfChanged("bar.dock_autohide") + refusalFor("bar.dock_autohide"), `<button class="tgl" type="button" role="switch" aria-checked="${hides}" aria-label="${escapeHtml(t("setDockAutohide"))}" data-set="bar.dock_autohide" data-val="${!hides}"></button>`); })() : ""}
       ${rowFor("bar.background", t("setBg"), t("setBgH"), segFor("bar.background", t("setBg"), [["solid", t("setBgSolid")], ["blur", t("setBgBlur")], ["off", t("setBgOff")]]))}
       ${row(t("setHeight"), heightHint, range("bar-height", "bar.height", RANGES.height, height, t("setHeight")))}
       ${row(t("setTrayShown"), t("setTrayShownH"), trayRange)}</div>
