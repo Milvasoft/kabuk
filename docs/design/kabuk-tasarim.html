@@ -1044,6 +1044,54 @@ p { margin: 0; max-width: 66ch; }
 .screen[data-dir="k"] .seg { box-shadow: var(--sunken); border: 0; }
 .screen[data-dir="k"] .seg button.on { box-shadow: var(--raised); }
 
+/* ---------------- L · Damla: glass capsules and a dynamic island ---------------- */
+.screen[data-dir="l"] {
+  --fg-s: #f5f6f8; --dim: #b6bac2; --faint: #4b4e55; --line-s: #2e3036; --accent-s: #34d158;
+  --edge: 8px; --bar-h: 46px; --rail: 60px; --pad: 10px; --gap: 10px; --radius: 14px; --win-bg: #0b0c0e; --win-line: #292b30;
+  --glass: rgba(34,36,40,.62); --glass-line: rgba(255,255,255,.18); --surf: rgba(30,32,36,.95); --surf-alt: rgba(22,24,27,.95); --surf-sel: rgba(255,255,255,.14); --surf-line: #3b3d43;
+  --ui: "Inter", "Segoe UI", sans-serif; --num: "Inter", "Segoe UI", sans-serif;
+}
+.screen[data-dir="l"] .bar { display: flex; justify-content: center; gap: 56px; background: none; font-size: 13px; }
+.screen[data-dir="l"]:is([data-pos="left"], [data-pos="right"]) .bar { flex-direction: column; }
+.screen[data-dir="l"] :is(.bar-l, .bar-c, .bar-r) { flex: none; gap: 14px; background: var(--glass); backdrop-filter: blur(24px) saturate(1.4); border: 1px solid var(--glass-line); border-radius: 999px; }
+.screen[data-dir="l"]:is([data-pos="top"], [data-pos="bottom"]) :is(.bar-l, .bar-c, .bar-r) { padding: 0 16px; }
+.screen[data-dir="l"]:is([data-pos="left"], [data-pos="right"]) :is(.bar-l, .bar-c, .bar-r) { padding: 14px 0; align-self: auto; }
+.screen[data-dir="l"][data-pos] .grp { padding: 0; gap: 14px; }
+.screen[data-dir="l"] .bar-l > .grp:nth-child(2), .screen[data-dir="l"] .bar-r .grp:has(.media), .screen[data-dir="l"] .mod:not([data-m="vol"]), .screen[data-dir="l"] .mod .v { display: none; }
+.screen[data-dir="l"] .bar-r .grp:has(.tray) { order: -1; }
+.screen[data-dir="l"] .bar-r .desk-corner { order: 2; }
+.screen[data-dir="l"] :is(.mod, .tray, .bell, .ind) { color: var(--fg-s); }
+.screen[data-dir="l"] .ws-list { gap: 6px; }
+.screen[data-dir="l"] .ws { width: 26px; height: 26px; border-radius: 13px; font-size: 12.5px; font-family: var(--num); transition: width .25s, height .25s, background .25s; }
+.screen[data-dir="l"] .ws.on { width: 38px; background: var(--accent-fill); color: var(--on-accent); font-weight: 600; }
+.screen[data-dir="l"]:is([data-pos="left"], [data-pos="right"]) .ws.on { width: 26px; height: 38px; }
+.screen[data-dir="l"] .ws.busy:not(.on)::after { content: ""; position: absolute; bottom: -1px; width: 3px; height: 3px; border-radius: 50%; background: var(--dim); }
+.screen[data-dir="l"] .bar-c .logo { display: flex; color: var(--accent-s); }
+.screen[data-dir="l"] .bar-c .logo svg.i { width: 24px; height: 24px; }
+.screen[data-dir="l"] .tasks { display: flex; align-items: center; gap: 12px; }
+.screen[data-dir="l"]:is([data-pos="left"], [data-pos="right"]) .tasks { flex-direction: column; }
+.screen[data-dir="l"] .task { width: 28px; height: 34px; padding: 0; justify-content: center; color: var(--fg-s); background: none; }
+.screen[data-dir="l"] .task svg.i { width: 24px; height: 24px; }
+.screen[data-dir="l"] .task span { display: none; }
+.screen[data-dir="l"] .task.on::after { bottom: 0; width: 6px; height: 2px; margin-left: -3px; }
+.screen[data-dir="l"] .clock { flex-direction: column; align-items: flex-end; gap: 0; line-height: 1.25; }
+.screen[data-dir="l"] .clock .t { font-size: 13px; font-weight: 500; order: -1; }
+.screen[data-dir="l"] .clock .d { font-size: 12px; color: var(--fg-s); }
+.screen[data-dir="l"]:not([data-pos="top"])::after { content: ""; position: absolute; z-index: 6; top: 8px; left: 50%; width: 176px; height: 34px; margin-left: -88px; border-radius: 17px; background: #000; }
+.screen[data-dir="l"] .launcher { left: 50%; top: 220px; transform: translateX(-50%); width: 680px; background: var(--surf); backdrop-filter: blur(30px); border: 1px solid var(--surf-line); border-radius: 20px; box-shadow: 0 30px 80px var(--shadow); overflow: hidden; }
+.screen[data-dir="l"] .l-in { padding: 16px 18px; color: var(--dim); border-bottom: 1px solid var(--surf-line); }
+.screen[data-dir="l"] .l-in input { font-size: 22px; }
+.screen[data-dir="l"] .l-list { padding: 6px; }
+.screen[data-dir="l"] .l-row { border-radius: 12px; padding: 8px 12px; }
+.screen[data-dir="l"] .l-row.sel { background: var(--accent-fill); color: var(--on-accent); }
+.screen[data-dir="l"] .l-row.sel :is(.sub, .kind, mark, .ic) { color: var(--on-accent); }
+.screen[data-dir="l"] .l-foot { display: none; }
+.screen[data-dir="l"] .toast { background: var(--surf); backdrop-filter: blur(20px); border: 1px solid var(--surf-line); border-radius: 18px; box-shadow: 0 16px 40px var(--shadow); }
+.screen[data-dir="l"][data-pos="bottom"] .toast { top: auto; bottom: calc(var(--edge) + var(--bar-h) + 12px); right: 12px; }
+.screen[data-dir="l"] .toast .ti { border-radius: 10px; background: var(--accent-fill); color: var(--on-accent); }
+.screen[data-dir="l"] .osd { background: var(--surf); border: 1px solid var(--surf-line); border-radius: 999px; }
+.screen[data-dir="l"] .osd .track i { background: var(--accent-fill); }
+
 /* ===================================================================
    LIGHT MODE — same looks, light surfaces. Accent defaults are darker so they stay readable on white.
    =================================================================== */
@@ -1066,6 +1114,7 @@ p { margin: 0; max-width: 66ch; }
 .screen[data-mode="light"][data-dir="h"] { --desk: #eef0f3; --fg-s: #15181c; --dim: #5d636c; --faint: #c9ced5; --line-s: #d7dbe1; --win-bg: #ffffff; --win-line: #d5dae0; --surf: #f7f8fa; --surf-alt: #eef0f3; --surf-sel: #e2e6eb; --surf-line: #cfd4db; --accent-s: #0f766e; }
 .screen[data-mode="light"][data-dir="i"] { --desk: #f4f2ee; --fg-s: #111110; --dim: #5e5b55; --faint: #c9c5bd; --line-s: #d3cfc6; --win-bg: #fbfaf8; --win-line: #c9c5bd; --surf: #f4f2ee; --surf-alt: #ebe8e2; --surf-sel: #e2ded6; --surf-line: #8f8a80; --accent-s: #d4231b; --accent2: #d4231b; }
 .screen[data-mode="light"][data-dir="j"] { --desk: #f5f0e6; --fg-s: #1f1b14; --dim: #6b6253; --faint: #d6cdbb; --line-s: #cfc5b2; --win-bg: #fbf8f1; --win-line: #ddd4c2; --surf: #fbf8f1; --surf-alt: #f2ece0; --surf-sel: #ece4d3; --surf-line: #c9bfab; --accent-s: #2f6b3a; }
+.screen[data-mode="light"][data-dir="l"] { --desk: #e7eaee; --fg-s: #14161a; --dim: #4f555e; --faint: #c3c8cf; --line-s: #d3d7dd; --win-bg: #ffffff; --win-line: #d5d9df; --glass: rgba(255,255,255,.58); --glass-line: rgba(255,255,255,.72); --surf: rgba(255,255,255,.96); --surf-alt: rgba(244,245,247,.96); --surf-sel: rgba(0,0,0,.08); --surf-line: #cdd1d8; --accent-s: #15803d; }
 .screen[data-mode="light"][data-dir="k"] { --desk: #d4d0c8; --fg-s: #000000; --dim: #4a4a4a; --faint: #a0a0a0; --line-s: #808080; --win-bg: #ffffff; --win-line: #000; --surf: #d4d0c8; --surf-alt: #c8c4bc; --surf-sel: #b8b4ac; --surf-line: #000; --accent-s: #1f3fbf; --hi: #ffffff; --lo: #404040; --hi2: #e8e6e1; --sunken: inset 1px 1px 0 #808080, inset -1px -1px 0 #ffffff, inset 2px 2px 0 #404040; }
 /* GNOME keeps its black top bar in light mode too */
 .screen[data-mode="light"][data-dir="g"] .bar { --fg-s: #f6f5f4; --dim: #a8a6a3; color: var(--fg-s); }
@@ -1202,6 +1251,7 @@ p { margin: 0; max-width: 66ch; }
       <button class="dir-btn" type="button" id="dir-i" data-dir="i" aria-pressed="false"><span class="dn"><span class="sw" style="background:#ff4b3e; border-radius:0"></span>Izgara</span></button>
       <button class="dir-btn" type="button" id="dir-j" data-dir="j" aria-pressed="false"><span class="dn"><span class="sw" style="background:#a8d5a2"></span>Defter</span></button>
       <button class="dir-btn" type="button" id="dir-k" data-dir="k" aria-pressed="false"><span class="dn"><span class="sw" style="background:#7b8cff; border-radius:0; box-shadow:inset 1px 1px 0 #fff6, inset -1px -1px 0 #0008"></span>Piksel</span></button>
+      <button class="dir-btn" type="button" id="dir-l" data-dir="l" aria-pressed="false"><span class="dn"><span class="sw" style="background:#34d158"></span>Damla</span></button>
     </div>
     <p class="dir-desc" id="dir-desc" aria-live="polite"></p>
     </div>
@@ -1356,7 +1406,7 @@ p { margin: 0; max-width: 66ch; }
       days: ["Paz", "Pzt", "Sal", "Çar", "Per", "Cum", "Cmt"],
       months: ["Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"],
       am: "ÖÖ", pm: "ÖS",
-      looks: { a: "Ada", b: "Çizgi", c: "Devre", d: "Ray", e: "Konsol", f: "Rıhtım", g: "Etkinlik", h: "Pano", i: "Izgara", j: "Defter", k: "Piksel" },
+      looks: { a: "Ada", b: "Çizgi", c: "Devre", d: "Ray", e: "Konsol", f: "Rıhtım", g: "Etkinlik", h: "Pano", i: "Izgara", j: "Defter", k: "Piksel", l: "Damla" },
       activities: "Etkinlikler", tasksLbl: "Açık pencereler",
       accents: { "#8fd3ff": "Buz mavisi", "#fbc419": "Milva sarısı", "#7fe0b5": "Nane", "#ff8f6b": "Mercan", "#b9a7ff": "Leylak", "#ff7eb6": "Pembe", "#ecebe7": "Kırık beyaz" },
       positions: { top: "Üst", bottom: "Alt", left: "Sol", right: "Sağ" },
@@ -1467,7 +1517,7 @@ p { margin: 0; max-width: 66ch; }
       days: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
       months: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
       am: "AM", pm: "PM",
-      looks: { a: "Island", b: "Line", c: "Circuit", d: "Rail", e: "Console", f: "Dock", g: "Activities", h: "Panel", i: "Grid", j: "Notebook", k: "Pixel" },
+      looks: { a: "Island", b: "Line", c: "Circuit", d: "Rail", e: "Console", f: "Dock", g: "Activities", h: "Panel", i: "Grid", j: "Notebook", k: "Pixel", l: "Drop" },
       activities: "Activities", tasksLbl: "Open windows",
       accents: { "#8fd3ff": "Ice blue", "#fbc419": "Milva yellow", "#7fe0b5": "Mint", "#ff8f6b": "Coral", "#b9a7ff": "Lilac", "#ff7eb6": "Pink", "#ecebe7": "Off-white" },
       positions: { top: "Top", bottom: "Bottom", left: "Left", right: "Right" },
@@ -1588,10 +1638,10 @@ p { margin: 0; max-width: 66ch; }
   /* =====================================================================
      State
      ===================================================================== */
-  const looks = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"];
-  const lookDefaults = { a: "#8fd3ff", b: "#ecebe7", c: "#fbc419", d: "#ff8f6b", e: "#ff7eb6", f: "#0a84ff", g: "#3584e4", h: "#4fd1c5", i: "#ff4b3e", j: "#a8d5a2", k: "#7b8cff" };
-  const lookGaps = { a: 14, b: 1, c: 12, d: 12, e: 12, f: 10, g: 10, h: 8, i: 1, j: 18, k: 6 };
-  const lookPos = { a: "top", b: "top", c: "top", d: "left", e: "bottom", f: "top", g: "top", h: "bottom", i: "top", j: "top", k: "top" };
+  const looks = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l"];
+  const lookDefaults = { a: "#8fd3ff", b: "#ecebe7", c: "#fbc419", d: "#ff8f6b", e: "#ff7eb6", f: "#0a84ff", g: "#3584e4", h: "#4fd1c5", i: "#ff4b3e", j: "#a8d5a2", k: "#7b8cff", l: "#34d158" };
+  const lookGaps = { a: 14, b: 1, c: 12, d: 12, e: 12, f: 10, g: 10, h: 8, i: 1, j: 18, k: 6, l: 10 };
+  const lookPos = { a: "top", b: "top", c: "top", d: "left", e: "bottom", f: "top", g: "top", h: "bottom", i: "top", j: "top", k: "top", l: "bottom" };
   // Design-page copy (always Turkish): what each look is.
   const lookDesc = {
     a: "Yüzen kapsüller. Bar ekrana yapışmaz, her modül grubu ayrı bir ada. Pencereler yumuşak köşeli, aralarında nefes payı var.",
@@ -1604,6 +1654,7 @@ p { margin: 0; max-width: 66ch; }
     i: "İsviçre grafik tasarımı: kalın grotesk yazı, büyük workspace rakamları, keskin köşeler ve kalın çizgiler. Pencereler aralıksız bir ızgarada kıl çizgilerle ayrılır; renk yalnızca kırmızı vurguda. Başlatıcı afiş gibi dev bir arama satırıyla açılır.",
     j: "Editoryal: bir dergi ya da defter sayfası gibi. Serif yazı, Romen rakamlı workspace'ler, italik pencere başlıkları ve ince çift çizgiler. Renk yalnızca etkin olanın altını çizer. Başlatıcı, sözlük kartı gibi ortada açılır.",
     k: "90'ların arayüzü: kabartma düğmeler, gömme göstergeler, piksel yazı. Etkin pencerenin başlık çubuğu vurgu renginde dolar; başlatıcı başlık şeritli eski bir diyalog kutusu gibi açılır, ses göstergesi bloklarla dolar.",
+    l: "Cam kapsüller ve dinamik ada. Altta üç ayrı buzlu cam kapsül: workspace'ler, başlat düğmesi ile uygulamalar, tepsi ve iki satırlı saat. Pencere başlığı, medya ve sistem değerleri üstteki siyah adaya taşınır. Başlatıcı ortada açılır.",
     g: "GNOME'a benzer: solda Etkinlikler düğmesi ve hap biçimli workspace göstergesi, ortada tarih ve saat, sağda tek parça sistem menüsü. Bildirimler üst ortadan iner.",
   };
   const accentList = ["#8fd3ff", "#fbc419", "#7fe0b5", "#ff8f6b", "#b9a7ff", "#ff7eb6", "#ecebe7"];
@@ -1625,7 +1676,7 @@ p { margin: 0; max-width: 66ch; }
   };
   try {
     const saved = JSON.parse(localStorage.getItem("kabuk-prefs") || "{}");
-    if (/^[a-k]$/.test(saved.dir || "")) state.dir = saved.dir;
+    if (/^[a-l]$/.test(saved.dir || "")) state.dir = saved.dir;
     if (/^#[0-9a-f]{6}$/i.test(saved.accent || "")) state.accent = saved.accent;
     if (/^(top|bottom|left|right)$/.test(saved.pos || "")) state.pos = saved.pos;
     if (/^(system|tr|en)$/.test(saved.lang || "")) state.langSetting = saved.lang;
@@ -1938,6 +1989,9 @@ launcher   idle      Alt+Space
     const wins = [["ed", "w-ed", "editor", editorHtml()], ["term", "w-term", "pwsh", termHtml()], ["web", "w-web", "milvaion", webHtml()], ["notes", "w-notes", "notes", notesHtml()]]
       .map(([key, cls, label, html]) => `<section class="win ${cls}" data-win="${key}" data-label="${label}" hidden>${vias}${html}<i class="grip" data-grip></i></section>`).join("");
 
+    // Damla's three capsules: the apps take the centre, the clock joins the right.
+    const damla = state.dir === "l";
+    const tasks = `<div class="grp tasks" data-tasks role="group" aria-label="${t("tasksLbl")}"></div>`;
     const wallId = state.wall[primary ? 1 : 2];
     return `<div class="screen${wallId !== "black" ? " has-wall" : ""}" data-dir="${state.dir}" data-pos="${barPos()}" data-mode="${modeNow()}">
       ${wallLayer(wallId, 1920, 1080)}
@@ -1945,10 +1999,10 @@ launcher   idle      Alt+Space
         <div class="bar-l">
           <div class="grp"><span class="logo" aria-hidden="true"></span><span class="act">${t("activities")}</span><div class="ws-list">${wsButtons}</div></div>
           <div class="grp"><span class="layout-ind">${icon("tile")}<span data-layout-label>${t("layoutTile")}</span></span>${m.title ? `<span class="title" data-title></span>` : ""}</div>
-          <div class="grp tasks" data-tasks role="group" aria-label="${t("tasksLbl")}"></div>
+          ${damla ? "" : tasks}
         </div>
-        <div class="bar-c">${center}</div>
-        <div class="bar-r">${right}</div>
+        <div class="bar-c">${damla ? `<span class="logo" aria-hidden="true">${icon("app")}</span>${tasks}` : center}</div>
+        <div class="bar-r">${right}${damla ? center : ""}</div>
       </header>
       <main class="tiles" data-ws="${ws}">${wins}</main>
       ${primary ? dockHtml() : ""}
@@ -2426,6 +2480,9 @@ launcher   idle      Alt+Space
         <div style="position:absolute;left:7px;right:7px;top:20px;bottom:7px;display:grid;grid-template-columns:1.3fr 1fr;grid-template-rows:1fr 1fr;gap:6px"><span style="grid-row:span 2;box-shadow:0 0 0 1px #3a352c, inset 0 6px 0 -4px VAR"></span><span style="box-shadow:0 0 0 1px #2a261f"></span><span style="box-shadow:0 0 0 1px #2a261f"></span></div>`;
   miniLook.k = `<div style="position:absolute;left:0;right:0;top:0;height:12px;background:#1e1e23;box-shadow:inset 1px 1px 0 #4c4c56, inset -1px -1px 0 #000;display:flex;align-items:center;gap:2px;padding:0 3px"><i style="width:8px;height:7px;background:#2c2c34;box-shadow:inset 1px 1px 0 #000, inset -1px -1px 0 #4c4c56"></i><i style="width:8px;height:7px;background:#1e1e23;box-shadow:inset 1px 1px 0 #4c4c56, inset -1px -1px 0 #000"></i><i style="flex:1"></i><i style="width:18px;height:7px;background:#141418;box-shadow:inset 1px 1px 0 #000, inset -1px -1px 0 #4c4c56"></i></div>
         <div style="position:absolute;left:4px;right:4px;top:16px;bottom:4px;display:grid;grid-template-columns:1.3fr 1fr;grid-template-rows:1fr 1fr;gap:3px"><span style="grid-row:span 2;background:#1e1e23;box-shadow:inset 1px 1px 0 #4c4c56, inset -1px -1px 0 #000;border-top:5px solid VAR"></span><span style="background:#1e1e23;box-shadow:inset 1px 1px 0 #4c4c56, inset -1px -1px 0 #000;border-top:5px solid #2c2c34"></span><span style="background:#1e1e23;box-shadow:inset 1px 1px 0 #4c4c56, inset -1px -1px 0 #000;border-top:5px solid #2c2c34"></span></div>`;
+  miniLook.l = `<div style="position:absolute;left:5px;right:5px;top:13px;bottom:18px;display:grid;grid-template-columns:1.3fr 1fr;grid-template-rows:1fr 1fr;gap:4px"><span style="grid-row:span 2;border:1px solid VAR;border-radius:4px"></span><span style="border:1px solid #2a2c31;border-radius:4px"></span><span style="border:1px solid #2a2c31;border-radius:4px"></span></div>
+        <div style="position:absolute;left:50%;top:3px;width:30px;height:7px;margin-left:-15px;border-radius:4px;background:#000;box-shadow:0 0 0 1px #2a2c31"></div>
+        <div style="position:absolute;left:0;right:0;bottom:3px;height:11px;display:flex;justify-content:center;gap:4px"><span style="width:18px;background:#26282c;border:1px solid #4a4d53;border-radius:6px;display:flex;align-items:center;justify-content:center"><i style="width:8px;height:4px;border-radius:2px;background:VAR"></i></span><span style="width:38px;background:#26282c;border:1px solid #4a4d53;border-radius:6px;display:flex;align-items:center;justify-content:center;gap:2px"><i style="width:5px;height:5px;background:VAR"></i><i style="width:5px;height:5px;background:#888"></i><i style="width:5px;height:5px;background:#888"></i><i style="width:5px;height:5px;background:#888"></i></span><span style="width:24px;background:#26282c;border:1px solid #4a4d53;border-radius:6px;display:flex;align-items:center;justify-content:center"><i style="width:12px;height:2px;background:#ddd"></i></span></div>`;
   miniLook.g = `<div style="position:absolute;left:0;right:0;top:0;height:10px;background:#000;display:flex;align-items:center;justify-content:space-between;padding:0 5px"><span style="display:flex;gap:2px;align-items:center"><i style="width:10px;height:2px;background:#ddd"></i><i style="width:7px;height:3px;border-radius:2px;background:VAR"></i><i style="width:3px;height:3px;border-radius:2px;background:#777"></i></span><span style="width:16px;height:2px;background:#ddd"></span><span style="width:12px;height:5px;border-radius:3px;background:#2e2e32"></span></div>
         <div style="position:absolute;left:5px;right:5px;top:14px;bottom:5px;display:grid;grid-template-columns:1.3fr 1fr;grid-template-rows:1fr 1fr;gap:4px"><span style="grid-row:span 2;border:1px solid #3a3a3a;border-radius:5px"></span><span style="border:1px solid #262626;border-radius:5px"></span><span style="border:1px solid #262626;border-radius:5px"></span></div>`;
   const saverArt = () => ({
@@ -2455,6 +2512,8 @@ launcher   idle      Alt+Space
     // Defter: fine pen lines. Piksel: chunky filled pages with a block cursor, like 90s icons.
     j: { r: 1, sw: 1.1, solid: false, page: "", ink: "fg-s" },
     k: { r: 0, sw: 2, solid: true, page: "surf-sel", ink: "fg-s", block: true },
+    // Damla: soft and solid on light pages, as frosted glass.
+    l: { r: 2.5, sw: 1, solid: true, page: { dark: "fg-s", light: "surf" }, ink: "faint", soft: true },
   };
   function systemIcon(kind, dir, mode) {
     const look = sysIconLook[dir] || sysIconLook.a;
