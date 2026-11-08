@@ -3919,6 +3919,91 @@ fn floating_groups_leave_the_desktop_behind_them() {
     );
 }
 
+/// Damla's blur stays inside its capsules (DECISIONS D99): Windows' own blur behind a
+/// window ignores the window's shape and frosted the whole strip, gaps and all. The rows
+/// above the capsules are part of the bar's window and must show the desktop untouched.
+#[test]
+fn damlas_glass_stays_inside_its_capsules() {
+    let primary = kabuk_win::shell::monitors().into_iter().find(|m| m.primary).unwrap();
+    let rows = kabuk_win::msgloop::PxRect {
+        x: primary.rect.left,
+        y: primary.rect.top,
+        w: primary.rect.right - primary.rect.left,
+        h: 3,
+    };
+    // Ada with no background takes as much of the screen and leaves the rows alone
+    // (`floating_groups_leave_the_desktop_behind_them`).
+    let rows_under = |look: &str, background: &str| {
+        let before = work_areas();
+        let sandbox = Sandbox::new();
+        std::fs::write(
+            sandbox.config_file(),
+            format!(
+                "schema = 1
+[appearance]
+look = \"{look}\"
+[bar]
+position = \"top\"
+background = \"{background}\"
+"
+            ),
+        )
+        .unwrap();
+        let _shell = sandbox.shell_with_bar(&[]);
+        assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("bar drawn") >= 1).is_some());
+        std::thread::sleep(Duration::from_millis(800));
+        let seen = kabuk_win::dpi::physical(|| kabuk_win::screen::capture(rows)).expect("screen");
+        assert_eq!(sandbox.restore().0, 0);
+        assert!(wait_until(SETTLE, || restored(&before)).is_some());
+        seen
+    };
+    let bare = rows_under("ada", "off");
+    let damla = rows_under("damla", "off");
+    let change = kabuk_win::screen::difference(&bare, &damla);
+    assert!(change < 1.0, "the desktop around the capsules changed by {change}");
+}
+
+/// Leaving Damla while Kabuk runs gives the bar its whole window back (DECISIONS D99).
+#[test]
+fn a_look_without_glass_takes_the_bar_back_whole() {
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    let look = |name: &str| {
+        std::fs::write(
+            sandbox.config_file(),
+            format!(
+                "schema = 1
+[appearance]
+look = \"{name}\"
+[bar]
+position = \"bottom\"
+"
+            ),
+        )
+        .unwrap()
+    };
+    look("damla");
+    let _shell = sandbox.shell_with_bar(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("bar cut to its capsules") > 0).is_some());
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let cut = || {
+        shell_windows("Kabuk.Bar", pid)
+            .into_iter()
+            .filter(|h| h.has_shapes())
+            .count()
+    };
+    let monitors = kabuk_win::shell::monitors().len();
+    assert!(
+        wait_until(SETTLE, || cut() == monitors).is_some(),
+        "{} of {monitors} bars cut",
+        cut()
+    );
+    look("pano");
+    assert!(wait_until(SETTLE, || cut() == 0).is_some(), "a bar stayed cut");
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(SETTLE, || restored(&before)).is_some());
+}
+
 /// The bar of Monitor 1 (main) of shell `pid`, and a sender of the shell's
 /// ABN_FULLSCREENAPP to it, as Explorer sends it (`true`: a program went full screen).
 fn main_bar_and_notify(pid: u32) -> (kabuk_win::window::Hwnd, impl Fn(bool)) {

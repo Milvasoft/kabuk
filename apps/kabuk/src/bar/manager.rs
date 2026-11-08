@@ -32,6 +32,7 @@ use kabuk_ui::render::{Gpu, Palette, PixelRect, Raster, RenderError, WindowSurfa
 use kabuk_win::appbar::{self, AppBar};
 use kabuk_win::audio::{self, Audio, Notify};
 use kabuk_win::events::{self, ForegroundWatch};
+use kabuk_win::glass::Glass;
 use kabuk_win::media::{Media, MediaInfo};
 use kabuk_win::msgloop::{self, msg, Msg, PxRect, Window};
 use kabuk_win::process::ExitWatch;
@@ -581,6 +582,10 @@ const ANNOUNCE_DEBOUNCE: Duration = Duration::from_millis(100);
 struct Bar {
     /// The shapes its window is cut to (Damla's capsules; empty: the whole window).
     cut: Vec<(PxRect, i32)>,
+    /// The frosted glass behind `cut`, in a look that has it (D99).
+    glass: Option<Glass>,
+    /// The colour last laid over `glass`.
+    tint: [u8; 4],
     window: Window,
     surface: Option<WindowSurface>,
     appbar: Option<AppBar>,
@@ -3962,22 +3967,55 @@ impl Shared {
 
     /// The blur behind a bar window when `bar.background = "blur"`, tinted with the
     /// desk colour of the mode in use (D28).
+    /// The colour laid over a blur: the one the user chose (D57), else the look's desk
+    /// colour; black is the desk of the dark modes.
+    fn blur_tint(&self) -> [u8; 4] {
+        let alpha = (BLUR_TINT_ALPHA * f32::from(u8::MAX)).round() as u8;
+        let (r, g, b) = match bar_color(self.config()) {
+            Some([r, g, b]) => (r, g, b),
+            None => self.look.tokens.color("desk").map_or((0, 0, 0), |d| (d.r, d.g, d.b)),
+        };
+        [r, g, b, alpha]
+    }
+
     fn set_backdrop(&self, hwnd: Hwnd) {
-        // Damla's capsules are glass whatever the bar's background says (D99).
-        let tint = (self.config().bar.background == BarBackground::Blur || self.look.style.glass).then(|| {
-            let alpha = (BLUR_TINT_ALPHA * f32::from(u8::MAX)).round() as u8;
-            // The colour the user chose (D57), else the look's desk colour; black is the
-            // desk of the dark modes.
-            let (r, g, b) = match bar_color(self.config()) {
-                Some([r, g, b]) => (r, g, b),
-                None => self.look.tokens.color("desk").map_or((0, 0, 0), |d| (d.r, d.g, d.b)),
-            };
-            [r, g, b, alpha]
-        });
+        // Damla frosts its capsules alone, through `Bar::glass` (D99).
+        let tint =
+            (self.config().bar.background == BarBackground::Blur && !self.look.style.glass).then(|| self.blur_tint());
         if hwnd.set_blur_behind(tint) {
             tracing::info!(hwnd = hwnd.0, blur = tint.is_some(), "bar backdrop set");
         } else if tint.is_some() {
             tracing::warn!("blur behind the bar unavailable");
+        }
+    }
+
+    /// Cuts bar `i` to the capsules and frosts them (D99). Only what changed is touched.
+    fn frost_bar(&mut self, i: usize, shapes: Vec<(PxRect, i32)>, tint: [u8; 4]) {
+        let bar = &mut self.bars[i];
+        if bar.glass.is_none() {
+            match Glass::new(bar.window.hwnd()) {
+                Ok(glass) => bar.glass = Some(glass),
+                Err(e) => tracing::warn!(error = %e, "no glass behind the capsules"),
+            }
+        }
+        let frost = |result: std::io::Result<()>| {
+            if let Err(e) = result {
+                tracing::warn!(error = %e, "the capsules' glass not set");
+            }
+        };
+        if tint != bar.tint {
+            bar.tint = tint;
+            if let Some(glass) = &bar.glass {
+                frost(glass.set_tint(tint));
+            }
+        }
+        if shapes != bar.cut {
+            tracing::debug!(capsules = shapes.len(), "bar cut to its capsules");
+            bar.window.hwnd().set_shapes(&shapes);
+            if let Some(glass) = &bar.glass {
+                frost(glass.set_shapes(&shapes));
+            }
+            bar.cut = shapes;
         }
     }
 
@@ -4042,6 +4080,8 @@ impl Shared {
         let drag = drag_watch(window.hwnd());
         Ok(Bar {
             cut: Vec::new(),
+            glass: None,
+            tint: [0; 4],
             _drag: drag,
             window,
             surface,
@@ -4924,11 +4964,13 @@ impl Shared {
             }
             if style.glass {
                 let shapes = geometry::glass_shapes(&layout, origin, scale);
-                if shapes != self.bars[i].cut {
-                    tracing::debug!(capsules = shapes.len(), "bar cut to its capsules");
-                    self.bars[i].window.hwnd().set_shapes(&shapes);
-                    self.bars[i].cut = shapes;
-                }
+                let tint = self.blur_tint();
+                self.frost_bar(i, shapes, tint);
+            } else if !self.bars[i].cut.is_empty() {
+                // A look without glass took over without the bar being made again.
+                self.bars[i].window.hwnd().set_shapes(&[]);
+                self.bars[i].cut.clear();
+                self.bars[i].glass = None;
             }
             let layout_us = started.elapsed().as_micros() as u64;
             // What screen readers find on it, read only when one asks (D97).
