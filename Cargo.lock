@@ -506,6 +506,7 @@ dependencies = [
  "windows",
  "windows-core",
  "windows-future",
+ "windows-numerics",
 ]
 
 [[package]]

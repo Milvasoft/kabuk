@@ -689,6 +689,15 @@ impl Hwnd {
     /// Cuts the window to `shapes` (client pixels, each a rectangle and its corner radius),
     /// so the rest of it neither shows nor takes the mouse; empty gives the whole window
     /// back. Windows' blur behind follows the cut (Damla's glass, DECISIONS D99).
+    /// Whether the window is cut to shapes ([`Hwnd::set_shapes`]).
+    pub fn has_shapes(self) -> bool {
+        use windows::Win32::Foundation::RECT;
+        use windows::Win32::Graphics::Gdi::{GetWindowRgnBox, NULLREGION};
+        let mut rect = RECT::default();
+        // SAFETY: `rect` is a valid out pointer for the call.
+        unsafe { GetWindowRgnBox(self.raw(), &mut rect) }.0 > NULLREGION.0
+    }
+
     pub fn set_shapes(self, shapes: &[(crate::msgloop::PxRect, i32)]) -> bool {
         use windows::Win32::Graphics::Gdi::{CombineRgn, CreateRoundRectRgn, DeleteObject, SetWindowRgn, HRGN, RGN_OR};
         if shapes.is_empty() {

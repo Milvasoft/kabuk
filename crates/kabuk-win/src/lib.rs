@@ -12,6 +12,7 @@ pub mod desktop;
 pub mod dpi;
 pub mod droptarget;
 pub mod events;
+pub mod glass;
 pub mod handle;
 pub mod hotspot;
 pub mod http;

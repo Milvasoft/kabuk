@@ -12,6 +12,7 @@ kabuk-core.workspace = true
 kabuk-i18n.workspace = true
 windows.workspace = true
 windows-core.workspace = true
+windows-numerics.workspace = true
 tracing.workspace = true
 webview2-com = { workspace = true, optional = true }
 
