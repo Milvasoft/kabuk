@@ -284,6 +284,11 @@ impl Shared {
     fn show_toast(&mut self, n: Notice) {
         let style = NotifyStyle::of(self.look.style.look);
         let (title, sub) = n.words(&self.i18n);
+        // On Damla the island says it (D99).
+        if self.island_notice(&title, &sub, n.icon()) {
+            tracing::info!(title = %title, sub = %sub, "notice shown");
+            return;
+        }
         let node = notify::view::toast(&title, &sub, n.icon(), &style, self.look.style.text_scale, &self.i18n);
         let Some((_, monitor, bar)) = self.notice_monitor() else {
             return;
@@ -336,6 +341,10 @@ impl Shared {
     fn show_osd(&mut self, level: Level, percent: u32) {
         let style = NotifyStyle::of(self.look.style.look);
         let p = u8::try_from(percent.min(100)).unwrap_or(100);
+        if self.island_level(level, p) {
+            tracing::debug!(?level, percent = p, "level shown");
+            return;
+        }
         let node = notify::view::osd(level, p, &style, self.look.style.text_scale);
         let Some((i, monitor, bar)) = self.notice_monitor() else {
             return;

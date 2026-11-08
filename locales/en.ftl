@@ -742,3 +742,24 @@ l-searching = Searching…
 set-saver-on = Screen saver
 set-saver-on-h = Starts after the wait chosen below
 set-saver-off-h = Off: no screen saver starts by itself. The shortcut and the hot corner still start the one chosen
+
+# Damla's island.
+island-name = Island
+island-desktop = Desktop
+island-no-value = –
+island-nothing-plays = Nothing is playing
+island-cpu = CPU
+island-ram = RAM
+island-gpu = GPU
+island-net = MB/s
+island-prev = Previous page
+island-next = Next page
+island-launcher = Launcher
+island-grid = All apps
+island-overview = Overview
+island-volume = Volume
+island-quick = Quick settings
+island-power = Power
+island-track-prev = Previous track
+island-track-play = Play or pause
+island-track-next = Next track

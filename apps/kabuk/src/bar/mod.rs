@@ -9,6 +9,7 @@ pub mod calendar_panel;
 pub mod dock;
 pub mod figures;
 pub mod geometry;
+pub mod island;
 pub mod keyboard_panel;
 pub mod keys_card;
 pub mod manager;

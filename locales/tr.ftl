@@ -741,3 +741,24 @@ l-searching = Aranıyor…
 set-saver-on = Ekran koruyucu
 set-saver-on-h = Aşağıda seçilen bekleme süresinden sonra başlar
 set-saver-off-h = Kapalı: hiçbir ekran koruyucu kendiliğinden başlamaz. Kısayol ve sıcak köşe seçileni yine başlatır
+
+# Damla görünümünün adası.
+island-name = Ada
+island-desktop = Masaüstü
+island-no-value = –
+island-nothing-plays = Çalan bir şey yok
+island-cpu = İşlemci
+island-ram = Bellek
+island-gpu = GPU
+island-net = MB/sn
+island-prev = Önceki sayfa
+island-next = Sonraki sayfa
+island-launcher = Başlatıcı
+island-grid = Tüm uygulamalar
+island-overview = Genel bakış
+island-volume = Ses
+island-quick = Hızlı ayarlar
+island-power = Güç
+island-track-prev = Önceki parça
+island-track-play = Çal veya duraklat
+island-track-next = Sonraki parça

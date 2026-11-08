@@ -70,6 +70,8 @@ pub mod cursors_host;
 mod gesture_host;
 #[path = "idle_host.rs"]
 mod idle_host;
+#[path = "island_host.rs"]
+mod island_host;
 #[path = "motion_host.rs"]
 mod motion_host;
 pub use calendar_host::{MSG_OPEN_CALENDAR_PANEL, MSG_TEST_CALENDAR_PANEL};
@@ -232,6 +234,10 @@ mod timer {
     pub const DEFERRED: usize = 41;
     /// The app grid has been closed a while: its screen taking (a GPU device) goes.
     pub const APP_GRID_CAPTURE: usize = 42;
+    /// The mouse has been away from Damla's island a moment: it closes.
+    pub const ISLAND_LEAVE: usize = 43;
+    /// A passing event on Damla's island has had its time.
+    pub const ISLAND_EVENT: usize = 44;
 }
 
 /// An auto-hiding bar (SPEC §2.1): how much of it stays on screen for the mouse to reach
@@ -873,6 +879,8 @@ struct Shared {
     slide_ticker: Option<kabuk_win::ticker::FrameTicker>,
     /// Steps the dock's tiles growing or settling under the mouse (D79).
     dock_ticker: Option<kabuk_win::ticker::FrameTicker>,
+    /// Damla's islands, one per monitor (D99).
+    islands: island_host::Islands,
     /// A display change came during a full-screen program: the bars are made again once
     /// it is gone (D72).
     rebuild_after_game: bool,
@@ -902,6 +910,8 @@ struct Look {
     mode: Mode,
     tokens: Tokens,
     palette: Palette,
+    /// Damla's island keeps the dark tokens in light mode: it is always black (D99).
+    island_palette: Palette,
     /// The bar's sizes: the look's, with the thickness the user set (D29).
     size: BarSize,
     /// Windows' high-contrast colours the palette took, while high contrast is on (D97).
@@ -963,6 +973,7 @@ fn resolve_look(cfg: &Config, windows_light: bool, hour: u8, contrast: Option<Co
     );
     // Etkinlik's bar stays black, so its text keeps the dark tokens in light mode.
     let fill = bar_color.map(|[r, g, b]| kabuk_theme::Color { r, g, b, a: 1.0 });
+    let island_palette = theme::palette(&resolved(Mode::Dark).tokens, fill);
     let palette = if let Some(c) = &contrast {
         tracing::info!("high contrast: the system's colours");
         theme::contrast_palette(c)
@@ -977,6 +988,7 @@ fn resolve_look(cfg: &Config, windows_light: bool, hour: u8, contrast: Option<Co
         size: bar_size(&r.tokens, cfg.bar.height),
         tokens: r.tokens,
         palette,
+        island_palette,
         contrast,
     }
 }
@@ -1159,6 +1171,7 @@ impl BarManager {
                 reveal: None,
                 slide_ticker: None,
                 dock_ticker: None,
+                islands: island_host::Islands::default(),
                 rebuild_after_game: false,
                 tray_menu: None,
                 tray_host: None,
@@ -1727,6 +1740,8 @@ impl Shared {
                         self.kill(timer::TRAY_MENU);
                         self.tray_menu = None;
                     }
+                    timer::ISLAND_LEAVE => self.island_left(),
+                    timer::ISLAND_EVENT => self.island_event_over(),
                     timer::TOAST => self.hide_toast(),
                     timer::IDLE => self.schedule_idle(),
                     timer::OSD => self.hide_osd(),
@@ -1974,6 +1989,10 @@ impl Shared {
                 self.step_bar_slides();
                 Some(0)
             }
+            island_host::MSG_ISLAND_FRAME => {
+                self.island_frame();
+                Some(0)
+            }
             MSG_DOCK_FRAME => {
                 if let Some(t) = &self.dock_ticker {
                     t.taken();
@@ -2163,7 +2182,11 @@ impl Shared {
                 Some(0)
             }
             MSG_MEDIA => {
+                let track = self.live.media.title.clone();
                 self.live.media = self.media.as_ref().map(Media::info).unwrap_or_default();
+                if let Some(t) = self.live.media.title.clone().filter(|t| track.as_ref() != Some(t)) {
+                    self.island_track(&t);
+                }
                 self.render_all(false);
                 self.media_card_changed();
                 Some(0)
@@ -2234,7 +2257,8 @@ impl Shared {
             .iter()
             .filter(|b| !b.aside)
             .map(|b| &b.window)
-            .chain(self.dock.as_ref().map(|d| &d.window));
+            .chain(self.dock.as_ref().map(|d| &d.window))
+            .chain(self.islands.windows.iter().filter(|i| !i.aside).map(|i| &i.window));
         let windows: Vec<&Window> = windows.filter(|w| w.hwnd().is_visible()).collect();
         let hwnds: Vec<Hwnd> = windows.iter().map(|w| w.hwnd()).collect();
         let under = kabuk_win::window::under_ordinary_windows(&hwnds);
@@ -2367,6 +2391,7 @@ impl Shared {
                 tracing::info!("dock back after a full-screen program");
             }
         }
+        self.islands_aside(|device| g.hide_bar && devices.iter().any(|d| d == device));
         if devices != self.game_devices {
             let (was, now) = (!self.game_devices.is_empty(), !devices.is_empty());
             tracing::info!(?devices, "game mode");
@@ -2445,6 +2470,8 @@ impl Shared {
                 .as_ref()
                 .is_none_or(kabuk_win::power::DisplayWatch::displays_on)
             && self.bars.iter().any(|b| !b.aside && b.peek.is_none_or(|p| p.to > 0.0));
+        // On Damla's bar they are not drawn: read only while its island shows them.
+        let seen = seen && (!island_host::shown(self.look.style.look) || self.islands_show_figures());
         let want = (seen && (m.cpu || m.ram || m.net), seen && m.gpu);
         if want == self.figures {
             return;
@@ -2619,6 +2646,7 @@ impl Shared {
 
     /// Recreates every bar (and Rıhtım's dock) from the current monitors and configuration.
     fn rebuild(&mut self) {
+        self.drop_islands();
         self.dock = None;
         self.bars.clear();
         // A monitor came or went: Explorer may have made new taskbars meanwhile.
@@ -2648,6 +2676,7 @@ impl Shared {
                 }
             }
         }
+        self.create_islands();
         self.render_all(true);
         // New bars start shown; a game already full screen keeps them away.
         self.step_aside_for_fullscreen();
@@ -4953,6 +4982,7 @@ impl Shared {
         }
         self.publish_app_icons();
         self.publish_tray_places();
+        self.draw_islands();
         if drew {
             match self.gpu.commit() {
                 Ok(()) => {}
@@ -4989,6 +5019,7 @@ impl Shared {
                             .ok();
                     d.drawn = None;
                 }
+                self.islands_new_device();
                 self.render_all(true);
             }
             Err(e) => tracing::error!(error = %e, "GPU unavailable"),
