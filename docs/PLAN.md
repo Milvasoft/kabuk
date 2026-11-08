@@ -541,6 +541,7 @@ Glass capsules and a dynamic island (DECISIONS D99).
 - The glass: the bar's window is cut to its capsules so the mouse passes between them, and each capsule has a real blur of its own (`kabuk_win::glass`). Tests: `the_glass_has_exactly_the_shapes_it_is_given`, `damlas_glass_stays_inside_its_capsules` (failed before, with the acrylic), `a_look_without_glass_takes_the_bar_back_whole`. Measured over a window of black and white stripes: the gaps stay sharp black and white, a capsule's inside is one even colour, the expected blend of the blur, the tint and the fill.
 - The apps grow under the mouse as the dock's tiles do. Tests: `damlas_apps_grow_as_the_docks_do_and_their_capsule_makes_room`, `damlas_apps_grow_under_the_mouse_and_settle`, `a_shape_that_moves_keeps_its_piece`.
 - Hidden, the bar still takes the mouse on its sliver (DECISIONS D100): `the_sliver_is_the_side_left_on_the_screen`, `damlas_hidden_bar_comes_back_under_the_mouse`.
+- The island's contents stand in the pill's middle (`its_contents_stand_in_the_middle_of_the_pill`, failed by 14 px before); its pages turn by a drag, a wheel or a touchpad (`a_drag_turns_one_page_and_is_not_a_click`, `a_wheel_turns_by_the_notch_and_a_touchpad_once`, `a_drag_across_damlas_island_turns_its_page`).
 - *Left out: banners for devices connecting (Windows gives no such event without a watcher of its own), and the island reserves no room at the top, so a maximised window runs under it.*
 
 ## M21 · Saved desktops `[ ]`
