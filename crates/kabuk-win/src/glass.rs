@@ -6,7 +6,7 @@
 //! rounded shape, so that is what shapes use. Its visuals sit under the window's own
 //! DirectComposition content (the "not topmost" target of the window).
 
-use std::cell::OnceCell;
+use std::cell::{OnceCell, RefCell};
 
 use windows::core::{Interface, BOOL};
 use windows::System::DispatcherQueueController;
@@ -18,7 +18,8 @@ use windows::Win32::System::WinRT::{
 use windows::UI::Color;
 use windows::UI::Composition::Desktop::DesktopWindowTarget;
 use windows::UI::Composition::{
-    CompositionBackdropBrush, CompositionBrush, CompositionColorBrush, Compositor, ContainerVisual,
+    CompositionBackdropBrush, CompositionBrush, CompositionColorBrush, CompositionRoundedRectangleGeometry, Compositor,
+    ContainerVisual, SpriteVisual,
 };
 use windows_numerics::{Vector2, Vector3};
 
@@ -55,12 +56,21 @@ fn ensure_queue() -> std::io::Result<()> {
     }
 }
 
+/// One frosted shape: moved and resized in place, as a capsule changes every frame while
+/// its apps grow.
+struct Piece {
+    visual: ContainerVisual,
+    outline: CompositionRoundedRectangleGeometry,
+    layers: [SpriteVisual; 2],
+}
+
 /// The frosted shapes behind one window. Dropping it takes them away.
 pub struct Glass {
     compositor: Compositor,
     root: ContainerVisual,
     backdrop: CompositionBackdropBrush,
     tint: CompositionColorBrush,
+    pieces: RefCell<Vec<Piece>>,
     _target: DesktopWindowTarget,
 }
 
@@ -94,6 +104,7 @@ impl Glass {
             root,
             backdrop,
             tint,
+            pieces: RefCell::new(Vec::new()),
             _target: target,
         })
     }
@@ -103,47 +114,70 @@ impl Glass {
         self.tint.SetColor(Color { A: a, R: r, G: g, B: b }).map_err(other)
     }
 
+    fn new_piece(&self) -> std::io::Result<Piece> {
+        let visual = self.compositor.CreateContainerVisual().map_err(other)?;
+        let outline = self.compositor.CreateRoundedRectangleGeometry().map_err(other)?;
+        let clip = self
+            .compositor
+            .CreateGeometricClipWithGeometry(&outline)
+            .map_err(other)?;
+        visual.SetClip(&clip).map_err(other)?;
+        let children = visual.Children().map_err(other)?;
+        let [under, over]: [CompositionBrush; 2] =
+            [self.backdrop.cast().map_err(other)?, self.tint.cast().map_err(other)?];
+        let sprite = |brush: CompositionBrush| -> std::io::Result<SpriteVisual> {
+            let layer = self.compositor.CreateSpriteVisual().map_err(other)?;
+            layer.SetBrush(&brush).map_err(other)?;
+            children.InsertAtTop(&layer).map_err(other)?;
+            Ok(layer)
+        };
+        let layers = [sprite(under)?, sprite(over)?];
+        Ok(Piece {
+            visual,
+            outline,
+            layers,
+        })
+    }
+
     /// Frosts exactly these shapes (rectangle in the window, corner radius), in pixels.
     pub fn set_shapes(&self, shapes: &[(PxRect, i32)]) -> std::io::Result<()> {
+        let mut pieces = self.pieces.borrow_mut();
         let children = self.root.Children().map_err(other)?;
-        children.RemoveAll().map_err(other)?;
-        for (rect, radius) in shapes {
+        while pieces.len() > shapes.len() {
+            if let Some(piece) = pieces.pop() {
+                children.Remove(&piece.visual).map_err(other)?;
+            }
+        }
+        while pieces.len() < shapes.len() {
+            let piece = self.new_piece()?;
+            children.InsertAtTop(&piece.visual).map_err(other)?;
+            pieces.push(piece);
+        }
+        for (piece, (rect, radius)) in pieces.iter().zip(shapes) {
             let size = Vector2 {
                 X: rect.w as f32,
                 Y: rect.h as f32,
             };
-            let piece = self.compositor.CreateContainerVisual().map_err(other)?;
             piece
+                .visual
                 .SetOffset(Vector3 {
                     X: rect.x as f32,
                     Y: rect.y as f32,
                     Z: 0.0,
                 })
                 .map_err(other)?;
-            piece.SetSize(size).map_err(other)?;
-            let outline = self.compositor.CreateRoundedRectangleGeometry().map_err(other)?;
-            outline.SetSize(size).map_err(other)?;
-            outline
+            piece.visual.SetSize(size).map_err(other)?;
+            piece.outline.SetSize(size).map_err(other)?;
+            piece
+                .outline
                 .SetCornerRadius(Vector2 {
                     X: *radius as f32,
                     Y: *radius as f32,
                 })
                 .map_err(other)?;
-            let clip = self
-                .compositor
-                .CreateGeometricClipWithGeometry(&outline)
-                .map_err(other)?;
-            piece.SetClip(&clip).map_err(other)?;
-            let layers = piece.Children().map_err(other)?;
-            let brushes: [CompositionBrush; 2] =
-                [self.backdrop.cast().map_err(other)?, self.tint.cast().map_err(other)?];
-            for brush in brushes {
-                let layer = self.compositor.CreateSpriteVisual().map_err(other)?;
-                layer.SetBrush(&brush).map_err(other)?;
+            for layer in &piece.layers {
                 layer.SetSize(size).map_err(other)?;
-                layers.InsertAtTop(&layer).map_err(other)?;
             }
-            children.InsertAtTop(&piece).map_err(other)?;
         }
         Ok(())
     }
@@ -176,6 +210,17 @@ mod tests {
         glass.set_tint([1, 2, 3, 4]).unwrap();
         glass.set_shapes(&[]).unwrap();
         assert_eq!(glass.shapes().unwrap(), 0);
+    }
+
+    #[test]
+    fn a_shape_that_moves_keeps_its_piece() {
+        let w = Window::shell_surface("Kabuk.Test.GlassMove", "", PxRect::default(), |_| None).unwrap();
+        let glass = Glass::new(w.hwnd()).unwrap();
+        glass.set_shapes(&[shape(0), shape(120)]).unwrap();
+        let first = glass.pieces.borrow()[0].visual.clone();
+        glass.set_shapes(&[shape(7), shape(140)]).unwrap();
+        assert_eq!(glass.pieces.borrow()[0].visual, first);
+        assert_eq!(glass.shapes().unwrap(), 2);
     }
 
     #[test]
