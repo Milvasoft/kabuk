@@ -218,6 +218,8 @@ mod tests {
         );
         // Defter is centred, 200 px down.
         assert_eq!(at(Look::Defter, bar(Edge::Top, 0.0, 50.0), SIZE), (674.0, 200.0));
+        // Damla too, 220 px down, whatever edge its capsules are on (DECISIONS D99).
+        assert_eq!(at(Look::Damla, bar(Edge::Bottom, 8.0, 46.0), SIZE), (674.0, 220.0));
     }
 
     #[test]

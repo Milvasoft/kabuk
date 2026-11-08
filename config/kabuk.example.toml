@@ -9,7 +9,7 @@
 schema = 1
 
 [appearance]
-look = "rihtim"           # ada, cizgi, devre, ray, konsol, rihtim, etkinlik, pano, izgara, defter
+look = "rihtim"           # ada, cizgi, devre, ray, konsol, rihtim, etkinlik, pano, izgara, defter, damla
 accent = "theme"          # "theme" (the look's own colour) or "#rrggbb"
 mode = "dark"             # dark, light, system (follow Windows), time (light 07:00-19:00)
 text_size = "normal"      # small, normal, large

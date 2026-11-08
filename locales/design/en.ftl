@@ -34,6 +34,7 @@ looks-h = Panel
 looks-i = Grid
 looks-j = Notebook
 looks-k = Pixel
+looks-l = Drop
 activities = Activities
 tasks-lbl = Open windows
 accents-8fd3ff = Ice blue

@@ -14,6 +14,8 @@ pub enum Group {
     Capsule { radius: f32, border: f32 },
     /// Devre: an outline of circuit trace.
     Outline { radius: f32, border: f32 },
+    /// Damla: frosted glass with a thin light edge, nothing behind it (DECISIONS D99).
+    Glass { radius: f32, border: f32 },
     /// Nothing drawn around the group.
     Bare,
 }
@@ -260,6 +262,9 @@ pub enum Arrangement {
     /// Izgara: the centre in the middle of the room between start and end
     /// (`auto 1fr auto`, `.bar-c { justify-content: center }`).
     Between,
+    /// Damla: three capsules together in the middle of the bar, `group_gap` apart: the
+    /// workspaces; the all-apps button and the apps; the rest with the clock last.
+    Capsules,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -290,7 +295,7 @@ pub struct Style {
     pub group_pad_h: f32,
     pub group_pad_v: f32,
     pub group_inner_gap: f32,
-    /// Gap between groups in a region (`.bar-l`, `.bar-r` gap).
+    /// Gap between groups in a region (`.bar-l`, `.bar-r` gap); Damla's between capsules.
     pub group_gap: f32,
     pub between: Between,
     /// The whole bar's own background (Ray's slab, Rıhtım's glass, Etkinlik's black).
@@ -383,6 +388,8 @@ pub struct Style {
     /// (found by the user: Etkinlik's black strip hid the blur, and the desk colour drawn
     /// over a wallpaper made "none" look solid).
     pub solid: bool,
+    /// The bar's window is blurred behind its groups (DECISIONS D99).
+    pub glass: bool,
 }
 
 /// How opaque the desk colour lies over the blurred wallpaper behind a bar
@@ -449,13 +456,16 @@ impl Style {
     /// What fills Devre's groups when the bar's background is solid: the colour the user
     /// chose (D57), else the desk colour; no strip lies behind them (found by the user:
     /// the strip behind its floating groups looked like a black band across the screen;
-    /// DECISIONS D71). `None` for the other looks and backgrounds.
+    /// DECISIONS D71). Damla's capsules likewise, in their glass (D99). `None` for the
+    /// other looks and backgrounds.
     pub fn group_fill(&self) -> Option<Role> {
-        (self.look == Look::Devre && self.solid).then_some(if self.bar_color.is_some() {
-            Role::BarFill
-        } else {
-            Role::Desk
-        })
+        let own = match self.look {
+            Look::Devre => Role::Desk,
+            Look::Damla => Role::Glass,
+            _ => return None,
+        };
+        self.solid
+            .then_some(if self.bar_color.is_some() { Role::BarFill } else { own })
     }
 
     /// The bar strip is filled behind everything: a solid background, unless the groups
@@ -476,6 +486,7 @@ impl Style {
             Look::Pano => pano(),
             Look::Izgara => izgara(),
             Look::Defter => defter(),
+            Look::Damla => damla(),
         }
     }
 }
@@ -579,6 +590,7 @@ fn ada() -> Style {
         wallpaper: false,
         bar_color: None,
         solid: true,
+        glass: false,
     }
 }
 
@@ -999,6 +1011,54 @@ fn defter() -> Style {
     }
 }
 
+/// `.screen[data-dir="l"]`: three glass capsules at the bottom; the window's title, the
+/// media and the system figures are the island's (DECISIONS D99).
+fn damla() -> Style {
+    let a = ada();
+    Style {
+        look: Look::Damla,
+        group: Group::Glass {
+            radius: 999.0,
+            border: 1.0,
+        },
+        group_pad_h: 16.0,
+        group_pad_v: 14.0,
+        group_gap: 56.0,
+        arrangement: Arrangement::Capsules,
+        ws: Ws::Pill {
+            w: 26.0,
+            h: 26.0,
+            active_w: 38.0,
+            radius: 13.0,
+            vertical: 26.0,
+            vertical_active_h: 38.0,
+            busy_dot: 3.0,
+        },
+        icon: 18.0,
+        mod_icon_color: Role::Fg,
+        // The switch that leaves only the volume's icon of the figures.
+        volume_icon_only: true,
+        layout: LayoutIndicator::Hidden,
+        title: false,
+        second_start_group: false,
+        media_group: false,
+        media_bars: None,
+        tray_icon: 18.0,
+        app_icon: 24.0,
+        app_grid_color: Some(Role::Accent),
+        clock: Clock {
+            time_size: 13.0,
+            date_size: 12.0,
+            date_color: Role::Fg,
+            gap: 0.0,
+            stacked: Some(1.25),
+            ..a.clock
+        },
+        glass: true,
+        ..a
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //! Every look has a style; the distinctive choices from the design page hold.
@@ -1065,6 +1125,16 @@ mod tests {
         assert!(j.clock.date_typo.italic && j.title_typo.italic && !j.title_main_typo.italic);
         assert!(j.bar_line.is_some_and(|l| l.double) && j.label_typo.small_caps);
         assert!(matches!(j.between, Between::Glyph { .. }));
+        // Damla: glass capsules, the figures, title and media left to the island, the
+        // clock in two lines; the only look whose window is blurred behind its groups.
+        let l = Style::of(Look::Damla);
+        assert!(matches!(l.group, Group::Glass { .. }));
+        assert_eq!(l.arrangement, Arrangement::Capsules);
+        assert!(!l.title && !l.media_group && l.volume_icon_only && l.clock.stacked.is_some());
+        assert_eq!(l.bar_paint, None);
+        for look in Look::ALL {
+            assert_eq!(Style::of(look).glass, look == Look::Damla, "{look:?}");
+        }
         let big = Style::of(Look::Ada).with_text_scale(1.15);
         assert!((big.size(13.0) - 14.95).abs() < 1e-4);
     }
@@ -1134,12 +1204,33 @@ mod tests {
         assert!(Style::of(Look::Etkinlik).bar_background().is_some(), "solid by default");
     }
 
+    /// DECISIONS D99: no strip lies behind Damla's capsules, over a wallpaper or not,
+    /// whatever fills them: their glass, or the colour the user chose.
+    #[test]
+    fn damlas_capsules_have_nothing_behind_them() {
+        let solid = Style::of(Look::Damla).with_solid(true);
+        for wall in [true, false] {
+            let s = solid.with_wallpaper(wall);
+            assert_eq!(s.bar_background(), None, "{wall}");
+            assert!(!s.strip(), "{wall}");
+            assert_eq!(s.group_fill(), Some(Role::Glass), "{wall}");
+        }
+        let chosen = solid.with_bar_color(Some([30, 20, 51]));
+        assert_eq!(chosen.bar_background(), None);
+        assert_eq!(chosen.group_fill(), Some(Role::BarFill));
+        assert_eq!(solid.with_solid(false).bar_background(), None);
+        assert!(!solid.with_solid(false).strip());
+    }
+
     /// DECISIONS D57: a colour the user chose fills the whole strip in every look, with
-    /// or without a wallpaper; a look's slab keeps its corners and border. Devre fills its
-    /// groups with it instead (D71).
+    /// or without a wallpaper; a look's slab keeps its corners and border. Devre and Damla
+    /// fill their groups with it instead (D71, D99).
     #[test]
     fn a_chosen_bar_colour_fills_the_strip_in_every_look() {
-        for look in Look::ALL.into_iter().filter(|l| *l != Look::Devre) {
+        for look in Look::ALL
+            .into_iter()
+            .filter(|l| !matches!(l, Look::Devre | Look::Damla))
+        {
             let s = Style::of(look).with_bar_color(Some([30, 20, 51]));
             for wall in [true, false] {
                 let p = s.with_wallpaper(wall).bar_background().expect("painted");

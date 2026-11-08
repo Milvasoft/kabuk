@@ -72,10 +72,12 @@ fn defaults_follow_the_spec() {
     assert_eq!(c.bar.position.edge(Look::Pano), Edge::Bottom);
     assert_eq!(c.bar.position.edge(Look::Izgara), Edge::Top);
     assert_eq!(c.bar.position.edge(Look::Defter), Edge::Top);
+    // Damla's capsules float at the bottom; the top is its island's (DECISIONS D99).
+    assert_eq!(c.bar.position.edge(Look::Damla), Edge::Bottom);
     assert_eq!(BarPosition::Right.edge(Look::Ray), Edge::Right);
-    // The design's looks but Piksel (`k`), which the user did not want (2026-10-15).
+    // The design's looks but Piksel (`k`), left out on 2026-10-15; `l` is Damla (D99).
     let codes: Vec<&str> = Look::ALL.iter().map(|l| l.code()).collect();
-    assert_eq!(codes, vec!["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]);
+    assert_eq!(codes, vec!["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "l"]);
 }
 
 /// DECISIONS D68: touchpad swipes are off by default, three fingers, as macOS; four
@@ -110,7 +112,12 @@ fn gestures_default_off_with_three_fingers() {
 /// The new looks are written by their ASCII names, like the others.
 #[test]
 fn new_looks_parse_by_name() {
-    for (name, look) in [("pano", Look::Pano), ("izgara", Look::Izgara), ("defter", Look::Defter)] {
+    for (name, look) in [
+        ("pano", Look::Pano),
+        ("izgara", Look::Izgara),
+        ("defter", Look::Defter),
+        ("damla", Look::Damla),
+    ] {
         let loaded = parse(&format!("schema = 1\n[appearance]\nlook = \"{name}\"\n")).unwrap();
         assert_eq!(loaded.config.appearance.look, look);
         assert!(loaded.warnings.is_empty(), "{name}: {:?}", loaded.warnings);

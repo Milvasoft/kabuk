@@ -45,7 +45,7 @@ fn square(gpu: &Gpu, key: u64) -> u64 {
 fn main() {
     let out = std::env::args().nth(1).unwrap_or_else(|| "bar.png".into());
     let code = arg("--look").unwrap_or_else(|| "a".into());
-    let look = Look::ALL.into_iter().find(|l| l.code() == code).expect("look a-j");
+    let look = Look::ALL.into_iter().find(|l| l.code() == code).expect("look a-j or l");
     let mode = if arg("--mode").as_deref() == Some("light") {
         Mode::Light
     } else {

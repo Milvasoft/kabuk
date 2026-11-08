@@ -242,6 +242,12 @@ fn group(children: Vec<Node>, s: &Style, vertical: bool, thickness: f32) -> Node
             border: Some((Role::Trace, border)),
             radius,
         }),
+        Group::Glass { radius, border } => Some(Paint {
+            // The glass stays whatever the bar's background is (it is the capsule).
+            fill: s.group_fill().unwrap_or(Role::Glass),
+            border: Some((Role::GlassLine, border)),
+            radius,
+        }),
         Group::Bare => None,
     };
     // `box-sizing: border-box`: the border sits inside the box, before the padding. The
@@ -1150,6 +1156,8 @@ fn tasks(d: &BarData, s: &Style, t: &super::style::Tasks) -> Vec<Node> {
 /// icons, and the "+n" shown for `n` icons left out (index `n - 1`).
 pub struct AppsGroup {
     pub at: usize,
+    /// Damla: the all-apps button, first in the apps' capsule.
+    pub lead: Option<Node>,
     pub icons: Vec<Node>,
     pub more: Vec<Node>,
 }
@@ -1158,7 +1166,8 @@ impl AppsGroup {
     /// The group with its first `shown` icons, and a "+n" for the rest.
     fn node(&self, shown: usize, s: &Style, vertical: bool, thickness: f32) -> Node {
         let shown = shown.min(self.icons.len());
-        let mut list: Vec<Node> = self.icons[..shown].to_vec();
+        let mut list: Vec<Node> = self.lead.iter().cloned().collect();
+        list.extend_from_slice(&self.icons[..shown]);
         let left_out = self.icons.len() - shown;
         if let Some(more) = left_out.checked_sub(1).and_then(|i| self.more.get(i)) {
             list.push(more.clone());
@@ -1216,6 +1225,9 @@ pub fn regions(d: &BarData, s: &Style, i18n: &I18n, thickness: f32) -> Regions {
         mark(&mut r.center);
         mark(&mut r.end);
         if let Some(a) = r.apps.as_mut() {
+            let mut lead: Vec<Node> = a.lead.take().into_iter().collect();
+            mark(&mut lead);
+            a.lead = lead.pop();
             mark(&mut a.icons);
             mark(&mut a.more);
         }
@@ -1227,18 +1239,31 @@ fn drawn_regions(d: &BarData, s: &Style, i18n: &I18n, thickness: f32) -> Regions
     let v = d.vertical();
     let g = |children: Vec<Node>| group(children, s, v, thickness);
 
+    let capsules = s.arrangement == Arrangement::Capsules;
     let mut first = Vec::new();
-    // Before the workspaces, as Launchpad leads macOS's dock, in every look: it stands
-    // where Rıhtım's logo ring and Etkinlik's "Activities" stood (asked for by the user).
-    if d.modules.app_grid {
-        let color = s.app_grid_color.unwrap_or(s.mod_icon_color);
+    let color = s.app_grid_color.unwrap_or(s.mod_icon_color);
+    // Damla's leads the apps, as large as they are and level with their pictures.
+    let lead = (capsules && d.modules.app_grid).then(|| {
+        Node::icon("app", s.app_icon, color)
+            .padding(Insets {
+                bottom: APP_MARK.1 + APP_MARK_GAP,
+                ..Insets::default()
+            })
+            .hit(hit::APP_GRID, 0)
+    });
+    // Before the workspaces, as Launchpad leads macOS's dock, in every other look: it
+    // stands where Rıhtım's logo ring and Etkinlik's "Activities" stood (asked for by the
+    // user).
+    if !capsules && d.modules.app_grid {
         first.push(Node::icon("app", s.tray_icon, color).hit(hit::APP_GRID, 0));
     }
     first.push(workspaces(d, s, i18n, thickness));
     let mut start = vec![g(first)];
     // The apps before the title, which changes with every window (found by the user: it
     // pushed the apps about).
-    let apps = app_icons(d, s).map(|icons| {
+    let icons = app_icons(d, s);
+    let apps = (icons.is_some() || lead.is_some()).then(|| {
+        let icons = icons.unwrap_or_default();
         let more = (1..=icons.len())
             .map(|n| {
                 let label = i18n.tr_args("bar-tray-more", &[("value", n.into())]);
@@ -1247,6 +1272,7 @@ fn drawn_regions(d: &BarData, s: &Style, i18n: &I18n, thickness: f32) -> Regions
             .collect();
         AppsGroup {
             at: start.len(),
+            lead,
             icons,
             more,
         }
@@ -1264,9 +1290,25 @@ fn drawn_regions(d: &BarData, s: &Style, i18n: &I18n, thickness: f32) -> Regions
         }
     }
 
-    let center = clock(d, s, i18n)
-        .map(|c| vec![g(vec![c.hit(hit::CLOCK, 0)])])
-        .unwrap_or_default();
+    let clock = clock(d, s, i18n).map(|c| c.hit(hit::CLOCK, 0));
+    if capsules {
+        // The third capsule holds what is left, in one piece, the clock at its end.
+        let mut parts: Vec<Node> = tray(d, s, i18n).into_iter().collect();
+        parts.extend(stats(d, s, i18n));
+        parts.extend(indicators(d, s, i18n));
+        parts.extend(bell_and_power(d, s));
+        parts.extend(clock);
+        if d.primary && d.modules.show_desktop {
+            parts.push(show_desktop(d, s));
+        }
+        return Regions {
+            start,
+            center: Vec::new(),
+            end: if parts.is_empty() { Vec::new() } else { vec![g(parts)] },
+            apps,
+        };
+    }
+    let center = clock.map(|c| vec![g(vec![c])]).unwrap_or_default();
 
     let mut end = Vec::new();
     if let Some(media) = media(d, s, i18n) {
@@ -1400,6 +1442,10 @@ pub fn backdrop(layout: &mut Layout, window: Rect) {
 pub fn compose(r: &Regions, size: Size, s: &Style, edge: Edge, measure: &dyn TextMeasure) -> Layout {
     let vertical = matches!(edge, Edge::Left | Edge::Right);
     let thickness = if vertical { size.w } else { size.h };
+    if let (Arrangement::Capsules, Some(apps)) = (s.arrangement, &r.apps) {
+        let middle = apps_in_the_middle(r, apps, size, s, vertical, measure);
+        return compose(&middle, size, s, edge, measure);
+    }
     let mut out = Layout {
         size,
         ..Layout::default()
@@ -1466,7 +1512,13 @@ pub fn compose(r: &Regions, size: Size, s: &Style, edge: Edge, measure: &dyn Tex
     // Each side may reach up to the centre group, one group gap away; with no centre
     // group, up to the middle.
     let gap = if center.is_some() { s.group_gap } else { 0.0 };
-    let side_room = ((main - center_len) / 2.0 - pad - gap).max(0.0);
+    // Damla's capsules are measured out already and have nothing to shorten.
+    let capsules = s.arrangement == Arrangement::Capsules;
+    let side_room = if capsules {
+        main
+    } else {
+        ((main - center_len) / 2.0 - pad - gap).max(0.0)
+    };
     let end = (!r.end.is_empty()).then(|| fitted(joined(&r.end, s, vertical, thickness), side_room, vertical, measure));
     let length = |n: &Option<Node>| n.as_ref().map(|n| len(layout(n, Point::default(), measure).size));
     // With no centre group (the clock at the end), the start may reach up to the end.
@@ -1512,16 +1564,82 @@ pub fn compose(r: &Regions, size: Size, s: &Style, edge: Edge, measure: &dyn Tex
     } else {
         ((main - center_len) / 2.0).min(highest - center_len).max(lowest)
     };
+    // Damla's outer capsules stand beside the middle one, the desktop around them.
+    let apart = if center.is_some() {
+        s.group_gap
+    } else {
+        s.group_gap / 2.0
+    };
+    let center_end = center_at + center_len;
     if let Some(n) = start {
-        add(n, &|sz| pos(pad, sz));
+        add(n, &|sz| {
+            pos(
+                if capsules {
+                    (center_at - apart - len(sz)).max(pad)
+                } else {
+                    pad
+                },
+                sz,
+            )
+        });
     }
     if let Some(c) = center {
         add(c, &|sz| pos(center_at, sz));
     }
     if let Some(n) = end {
-        add(n, &|sz| pos(main - pad - len(sz), sz));
+        let last = main - pad;
+        add(n, &|sz| {
+            pos(
+                if capsules {
+                    (center_end + apart).min(last - len(sz))
+                } else {
+                    last - len(sz)
+                },
+                sz,
+            )
+        });
     }
     out
+}
+
+/// Damla's regions with the apps' capsule as the centre: as many apps as leave room for
+/// the outer capsules and their gaps; the rest behind the "+n" (DECISIONS D99).
+fn apps_in_the_middle(
+    r: &Regions,
+    apps: &AppsGroup,
+    size: Size,
+    s: &Style,
+    vertical: bool,
+    measure: &dyn TextMeasure,
+) -> Regions {
+    let thickness = if vertical { size.w } else { size.h };
+    let main = if vertical { size.h } else { size.w };
+    let along = |node: &Node| {
+        let sz = layout(node, Point::default(), measure).size;
+        if vertical {
+            sz.h
+        } else {
+            sz.w
+        }
+    };
+    let outer = |nodes: &[Node]| {
+        if nodes.is_empty() {
+            0.0
+        } else {
+            along(&joined(nodes, s, vertical, thickness))
+        }
+    };
+    let room = main - 2.0 * (s.bar_pad + s.group_gap) - outer(&r.start) - outer(&r.end);
+    let shown = (0..=apps.icons.len())
+        .rev()
+        .find(|n| along(&apps.node(*n, s, vertical, thickness)) <= room)
+        .unwrap_or(0);
+    Regions {
+        start: r.start.clone(),
+        center: vec![apps.node(shown, s, vertical, thickness)],
+        end: r.end.clone(),
+        apps: None,
+    }
 }
 
 /// `node` cut to at most `room` along the bar by shortening its widest texts (a long
@@ -1771,7 +1889,8 @@ mod tests {
                 ..d.clone()
             },
         ] {
-            for look in Look::ALL {
+            // Damla's leads the apps' capsule instead (D99; its own test).
+            for look in Look::ALL.into_iter().filter(|l| *l != Look::Damla) {
                 let l = render_look(look, &bar, &tr);
                 let button = l.hits.iter().find(|(_, h)| h.module == hit::APP_GRID).map(|(r, _)| *r);
                 let first = l.hits.iter().map(|(r, _)| r.x).fold(f32::MAX, f32::min);
@@ -1801,6 +1920,130 @@ mod tests {
         let mut off = d.clone();
         off.modules.app_grid = false;
         assert!(!render(&off, &tr).hits.iter().any(|(_, h)| h.module == hit::APP_GRID));
+    }
+
+    /// A capsule's rectangles on Damla's bar, in order along it.
+    fn glass_capsules(l: &Layout) -> Vec<Rect> {
+        let mut c: Vec<Rect> = panels(l)
+            .into_iter()
+            .filter(|(_, p)| p.fill == Role::Glass)
+            .map(|(r, _)| r)
+            .collect();
+        c.sort_by(|a, b| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)));
+        c
+    }
+
+    /// DECISIONS D99: three capsules, together in the middle of the bar with the desktop
+    /// around them: the workspaces; the all-apps button and the apps; the rest, clock last.
+    #[test]
+    fn damla_stands_in_three_capsules_in_the_middle() {
+        let tr = I18n::new(Lang::Tr);
+        let icon = AppIcon {
+            label: String::new(),
+            image: Some(31),
+            running: true,
+            focused: false,
+            attention: false,
+            grow: 0.0,
+            shift: (0.0, 0.0),
+        };
+        let d = BarData {
+            edge: Edge::Bottom,
+            apps: vec![icon; 5],
+            ..data(&tr)
+        };
+        let l = render_look(Look::Damla, &d, &tr);
+        let c = glass_capsules(&l);
+        assert_eq!(c.len(), 3, "{c:?}");
+        let inside = |r: &Rect, cap: &Rect| r.x >= cap.x && r.right() <= cap.right();
+        let hits = |module| l.hits.iter().filter(move |(_, h)| h.module == module).map(|(r, _)| *r);
+        assert!(hits(hit::WORKSPACE).all(|r| inside(&r, &c[0])));
+        let button = hits(hit::APP_GRID).next().expect("the all-apps button");
+        assert!(inside(&button, &c[1]));
+        assert_eq!(hits(hit::APP).count(), 5);
+        assert!(hits(hit::APP).all(|r| inside(&r, &c[1]) && r.x > button.x));
+        let clock = hits(hit::CLOCK).next().expect("the clock");
+        assert!(inside(&clock, &c[2]));
+        assert!(hits(hit::NETWORK).all(|r| inside(&r, &c[2]) && r.right() <= clock.x));
+        // The gaps are the look's, the middle capsule is in the middle, and there is
+        // empty desktop beyond the outer ones.
+        let gap = Style::of(Look::Damla).group_gap;
+        assert!((c[1].x - c[0].right() - gap).abs() < 0.5, "{c:?}");
+        assert!((c[2].x - c[1].right() - gap).abs() < 0.5, "{c:?}");
+        assert!(((c[1].x + c[1].right()) / 2.0 - l.size.w / 2.0).abs() < 0.5, "{c:?}");
+        assert!(c[0].x > gap && c[2].right() < l.size.w - gap, "{c:?}");
+    }
+
+    /// DECISIONS D99: the window's title, the media and the figures are the island's;
+    /// the time stands over the date, and the bar paints no strip.
+    #[test]
+    fn damla_leaves_the_title_the_media_and_the_figures_to_the_island() {
+        let tr = I18n::new(Lang::Tr);
+        let d = BarData {
+            edge: Edge::Bottom,
+            ..data(&tr)
+        };
+        let l = render_look(Look::Damla, &d, &tr);
+        let t = texts(&l);
+        assert!(!t.iter().any(|s| s.contains("Milva")), "title: {t:?}");
+        assert!(!l
+            .hits
+            .iter()
+            .any(|(_, h)| h.module == hit::TITLE || h.module == hit::MEDIA));
+        assert!(!l.hits.iter().any(|(_, h)| h.module == hit::STATS), "figures");
+        assert!(l.hits.iter().any(|(_, h)| h.module == hit::VOLUME), "the volume's icon");
+        let (time, date) = (text_rect(&l, "20:31"), text_rect(&l, "Pzt 12 Eki"));
+        assert!(time.bottom() <= date.y + 4.0 && time.y < date.y, "{time:?} {date:?}");
+        // Only the capsules are painted behind the parts: nothing spans the bar.
+        assert!(panels(&l).iter().all(|(r, _)| r.w < l.size.w / 2.0), "a strip");
+    }
+
+    /// DECISIONS D99: with more apps than fit, the three capsules fill the bar a gap
+    /// apart, the outer ones whole, and the rest go behind the "+n"; without apps or the
+    /// button the two others still stand together in the middle.
+    #[test]
+    fn damlas_apps_that_do_not_fit_go_behind_more() {
+        let tr = I18n::new(Lang::Tr);
+        let icon = AppIcon {
+            label: String::new(),
+            image: Some(31),
+            running: true,
+            focused: false,
+            attention: false,
+            grow: 0.0,
+            shift: (0.0, 0.0),
+        };
+        let d = BarData {
+            edge: Edge::Bottom,
+            apps: vec![icon; 90],
+            ..data(&tr)
+        };
+        let l = render_look(Look::Damla, &d, &tr);
+        let shown = l.hits.iter().filter(|(_, h)| h.module == hit::APP).count();
+        assert!(shown < 90 && shown > 0, "{shown}");
+        assert_eq!(l.hits.iter().filter(|(_, h)| h.module == hit::APP_MORE).count(), 1);
+        let c = glass_capsules(&l);
+        assert_eq!(c.len(), 3, "{c:?}");
+        let gap = Style::of(Look::Damla).group_gap;
+        assert!(c[0].x >= 0.0 && c[2].right() <= l.size.w, "{c:?}");
+        assert!((c[1].x - c[0].right() - gap).abs() < 0.5, "{c:?}");
+        assert!((c[2].x - c[1].right() - gap).abs() < 0.5, "{c:?}");
+        assert!(texts(&l).contains(&"20:31".to_string()), "the clock is whole");
+
+        let mut bare = d.clone();
+        bare.apps.clear();
+        bare.modules.app_grid = false;
+        let l = render_look(Look::Damla, &bare, &tr);
+        let c = glass_capsules(&l);
+        assert_eq!(c.len(), 2, "{c:?}");
+        assert!(((c[0].right() + c[1].x) / 2.0 - l.size.w / 2.0).abs() < 0.5, "{c:?}");
+
+        // No apps but the button: the middle capsule holds the button alone.
+        let mut lone = d.clone();
+        lone.apps.clear();
+        let l = render_look(Look::Damla, &lone, &tr);
+        assert_eq!(glass_capsules(&l).len(), 3);
+        assert_eq!(l.hits.iter().filter(|(_, h)| h.module == hit::APP_GRID).count(), 1);
     }
 
     /// DECISIONS D88: the network indicator shows the link as Windows' taskbar does

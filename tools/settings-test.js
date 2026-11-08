@@ -380,9 +380,9 @@ async function main() {
   await go("look");
   await page.click(`[data-set="appearance.look"][data-val='"cizgi"']`); await settled();
   check(/look = "cizgi"/.test(toml()) && (await page.getAttribute(".screen", "data-dir")) === "b", "look Çizgi, page restyled");
-  // Ten looks (DECISIONS D67): the design's but Piksel.
-  check((await page.locator(`[data-set="appearance.look"]`).count()) === 10 && (await page.locator(`[data-val='"piksel"']`).count()) === 0, "looks: ten cards, no Piksel");
-  for (const [name, dir] of [["pano", "h"], ["izgara", "i"], ["defter", "j"]]) {
+  // Eleven looks (DECISIONS D67, D99): the design's but Piksel.
+  check((await page.locator(`[data-set="appearance.look"]`).count()) === 11 && (await page.locator(`[data-val='"piksel"']`).count()) === 0, "looks: eleven cards, no Piksel");
+  for (const [name, dir] of [["pano", "h"], ["izgara", "i"], ["defter", "j"], ["damla", "l"]]) {
     await page.click(`[data-set="appearance.look"][data-val='"${name}"']`); await settled();
     check(new RegExp(`look = "${name}"`).test(toml()) && (await page.getAttribute(".screen", "data-dir")) === dir, `look ${name}, page restyled`);
   }

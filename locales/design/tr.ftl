@@ -34,6 +34,7 @@ looks-h = Pano
 looks-i = Izgara
 looks-j = Defter
 looks-k = Piksel
+looks-l = Damla
 activities = Etkinlikler
 tasks-lbl = Açık pencereler
 accents-8fd3ff = Buz mavisi

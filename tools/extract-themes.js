@@ -1,4 +1,4 @@
-// Extracts the colour and size tokens of the seven looks from the design page into
+// Extracts the colour and size tokens of the looks from the design page into
 // themes/<code>.toml, so nothing is copied by hand (docs/PLAN.md M2).
 //
 //   node tools/extract-themes.js            write themes/*.toml
@@ -14,7 +14,7 @@ const path = require("path");
 const root = path.resolve(__dirname, "..");
 const page = path.join(root, "docs", "design", "kabuk-tasarim.html");
 const outDir = path.join(root, "themes");
-const looks = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"];
+const looks = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "l"];
 
 function styleText(html) {
   const blocks = [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map((m) => m[1]);

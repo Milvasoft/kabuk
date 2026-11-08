@@ -238,7 +238,7 @@ pub fn default_look() -> Look {
 /// The environment variable a debug build takes its default look from (tests).
 pub const TEST_DEFAULT_LOOK: &str = "KABUK_TEST_DEFAULT_LOOK";
 
-/// The ten looks (SPEC §3). Serialized by their ASCII proper names.
+/// The eleven looks (SPEC §3). Serialized by their ASCII proper names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Look {
@@ -255,10 +255,12 @@ pub enum Look {
     Izgara,
     /// Editorial: a serif page with Roman numerals.
     Defter,
+    /// Three floating glass capsules at the bottom (DECISIONS D99).
+    Damla,
 }
 
 impl Look {
-    pub const ALL: [Look; 10] = [
+    pub const ALL: [Look; 11] = [
         Look::Ada,
         Look::Cizgi,
         Look::Devre,
@@ -269,6 +271,7 @@ impl Look {
         Look::Pano,
         Look::Izgara,
         Look::Defter,
+        Look::Damla,
     ];
 
     /// The look's code in the design page and in `themes/<code>.toml`.
@@ -284,6 +287,7 @@ impl Look {
             Look::Pano => "h",
             Look::Izgara => "i",
             Look::Defter => "j",
+            Look::Damla => "l",
         }
     }
 
@@ -291,7 +295,7 @@ impl Look {
     pub fn default_bar_edge(self) -> Edge {
         match self {
             Look::Ray => Edge::Left,
-            Look::Konsol | Look::Pano => Edge::Bottom,
+            Look::Konsol | Look::Pano | Look::Damla => Edge::Bottom,
             _ => Edge::Top,
         }
     }
@@ -372,7 +376,7 @@ impl CursorStyle {
     /// The look's own style.
     pub fn of(look: Look) -> CursorStyle {
         match look {
-            Look::Ada | Look::Rihtim | Look::Etkinlik | Look::Pano => CursorStyle::Round,
+            Look::Ada | Look::Rihtim | Look::Etkinlik | Look::Pano | Look::Damla => CursorStyle::Round,
             Look::Cizgi | Look::Defter => CursorStyle::Slim,
             Look::Izgara => CursorStyle::Block,
             Look::Devre => CursorStyle::Circuit,

@@ -148,6 +148,7 @@ impl LauncherStyle {
             Look::Pano => pano(),
             Look::Izgara => izgara(),
             Look::Defter => defter(),
+            Look::Damla => damla(),
         }
     }
 }
@@ -528,6 +529,34 @@ fn defter() -> LauncherStyle {
             typo: Typo::italic(),
             ..a.foot.expect("the shared rules have hints")
         }),
+        ..a
+    }
+}
+
+/// `.screen[data-dir="l"] .launcher`: a frosted panel, centred.
+fn damla() -> LauncherStyle {
+    let a = ada();
+    LauncherStyle {
+        look: Look::Damla,
+        place: Place::Centered { top: 220.0 },
+        width: 680.0,
+        panel: Some(Paint {
+            fill: Role::Surface,
+            border: Some((Role::SurfaceLine, 1.0)),
+            radius: 20.0,
+        }),
+        panel_pad: Insets::all(0.0),
+        input_pad: insets(16.0, 18.0, 16.0, 18.0),
+        input_rule: Some(Rule::solid(Role::SurfaceLine, 1.0)),
+        input_size: 22.0,
+        list_pad: Insets::all(6.0),
+        list_gap: 0.0,
+        row_pad: insets(8.0, 12.0, 8.0, 12.0),
+        sel_fill: Role::AccentFill,
+        sel_text: Some(Role::OnAccent),
+        sel_icon: Some(Role::OnAccent),
+        sel_kind: Some(Role::OnAccent),
+        foot: None,
         ..a
     }
 }

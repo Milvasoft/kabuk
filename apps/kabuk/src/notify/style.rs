@@ -16,7 +16,7 @@ pub enum ToastPlace {
     Corner,
     /// Etkinlik: top centre, as GNOME's banners.
     Centre,
-    /// Pano: as [`ToastPlace::Corner`], but above a bottom bar at the bottom right.
+    /// Pano, Damla: as [`ToastPlace::Corner`], but above a bottom bar at the bottom right.
     NearBar,
 }
 
@@ -277,6 +277,18 @@ impl NotifyStyle {
                 },
                 ..base
             },
+            // The top is the island's (DECISIONS D99): notices rise from the bottom corner.
+            Look::Damla => NotifyStyle {
+                look,
+                toast_place: ToastPlace::NearBar,
+                toast_panel: panel(Role::Surface, Some((Role::SurfaceLine, 1.0)), 18.0),
+                icon_box: IconBox {
+                    paint: panel(Role::AccentFill, None, 10.0),
+                    icon: Role::OnAccent,
+                    ..base.icon_box
+                },
+                ..base
+            },
         }
     }
 }
@@ -314,5 +326,11 @@ mod tests {
         assert_eq!((i.track.height, i.value_weight, i.toast_margin), (8.0, 900, 16.0));
         let j = NotifyStyle::of(Look::Defter);
         assert!(j.title_typo.italic && j.sub_typo.italic && j.track.height == 2.0 && j.title_size == 16.0);
+        let l = NotifyStyle::of(Look::Damla);
+        assert_eq!(
+            (l.toast_place, l.toast_panel.radius, l.icon_box.icon),
+            (ToastPlace::NearBar, 18.0, Role::OnAccent)
+        );
+        assert_eq!(l.osd_panel.radius, 999.0);
     }
 }

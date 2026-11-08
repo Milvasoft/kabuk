@@ -2,10 +2,10 @@
 // The page's own drawing code, run with the settings page's `t` and `escapeHtml`.
 "use strict";
 window.kabukDesignArt = function (t, escapeHtml) {
-  const looks = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"];
-  const lookDefaults = { a: "#8fd3ff", b: "#ecebe7", c: "#fbc419", d: "#ff8f6b", e: "#ff7eb6", f: "#0a84ff", g: "#3584e4", h: "#4fd1c5", i: "#ff4b3e", j: "#a8d5a2", k: "#7b8cff" };
-  const lookGaps = { a: 14, b: 1, c: 12, d: 12, e: 12, f: 10, g: 10, h: 8, i: 1, j: 18, k: 6 };
-  const lookPos = { a: "top", b: "top", c: "top", d: "left", e: "bottom", f: "top", g: "top", h: "bottom", i: "top", j: "top", k: "top" };
+  const looks = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l"];
+  const lookDefaults = { a: "#8fd3ff", b: "#ecebe7", c: "#fbc419", d: "#ff8f6b", e: "#ff7eb6", f: "#0a84ff", g: "#3584e4", h: "#4fd1c5", i: "#ff4b3e", j: "#a8d5a2", k: "#7b8cff", l: "#34d158" };
+  const lookGaps = { a: 14, b: 1, c: 12, d: 12, e: 12, f: 10, g: 10, h: 8, i: 1, j: 18, k: 6, l: 10 };
+  const lookPos = { a: "top", b: "top", c: "top", d: "left", e: "bottom", f: "top", g: "top", h: "bottom", i: "top", j: "top", k: "top", l: "bottom" };
   const accentList = ["#8fd3ff", "#fbc419", "#7fe0b5", "#ff8f6b", "#b9a7ff", "#ff7eb6", "#ecebe7"];
 
   const seeded = (seed) => () => { seed = (seed + 0x6d2b79f5) | 0; let x = Math.imul(seed ^ (seed >>> 15), 1 | seed); x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x; return ((x ^ (x >>> 14)) >>> 0) / 4294967296; };
@@ -73,6 +73,9 @@ window.kabukDesignArt = function (t, escapeHtml) {
         <div style="position:absolute;left:7px;right:7px;top:20px;bottom:7px;display:grid;grid-template-columns:1.3fr 1fr;grid-template-rows:1fr 1fr;gap:6px"><span style="grid-row:span 2;box-shadow:0 0 0 1px #3a352c, inset 0 6px 0 -4px VAR"></span><span style="box-shadow:0 0 0 1px #2a261f"></span><span style="box-shadow:0 0 0 1px #2a261f"></span></div>`;
   miniLook.k = `<div style="position:absolute;left:0;right:0;top:0;height:12px;background:#1e1e23;box-shadow:inset 1px 1px 0 #4c4c56, inset -1px -1px 0 #000;display:flex;align-items:center;gap:2px;padding:0 3px"><i style="width:8px;height:7px;background:#2c2c34;box-shadow:inset 1px 1px 0 #000, inset -1px -1px 0 #4c4c56"></i><i style="width:8px;height:7px;background:#1e1e23;box-shadow:inset 1px 1px 0 #4c4c56, inset -1px -1px 0 #000"></i><i style="flex:1"></i><i style="width:18px;height:7px;background:#141418;box-shadow:inset 1px 1px 0 #000, inset -1px -1px 0 #4c4c56"></i></div>
         <div style="position:absolute;left:4px;right:4px;top:16px;bottom:4px;display:grid;grid-template-columns:1.3fr 1fr;grid-template-rows:1fr 1fr;gap:3px"><span style="grid-row:span 2;background:#1e1e23;box-shadow:inset 1px 1px 0 #4c4c56, inset -1px -1px 0 #000;border-top:5px solid VAR"></span><span style="background:#1e1e23;box-shadow:inset 1px 1px 0 #4c4c56, inset -1px -1px 0 #000;border-top:5px solid #2c2c34"></span><span style="background:#1e1e23;box-shadow:inset 1px 1px 0 #4c4c56, inset -1px -1px 0 #000;border-top:5px solid #2c2c34"></span></div>`;
+  miniLook.l = `<div style="position:absolute;left:5px;right:5px;top:13px;bottom:18px;display:grid;grid-template-columns:1.3fr 1fr;grid-template-rows:1fr 1fr;gap:4px"><span style="grid-row:span 2;border:1px solid VAR;border-radius:4px"></span><span style="border:1px solid #2a2c31;border-radius:4px"></span><span style="border:1px solid #2a2c31;border-radius:4px"></span></div>
+        <div style="position:absolute;left:50%;top:3px;width:30px;height:7px;margin-left:-15px;border-radius:4px;background:#000;box-shadow:0 0 0 1px #2a2c31"></div>
+        <div style="position:absolute;left:0;right:0;bottom:3px;height:11px;display:flex;justify-content:center;gap:4px"><span style="width:18px;background:#26282c;border:1px solid #4a4d53;border-radius:6px;display:flex;align-items:center;justify-content:center"><i style="width:8px;height:4px;border-radius:2px;background:VAR"></i></span><span style="width:38px;background:#26282c;border:1px solid #4a4d53;border-radius:6px;display:flex;align-items:center;justify-content:center;gap:2px"><i style="width:5px;height:5px;background:VAR"></i><i style="width:5px;height:5px;background:#888"></i><i style="width:5px;height:5px;background:#888"></i><i style="width:5px;height:5px;background:#888"></i></span><span style="width:24px;background:#26282c;border:1px solid #4a4d53;border-radius:6px;display:flex;align-items:center;justify-content:center"><i style="width:12px;height:2px;background:#ddd"></i></span></div>`;
   miniLook.g = `<div style="position:absolute;left:0;right:0;top:0;height:10px;background:#000;display:flex;align-items:center;justify-content:space-between;padding:0 5px"><span style="display:flex;gap:2px;align-items:center"><i style="width:10px;height:2px;background:#ddd"></i><i style="width:7px;height:3px;border-radius:2px;background:VAR"></i><i style="width:3px;height:3px;border-radius:2px;background:#777"></i></span><span style="width:16px;height:2px;background:#ddd"></span><span style="width:12px;height:5px;border-radius:3px;background:#2e2e32"></span></div>
         <div style="position:absolute;left:5px;right:5px;top:14px;bottom:5px;display:grid;grid-template-columns:1.3fr 1fr;grid-template-rows:1fr 1fr;gap:4px"><span style="grid-row:span 2;border:1px solid #3a3a3a;border-radius:5px"></span><span style="border:1px solid #262626;border-radius:5px"></span><span style="border:1px solid #262626;border-radius:5px"></span></div>`;
   const saverArt = () => ({
@@ -102,6 +105,8 @@ window.kabukDesignArt = function (t, escapeHtml) {
     // Defter: fine pen lines. Piksel: chunky filled pages with a block cursor, like 90s icons.
     j: { r: 1, sw: 1.1, solid: false, page: "", ink: "fg-s" },
     k: { r: 0, sw: 2, solid: true, page: "surf-sel", ink: "fg-s", block: true },
+    // Damla: soft and solid on light pages, as frosted glass.
+    l: { r: 2.5, sw: 1, solid: true, page: { dark: "fg-s", light: "surf" }, ink: "faint", soft: true },
   };
   function systemIcon(kind, dir, mode) {
     const look = sysIconLook[dir] || sysIconLook.a;

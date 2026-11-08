@@ -1040,6 +1040,54 @@ p { margin: 0; max-width: 66ch; }
 .screen[data-dir="k"] .seg { box-shadow: var(--sunken); border: 0; }
 .screen[data-dir="k"] .seg button.on { box-shadow: var(--raised); }
 
+/* ---------------- L · Damla: glass capsules and a dynamic island ---------------- */
+.screen[data-dir="l"] {
+  --fg-s: #f5f6f8; --dim: #b6bac2; --faint: #4b4e55; --line-s: #2e3036; --accent-s: #34d158;
+  --edge: 8px; --bar-h: 46px; --rail: 60px; --pad: 10px; --gap: 10px; --radius: 14px; --win-bg: #0b0c0e; --win-line: #292b30;
+  --glass: rgba(34,36,40,.62); --glass-line: rgba(255,255,255,.18); --surf: rgba(30,32,36,.95); --surf-alt: rgba(22,24,27,.95); --surf-sel: rgba(255,255,255,.14); --surf-line: #3b3d43;
+  --ui: "Inter", "Segoe UI", sans-serif; --num: "Inter", "Segoe UI", sans-serif;
+}
+.screen[data-dir="l"] .bar { display: flex; justify-content: center; gap: 56px; background: none; font-size: 13px; }
+.screen[data-dir="l"]:is([data-pos="left"], [data-pos="right"]) .bar { flex-direction: column; }
+.screen[data-dir="l"] :is(.bar-l, .bar-c, .bar-r) { flex: none; gap: 14px; background: var(--glass); backdrop-filter: blur(24px) saturate(1.4); border: 1px solid var(--glass-line); border-radius: 999px; }
+.screen[data-dir="l"]:is([data-pos="top"], [data-pos="bottom"]) :is(.bar-l, .bar-c, .bar-r) { padding: 0 16px; }
+.screen[data-dir="l"]:is([data-pos="left"], [data-pos="right"]) :is(.bar-l, .bar-c, .bar-r) { padding: 14px 0; align-self: auto; }
+.screen[data-dir="l"][data-pos] .grp { padding: 0; gap: 14px; }
+.screen[data-dir="l"] .bar-l > .grp:nth-child(2), .screen[data-dir="l"] .bar-r .grp:has(.media), .screen[data-dir="l"] .mod:not([data-m="vol"]), .screen[data-dir="l"] .mod .v { display: none; }
+.screen[data-dir="l"] .bar-r .grp:has(.tray) { order: -1; }
+.screen[data-dir="l"] .bar-r .desk-corner { order: 2; }
+.screen[data-dir="l"] :is(.mod, .tray, .bell, .ind) { color: var(--fg-s); }
+.screen[data-dir="l"] .ws-list { gap: 6px; }
+.screen[data-dir="l"] .ws { width: 26px; height: 26px; border-radius: 13px; font-size: 12.5px; font-family: var(--num); transition: width .25s, height .25s, background .25s; }
+.screen[data-dir="l"] .ws.on { width: 38px; background: var(--accent-fill); color: var(--on-accent); font-weight: 600; }
+.screen[data-dir="l"]:is([data-pos="left"], [data-pos="right"]) .ws.on { width: 26px; height: 38px; }
+.screen[data-dir="l"] .ws.busy:not(.on)::after { content: ""; position: absolute; bottom: -1px; width: 3px; height: 3px; border-radius: 50%; background: var(--dim); }
+.screen[data-dir="l"] .bar-c .logo { display: flex; color: var(--accent-s); }
+.screen[data-dir="l"] .bar-c .logo svg.i { width: 24px; height: 24px; }
+.screen[data-dir="l"] .tasks { display: flex; align-items: center; gap: 12px; }
+.screen[data-dir="l"]:is([data-pos="left"], [data-pos="right"]) .tasks { flex-direction: column; }
+.screen[data-dir="l"] .task { width: 28px; height: 34px; padding: 0; justify-content: center; color: var(--fg-s); background: none; }
+.screen[data-dir="l"] .task svg.i { width: 24px; height: 24px; }
+.screen[data-dir="l"] .task span { display: none; }
+.screen[data-dir="l"] .task.on::after { bottom: 0; width: 6px; height: 2px; margin-left: -3px; }
+.screen[data-dir="l"] .clock { flex-direction: column; align-items: flex-end; gap: 0; line-height: 1.25; }
+.screen[data-dir="l"] .clock .t { font-size: 13px; font-weight: 500; order: -1; }
+.screen[data-dir="l"] .clock .d { font-size: 12px; color: var(--fg-s); }
+.screen[data-dir="l"]:not([data-pos="top"])::after { content: ""; position: absolute; z-index: 6; top: 8px; left: 50%; width: 176px; height: 34px; margin-left: -88px; border-radius: 17px; background: #000; }
+.screen[data-dir="l"] .launcher { left: 50%; top: 220px; transform: translateX(-50%); width: 680px; background: var(--surf); backdrop-filter: blur(30px); border: 1px solid var(--surf-line); border-radius: 20px; box-shadow: 0 30px 80px var(--shadow); overflow: hidden; }
+.screen[data-dir="l"] .l-in { padding: 16px 18px; color: var(--dim); border-bottom: 1px solid var(--surf-line); }
+.screen[data-dir="l"] .l-in input { font-size: 22px; }
+.screen[data-dir="l"] .l-list { padding: 6px; }
+.screen[data-dir="l"] .l-row { border-radius: 12px; padding: 8px 12px; }
+.screen[data-dir="l"] .l-row.sel { background: var(--accent-fill); color: var(--on-accent); }
+.screen[data-dir="l"] .l-row.sel :is(.sub, .kind, mark, .ic) { color: var(--on-accent); }
+.screen[data-dir="l"] .l-foot { display: none; }
+.screen[data-dir="l"] .toast { background: var(--surf); backdrop-filter: blur(20px); border: 1px solid var(--surf-line); border-radius: 18px; box-shadow: 0 16px 40px var(--shadow); }
+.screen[data-dir="l"][data-pos="bottom"] .toast { top: auto; bottom: calc(var(--edge) + var(--bar-h) + 12px); right: 12px; }
+.screen[data-dir="l"] .toast .ti { border-radius: 10px; background: var(--accent-fill); color: var(--on-accent); }
+.screen[data-dir="l"] .osd { background: var(--surf); border: 1px solid var(--surf-line); border-radius: 999px; }
+.screen[data-dir="l"] .osd .track i { background: var(--accent-fill); }
+
 /* ===================================================================
    LIGHT MODE — same looks, light surfaces. Accent defaults are darker so they stay readable on white.
    =================================================================== */
@@ -1062,6 +1110,7 @@ p { margin: 0; max-width: 66ch; }
 .screen[data-mode="light"][data-dir="h"] { --desk: #eef0f3; --fg-s: #15181c; --dim: #5d636c; --faint: #c9ced5; --line-s: #d7dbe1; --win-bg: #ffffff; --win-line: #d5dae0; --surf: #f7f8fa; --surf-alt: #eef0f3; --surf-sel: #e2e6eb; --surf-line: #cfd4db; --accent-s: #0f766e; }
 .screen[data-mode="light"][data-dir="i"] { --desk: #f4f2ee; --fg-s: #111110; --dim: #5e5b55; --faint: #c9c5bd; --line-s: #d3cfc6; --win-bg: #fbfaf8; --win-line: #c9c5bd; --surf: #f4f2ee; --surf-alt: #ebe8e2; --surf-sel: #e2ded6; --surf-line: #8f8a80; --accent-s: #d4231b; --accent2: #d4231b; }
 .screen[data-mode="light"][data-dir="j"] { --desk: #f5f0e6; --fg-s: #1f1b14; --dim: #6b6253; --faint: #d6cdbb; --line-s: #cfc5b2; --win-bg: #fbf8f1; --win-line: #ddd4c2; --surf: #fbf8f1; --surf-alt: #f2ece0; --surf-sel: #ece4d3; --surf-line: #c9bfab; --accent-s: #2f6b3a; }
+.screen[data-mode="light"][data-dir="l"] { --desk: #e7eaee; --fg-s: #14161a; --dim: #4f555e; --faint: #c3c8cf; --line-s: #d3d7dd; --win-bg: #ffffff; --win-line: #d5d9df; --glass: rgba(255,255,255,.58); --glass-line: rgba(255,255,255,.72); --surf: rgba(255,255,255,.96); --surf-alt: rgba(244,245,247,.96); --surf-sel: rgba(0,0,0,.08); --surf-line: #cdd1d8; --accent-s: #15803d; }
 .screen[data-mode="light"][data-dir="k"] { --desk: #d4d0c8; --fg-s: #000000; --dim: #4a4a4a; --faint: #a0a0a0; --line-s: #808080; --win-bg: #ffffff; --win-line: #000; --surf: #d4d0c8; --surf-alt: #c8c4bc; --surf-sel: #b8b4ac; --surf-line: #000; --accent-s: #1f3fbf; --hi: #ffffff; --lo: #404040; --hi2: #e8e6e1; --sunken: inset 1px 1px 0 #808080, inset -1px -1px 0 #ffffff, inset 2px 2px 0 #404040; }
 /* GNOME keeps its black top bar in light mode too */
 .screen[data-mode="light"][data-dir="g"] .bar { --fg-s: #f6f5f4; --dim: #a8a6a3; color: var(--fg-s); }
