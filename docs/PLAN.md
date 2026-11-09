@@ -544,22 +544,17 @@ Glass capsules and a dynamic island (DECISIONS D99).
 - The island's contents stand in the pill's middle (`its_contents_stand_in_the_middle_of_the_pill`, failed by 14 px before); its pages turn by a drag, a wheel or a touchpad (`a_drag_turns_one_page_and_is_not_a_click`, `a_wheel_turns_by_the_notch_and_a_touchpad_once`, `a_drag_across_damlas_island_turns_its_page`).
 - *Left out: banners for devices connecting (Windows gives no such event without a watcher of its own), and the island reserves no room at the top, so a maximised window runs under it.*
 
-## M21 · Saved desktops `[ ]`
+## M21 · Saved desktops `[x]`
 
-Save the windows on screen as a named set and bring the whole set back later, in the manner of PowerToys Workspaces. Not started.
+Save the windows on screen as a named set and bring the whole set back later, in the manner of PowerToys Workspaces. A module of its own beside layout profiles: `kabuk_core::desktops` (pure), `kabuk_win::browser` and `process` (read from outside), `kabuk::desktops` (the live desktop), Settings › Saved desktops (DECISIONS D101).
 
 **What matters most:** a program comes back as it was at the moment of the snapshot, not merely started. Chrome showing `localhost:6179` when the snapshot was taken opens at `localhost:6179`; a program started with arguments starts with those arguments.
 
-**To do**
-- Snapshot: for every managed window its executable, its command-line arguments, its working directory, its monitor, workspace, tiled or floating state and place.
-- What the snapshot cannot read from the command line: a browser's address is not an argument of a browser opened by hand. Read the address the window is showing and start the browser with it (with the same profile, `--profile-directory`); to settle first: how to read it without injecting anything (UI Automation on the address bar is the first candidate), and what to do with a window of several tabs.
-- Launch: start each program with what was saved, wait for its window, put the window where it was; a program already running is reused or started again, a choice per set. A program that is gone is reported, not skipped silently.
-- Elevated programs, packaged apps (started by their app id, as the launcher does) and programs whose window appears late (a splash screen first).
-- Settings page, launcher entry, `kabuk msg` command, both languages.
+**Settled:** the address is read through UI Automation (the raw view), the profile from each window's app id, File Explorer's folder from Windows' shell windows; nothing is injected. A window of several tabs comes back at the tab it shows. Whether a program already running is reused or started again is a switch per set. Windows minimised at the snapshot come back open; what runs inside a terminal and an editor's open folder (unless on its command line) are not kept.
 
 **Done criteria**
-- [ ] A browser saved at a local address comes back at that address, with its profile (integration test with a local page, and tried by hand).
-- [ ] A program saved with arguments starts with exactly those arguments (test app).
-- [ ] Windows return to their monitor, workspace and place; a missing monitor falls back to Monitor 1 (main).
-- [ ] A missing program is reported, the rest still open.
-- [ ] Wired end to end: configuration, settings screen, both languages, live reload.
+- [x] A browser saved at a local address comes back at that address, with its profile. *Integration test `a_browser_comes_back_at_its_address_with_its_profile` (Edge with a local page and a profile folder); tried on my desktop with the real shell and Chrome at `localhost:6179`, saved while its workspace was hidden, closed and opened again: same address, same profile.*
+- [x] A program saved with arguments starts with exactly those arguments. *`a_saved_desktop_brings_a_program_back_with_its_arguments`.*
+- [x] Windows return to their monitor, workspace and place; a missing monitor falls back to Monitor 1 (main). *`a_saved_desktop_puts_windows_back_and_reports_a_missing_program`; `a_place_stays_inside_the_monitor`.*
+- [x] A missing program is reported, the rest still open. *The same test, and the notice's text in both languages.*
+- [x] Wired end to end: configuration, settings screen, both languages, live reload. *`saved_desktops`, `saved_desktops_become_entries`, `tools/settings-test.js`, and the file written by a save read back by the running shell.*

@@ -91,6 +91,10 @@ Target platform: Windows 11.
 - User rules are added from the settings screen; "Pick an open window" lists every window Windows' taskbar would show (also while Kabuk is not running), by program, and fills the form with the details of the clicked window.
 - Rules are shown in the table as "Source: Default / Yours".
 
+### 2.3b Saved desktops (DECISIONS D101)
+
+The windows on screen saved under a name and brought back later as they were, in the manner of PowerToys Workspaces (Settings › Saved desktops, the launcher, `kabuk msg desktops save|open|delete <name>` and `list`). Each program comes back with the arguments it was started with, in its folder, on its monitor and workspace, tiled or floating at its place; a browser at the address it was showing and in its profile (Chrome, Edge and other Chromium browsers, Firefox), the tab it was showing only; File Explorer at its folder; a packaged app by its app id. A window already showing the same thing goes to its place instead of starting again, unless the set is told to always start again. A program that is gone or whose window does not come within 30 seconds is reported, and the rest still open. A monitor that is gone falls back to Monitor 1 (main).
+
 ### 2.4 Game mode
 
 - When a full-screen application (game, video player, presentation) opens, **within 1 second** on that monitor: the bar is hidden, tiling pauses (windows stay in place, new windows are not tiled), notifications are muted. A game at a resolution of its own counts (the monitor is taken as it is now), an overlay that clicks pass through does not hide it, and the bars are not made again under it when the resolution changes (DECISIONS D72).
@@ -158,6 +162,7 @@ The 12 pages in the design, in the same order: Appearance, Wallpaper, Screen sav
 - **Wallpaper:** §2.8.
 - **Screen saver:** §2.7.
 - **Bar:** position, monitors, auto-hide, background (solid, blur, off), colour (the look's own, a swatch or any colour; it fills the solid bar and tints the blur, with a note when the look's text would be hard to read on it; DECISIONS D57), height, tray icons shown on the bar, modules (§2.1).
+- **Saved desktops** (a page of its own, DECISIONS D101): the sets with their windows, open and remove, "always start the programs again" for each, and saving what is on screen under a name.
 - **Windows:** workspace layout (Tiling/Floating), tiling layout (Dwindle/Master; a workspace switched with the layout shortcut keeps its own), how many workspaces (1-9) and how many the bar always shows, float on drag, grab anywhere with Alt, double-click to tile (§2.2), window gap, new window direction, active window frame, windows follow the look (title bar colours and corners of other programs' windows, DECISIONS D30).
 - **Window rules:** §2.3: the default rules on or off; a rule's every match and action set in an editor, a rule edited in place, a wrong value said under its field.
 - **Game mode:** §2.4, anti-cheat note.
@@ -165,7 +170,7 @@ The 12 pages in the design, in the same order: Appearance, Wallpaper, Screen sav
 - **Shortcuts:** list of all shortcuts, each one changeable.
 - **Language & region:** language (System language, Türkçe, English), time format (24/12), date and decimal separator preview.
 - **OLED care:** bar shift, a still picture's drift and its step (1-120 min, §2.8), idle dimming, dimming delay (30 s, 1 min, 2 min, Custom: number + s/min, an integer between 10 s and 60 min; error message for an out-of-range value; the row is disabled while dimming is off).
-- **About:** version, number of running components, number of monitors, number of managed windows, RAM usage, check for updates (Kabuk's latest release on GitHub, `Milvasoft/kabuk`; a newer one is offered with a button that opens its release page, whose setup installs over the running copy and keeps the settings). The settings file (PLAN M19 U20): every setting exported to a file the user picks (`kabuk.toml` as it is), a saved one imported (read as Kabuk reads `kabuk.toml`: one it would refuse is not taken and its problems are listed), and "Reset all" back to the defaults behind a confirmation, shortcuts and window rules too, the layout profiles kept. An import or reset first keeps `kabuk.toml` as `kabuk.toml.bak` beside it, and offers to bring the earlier settings back from it.
+- **About:** version, number of running components, number of monitors, number of managed windows, RAM usage, check for updates (Kabuk's latest release on GitHub, `Milvasoft/kabuk`; a newer one is offered with a button that opens its release page, whose setup installs over the running copy and keeps the settings). The settings file (PLAN M19 U20): every setting exported to a file the user picks (`kabuk.toml` as it is), a saved one imported (read as Kabuk reads `kabuk.toml`: one it would refuse is not taken and its problems are listed), and "Reset all" back to the defaults behind a confirmation, shortcuts and window rules too, the layout profiles and saved desktops kept. An import or reset first keeps `kabuk.toml` as `kabuk.toml.bak` beside it, and offers to bring the earlier settings back from it.
 
 ### 2.10 System theme
 
