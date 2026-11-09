@@ -6,7 +6,7 @@ It's for people who like how Hyprland, i3 and waybar feel but stay on Windows fo
 
 ![The Rıhtım look on a real desktop: a bar across the top, a dock at the bottom and the animated circuit eye wallpaper](docs/images/desktop.png)
 
-Kabuk is at version 1.0.9 and runs on my machine every day. It speaks Turkish and English.
+Kabuk is at version 1.0.10 and runs on my machine every day. It speaks Turkish and English.
 
 Get it from the [Microsoft Store](https://apps.microsoft.com/detail/9NGK4T6XHF34) or the [latest release](https://github.com/Milvasoft/kabuk/releases/latest).
 
