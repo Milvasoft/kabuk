@@ -412,6 +412,7 @@ impl Shared {
         if changed {
             self.load_app_images();
         }
+        self.follow_app_preview();
         changed
     }
 

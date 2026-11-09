@@ -12,6 +12,7 @@ use kabuk_ui::motion::{Entrance, Level, Motion, Pose};
 use kabuk_ui::node::Layout;
 use kabuk_ui::render::{Gpu, Palette, WindowSurface};
 use kabuk_win::msgloop::{PxRect, Window};
+use kabuk_win::thumbnail::{Flight, Thumbnail};
 
 use super::{timer, Shared};
 
@@ -24,8 +25,18 @@ pub(super) struct Shown {
     scale: Scale,
 }
 
+/// Live pictures laid over a popup that fade with it as it goes: the flight stops before
+/// the pictures go.
+#[derive(Default)]
+pub(super) struct Pictures {
+    pub(super) _flight: Option<Flight>,
+    pub(super) _thumbs: Vec<Thumbnail>,
+}
+
 /// A closed popup playing its exit, gone at `gone`.
 pub(super) struct Leaving {
+    /// They go before the window they are drawn on.
+    _pictures: Pictures,
     _surface: Option<WindowSurface>,
     _window: Window,
     gone: Instant,
@@ -101,7 +112,7 @@ impl Shown {
 
     /// Plays the exit from where the entrance is; `None` when there is nothing to play
     /// and the window can go now. The caller commits.
-    fn leave(mut self, gpu: &Gpu, level: Level) -> Option<Leaving> {
+    fn leave(mut self, gpu: &Gpu, level: Level, pictures: Pictures) -> Option<Leaving> {
         let now = Instant::now();
         let (hidden, seconds) = self.entrance.at(level);
         let t = self.motion.towards(hidden, seconds, now);
@@ -113,6 +124,7 @@ impl Shown {
         self.window.pass_input();
         tracing::info!(ms = ms(t.seconds), "popup leaves");
         Some(Leaving {
+            _pictures: pictures,
             _surface: Some(surface),
             _window: self.window,
             gone: self.motion.ends(),
@@ -183,9 +195,14 @@ impl Shared {
 
     /// Closes `popup`: it fades out and goes when the exit has played.
     pub(super) fn retire(&mut self, popup: Option<Shown>) {
+        self.retire_with(popup, Pictures::default());
+    }
+
+    /// Closes `popup` as [`Shared::retire`] does, its live `pictures` kept until it is gone.
+    pub(super) fn retire_with(&mut self, popup: Option<Shown>, pictures: Pictures) {
         let Some(popup) = popup else { return };
         let level = self.motion_level();
-        if let Some(l) = popup.leave(&self.gpu, level) {
+        if let Some(l) = popup.leave(&self.gpu, level, pictures) {
             let _ = self.gpu.commit();
             self.leaving.push(l);
             self.schedule_leaving();

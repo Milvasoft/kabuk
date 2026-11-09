@@ -53,7 +53,7 @@ struct Flight {
 }
 
 /// The flight's curve, the window moves' own (ease-out).
-fn ease(u: f32) -> f32 {
+pub(super) fn ease(u: f32) -> f32 {
     kabuk_ui::motion::ease_out(0.0, 1.0, 1.0).at(u)
 }
 
@@ -198,6 +198,7 @@ impl Shared {
                 thumb: w.thumb.id(),
                 from: px(overview::flying(w.from, w.to, from)),
                 to: px(overview::flying(w.from, w.to, to)),
+                opacity: (u8::MAX, u8::MAX),
             })
             .collect();
         let seconds = kabuk_ui::motion::OVERVIEW_FLY * (to - from).abs();

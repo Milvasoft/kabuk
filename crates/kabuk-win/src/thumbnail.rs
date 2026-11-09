@@ -19,7 +19,7 @@ pub struct Thumbnail(isize);
 #[derive(Clone, Copy, Debug)]
 pub struct ThumbId(isize);
 
-fn place_handle(h: isize, rect: PxRect) -> bool {
+fn place_handle(h: isize, rect: PxRect, opacity: u8) -> bool {
     let p = DWM_THUMBNAIL_PROPERTIES {
         dwFlags: DWM_TNP_RECTDESTINATION | DWM_TNP_VISIBLE | DWM_TNP_OPACITY | DWM_TNP_SOURCECLIENTAREAONLY,
         rcDestination: RECT {
@@ -28,7 +28,7 @@ fn place_handle(h: isize, rect: PxRect) -> bool {
             right: rect.x + rect.w,
             bottom: rect.y + rect.h,
         },
-        opacity: u8::MAX,
+        opacity,
         fVisible: true.into(),
         fSourceClientAreaOnly: false.into(),
         ..Default::default()
@@ -46,23 +46,35 @@ impl Thumbnail {
     /// `source` drawn into `dest` at `rect` (in `dest`'s client pixels); `None` when DWM
     /// refuses (the source is gone or hidden).
     pub fn new(dest: Hwnd, source: Hwnd, rect: PxRect) -> Option<Thumbnail> {
+        Thumbnail::faded(dest, source, rect, u8::MAX)
+    }
+
+    /// As [`Thumbnail::new`], drawn at `opacity` (0 is unseen, for a [`Flight`] to fade in).
+    pub fn faded(dest: Hwnd, source: Hwnd, rect: PxRect, opacity: u8) -> Option<Thumbnail> {
         // SAFETY: registers a thumbnail between two windows; unregistered on drop.
         let t = Thumbnail(unsafe { DwmRegisterThumbnail(dest.raw(), source.raw()) }.ok()?);
-        t.place(rect).then_some(t)
+        place_handle(t.0, rect, opacity).then_some(t)
     }
 
     /// Moves it; false when DWM refuses.
     pub fn place(&self, rect: PxRect) -> bool {
-        place_handle(self.0, rect)
+        place_handle(self.0, rect, u8::MAX)
     }
 }
 
-/// One thumbnail's way: from `from` to `to`.
+/// One thumbnail's way: from `from` to `to`, its opacity going from the first value to
+/// the second.
 #[derive(Clone, Copy, Debug)]
 pub struct Way {
     pub thumb: ThumbId,
     pub from: PxRect,
     pub to: PxRect,
+    pub opacity: (u8, u8),
+}
+
+/// Its opacity when `u` (0-1) of the way is done.
+fn fading((a, b): (u8, u8), u: f32) -> u8 {
+    (f32::from(a) + (f32::from(b) - f32::from(a)) * u).round() as u8
 }
 
 /// Where a thumbnail is when `u` (0-1) of the way is done.
@@ -95,7 +107,6 @@ impl Flight {
         use windows::Win32::Graphics::Dwm::DwmFlush;
         let stop = std::sync::Arc::new(AtomicBool::new(false));
         let stopped = stop.clone();
-        let handles: Vec<(isize, PxRect, PxRect)> = ways.iter().map(|w| (w.thumb.0, w.from, w.to)).collect();
         let thread = std::thread::Builder::new()
             .name("overview-flight".into())
             .spawn(move || {
@@ -110,8 +121,8 @@ impl Flight {
                         1.0
                     };
                     let u = ease(t);
-                    for (h, from, to) in &handles {
-                        place_handle(*h, between(*from, *to, u));
+                    for w in &ways {
+                        place_handle(w.thumb.0, between(w.from, w.to, u), fading(w.opacity, u));
                     }
                     if t >= 1.0 {
                         break;
@@ -157,8 +168,17 @@ impl Drop for Thumbnail {
 
 #[cfg(test)]
 mod tests {
-    //! Edge case: a thumbnail of a window that does not exist is refused.
+    //! Edge cases: a thumbnail of a window that does not exist is refused; a fade reaches
+    //! both of its ends, in either direction.
     use super::*;
+
+    #[test]
+    fn a_fade_goes_from_its_first_opacity_to_its_last() {
+        assert_eq!(fading((0, u8::MAX), 0.0), 0);
+        assert_eq!(fading((0, u8::MAX), 1.0), u8::MAX);
+        assert_eq!(fading((200, 0), 0.5), 100);
+        assert_eq!(fading((200, 0), 1.0), 0);
+    }
 
     #[test]
     fn a_missing_source_is_refused() {

@@ -195,6 +195,8 @@ mod timer {
     /// Shows the previews of the app the mouse rests on, and hides them once it left.
     pub const APP_PREVIEW: usize = 20;
     pub const APP_PREVIEW_HIDE: usize = 21;
+    /// Looks for the windows closed from the previews, while one is still going.
+    pub const APP_PREVIEW_CLOSING: usize = 45;
     /// The still picture's next drift step (DECISIONS D47).
     pub const DRIFT: usize = 22;
     /// The mouse has been away from an auto-hiding bar long enough: it slides off.
@@ -1800,6 +1802,7 @@ impl Shared {
                         self.step_aside_for_fullscreen();
                     }
                     timer::APP_PREVIEW_HIDE => self.hide_app_preview(),
+                    timer::APP_PREVIEW_CLOSING => self.preview_closing_due(),
                     timer::DRIFT => self.drift_step(false),
                     timer::AUTOHIDE => self.autohide_due(),
                     timer::REVEAL => self.reveal_due(),
@@ -2033,6 +2036,10 @@ impl Shared {
                 }
                 self.render_all(false);
                 self.tick_dock();
+                Some(0)
+            }
+            app_preview_host::MSG_APP_PREVIEW_FRAME => {
+                self.app_preview_frame();
                 Some(0)
             }
             MSG_START_SAVER => {

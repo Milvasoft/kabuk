@@ -1645,6 +1645,88 @@ fn an_apps_previews_show_its_windows_and_bring_one_back() {
     assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
 }
 
+/// Asked for by the user: a window closed from its preview leaves the panel up with the
+/// others, so several can be closed one after the other; the panel goes with the last.
+#[test]
+fn closing_windows_from_their_previews_keeps_the_panel_until_the_last() {
+    use kabuk::bar::manager::{CONTROL_CLASS, MSG_TEST_APP_PREVIEW};
+    use kabuk_win::msgloop::{post_message, Msg};
+    let before = work_areas();
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.config_file(), "schema = 1\n").unwrap();
+    let _shell = sandbox.shell_with_bar_and_wm();
+    assert!(wait_until(STARTUP_TIMEOUT, || reserved(&before)).is_some());
+    let first = TestWindow::open(&["--title", &title("preview-close-1")]);
+    let second = TestWindow::open(&["--title", &title("preview-close-2")]);
+    for w in [&first, &second] {
+        let managed = format!("managing window hwnd={}", w.hwnd.0);
+        assert!(wait_until(SETTLE, || sandbox.log_lines(&managed) == 1).is_some());
+    }
+    let pid = sandbox.state().kabuk_pid.expect("pid");
+    let control = kabuk_win::window::message_windows_of_class(CONTROL_CLASS)
+        .into_iter()
+        .find(|h| h.pid() == Some(pid))
+        .expect("bar control window");
+    let post = |what: usize| {
+        post_message(
+            control,
+            Msg {
+                id: MSG_TEST_APP_PREVIEW,
+                wparam: what,
+                lparam: first.hwnd.0 as isize,
+            },
+        )
+        .expect("post to the bar")
+    };
+    let preview = || {
+        kabuk_win::window::windows_of_class("Kabuk.AppPreview")
+            .into_iter()
+            .find(|h| h.pid() == Some(pid) && h.is_visible())
+    };
+
+    post(1);
+    assert!(wait_until(SETTLE, || preview().is_some()).is_some(), "no previews");
+    assert!(wait_until(SETTLE, || sandbox.log_lines("windows=2 pictures=2") == 1).is_some());
+    let panel = preview().expect("the panel");
+
+    // The × under the mouse grows; the frames stop when it has.
+    post(4);
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("a preview's close mark under the mouse")
+            == 1)
+        .is_some(),
+        "the close mark did not react"
+    );
+
+    // The card goes with its window; the same panel stays.
+    post(3);
+    let closed = |w: &TestWindow| !w.hwnd.exists();
+    let gone: Vec<&TestWindow> = vec![&first, &second];
+    assert!(
+        wait_until(SETTLE, || gone.iter().filter(|w| closed(w)).count() == 1).is_some(),
+        "no window closed"
+    );
+    assert!(
+        wait_until(SETTLE, || sandbox.log_lines("app previews follow") == 1).is_some(),
+        "the cards did not follow"
+    );
+    assert_eq!(preview(), Some(panel), "the panel closed with the window");
+
+    // The last one takes the panel with it.
+    post(3);
+    assert!(
+        wait_until(SETTLE, || gone.iter().all(|w| closed(w))).is_some(),
+        "the last window stayed"
+    );
+    assert!(
+        wait_until(SETTLE, || preview().is_none()).is_some(),
+        "the panel outlived the app's windows"
+    );
+
+    assert_eq!(sandbox.restore().0, 0);
+    assert!(wait_until(Duration::from_secs(5), || restored(&before)).is_some());
+}
+
 /// Found by the user: Chrome, minimised when Kabuk started, never played the genie while
 /// windows opened later did. A window first met minimised gets the genie too.
 #[test]
