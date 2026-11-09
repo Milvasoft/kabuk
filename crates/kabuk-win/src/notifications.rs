@@ -146,10 +146,30 @@ pub fn remove(id: u32) -> std::io::Result<()> {
     l.RemoveNotification(id).map_err(crate::sync::io_error)
 }
 
-/// Empties Windows' notification centre.
+/// Empties Windows' notification centre, one notice at a time: `ClearNotifications` fails
+/// with "Element not found" (0x80070490) with notices there to clear (found by the user:
+/// "Clear all" did nothing).
 pub fn clear() -> std::io::Result<()> {
     let l = listener().ok_or_else(|| std::io::Error::from(std::io::ErrorKind::PermissionDenied))?;
-    l.ClearNotifications().map_err(crate::sync::io_error)
+    let all = l
+        .GetNotificationsAsync(NotificationKinds::Toast)
+        .map_err(crate::sync::io_error)?
+        .join()
+        .map_err(crate::sync::io_error)?;
+    let ids: Vec<u32> = all.into_iter().filter_map(|n| n.Id().ok()).collect();
+    remove_each(&ids, |id| l.RemoveNotification(id).map_err(crate::sync::io_error))
+}
+
+/// Removes every id, on past one that fails (it may be gone already); the first failure.
+fn remove_each(ids: &[u32], mut remove: impl FnMut(u32) -> std::io::Result<()>) -> std::io::Result<()> {
+    let mut first = Ok(());
+    for id in ids {
+        let r = remove(*id);
+        if first.is_ok() {
+            first = r;
+        }
+    }
+    first
 }
 
 /// The folder of Windows' notification database (`wpndatabase.db`).
@@ -259,6 +279,24 @@ mod tests {
     //! database folder is under the user's local data; a burst of writes is told once and
     //! the watcher stops when asked.
     use super::*;
+
+    /// Found by the user: "Clear all" must reach every notice, even past one that fails.
+    #[test]
+    fn clearing_tries_every_notice_and_reports_the_first_failure() {
+        let mut seen = Vec::new();
+        assert!(remove_each(&[], |_| unreachable!()).is_ok());
+        let r = remove_each(&[1, 2, 3], |id| {
+            seen.push(id);
+            match id {
+                2 => Err(std::io::Error::from(std::io::ErrorKind::NotFound)),
+                3 => Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
+                _ => Ok(()),
+            }
+        });
+        assert_eq!(seen, [1, 2, 3]);
+        assert_eq!(r.unwrap_err().kind(), std::io::ErrorKind::NotFound);
+        assert!(remove_each(&[7, 8], |_| Ok(())).is_ok());
+    }
 
     #[test]
     fn the_count_answers() {
