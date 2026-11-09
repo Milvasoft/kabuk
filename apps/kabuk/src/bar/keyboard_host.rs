@@ -70,13 +70,7 @@ impl Shared {
             .get_or_insert_with(kabuk_win::input_lang::installed)
             .clone();
         let shown = kabuk_core::input_lang::shown(all.len())
-            .then(|| {
-                let now = kabuk_win::input_lang::current()?;
-                let id = kabuk_core::input_lang::language_id(now);
-                all.iter()
-                    .find(|l| kabuk_core::input_lang::language_id(l.hkl) == id)
-                    .map(|l| kabuk_core::input_lang::short(&l.locale))
-            })
+            .then(|| Some(all.get(kabuk_win::input_lang::in_front(&all)?)?.code.clone()))
             .flatten();
         if shown == self.live.keyboard {
             return false;
@@ -128,13 +122,14 @@ impl Shared {
         self.close_media_card();
         let target = kabuk_win::events::foreground();
         let languages = kabuk_win::input_lang::installed();
-        let now = kabuk_win::input_lang::current().map(kabuk_core::input_lang::language_id);
+        let now = kabuk_win::input_lang::in_front(&languages);
         let rows: Vec<Row> = languages
             .iter()
-            .map(|l| Row {
-                code: kabuk_core::input_lang::short(&l.locale),
+            .enumerate()
+            .map(|(i, l)| Row {
+                code: l.code.clone(),
                 name: l.name.clone(),
-                current: Some(kabuk_core::input_lang::language_id(l.hkl)) == now,
+                current: Some(i) == now,
             })
             .collect();
         let weak = self.me.clone();

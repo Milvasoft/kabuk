@@ -3557,11 +3557,8 @@ impl Shared {
                 kabuk_core::network::Link::None => i18n.tr("net-none"),
             }),
             view::hit::KEYBOARD => {
-                let now = kabuk_win::input_lang::current();
-                kabuk_win::input_lang::installed()
-                    .into_iter()
-                    .find(|l| Some(l.hkl) == now)
-                    .map(|l| l.name)
+                let all = kabuk_win::input_lang::installed();
+                all.get(kabuk_win::input_lang::in_front(&all)?).map(|l| l.name.clone())
             }
             view::hit::STATS => match value {
                 view::hit::STAT_CPU => self.live.stats.cpu.map(|c| figure("lbl-cpu", pct(c))),

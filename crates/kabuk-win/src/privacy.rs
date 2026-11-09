@@ -9,7 +9,7 @@ use windows::core::{HSTRING, PWSTR};
 use windows::Win32::Foundation::{CloseHandle, ERROR_SUCCESS, HANDLE, WAIT_OBJECT_0};
 use windows::Win32::System::Registry::{
     RegCloseKey, RegEnumKeyExW, RegGetValueW, RegNotifyChangeKeyValue, RegOpenKeyExW, HKEY, HKEY_CURRENT_USER,
-    KEY_NOTIFY, KEY_READ, REG_NOTIFY_CHANGE_LAST_SET, REG_NOTIFY_CHANGE_NAME, RRF_RT_REG_QWORD,
+    KEY_NOTIFY, KEY_READ, REG_NOTIFY_CHANGE_LAST_SET, REG_NOTIFY_CHANGE_NAME, RRF_RT_REG_QWORD, RRF_RT_REG_SZ,
 };
 use windows::Win32::System::Threading::{CreateEventW, SetEvent, WaitForMultipleObjects, INFINITE};
 
@@ -23,18 +23,45 @@ const DESKTOP: &str = "NonPackaged";
 const NAME_MAX: usize = 256;
 
 /// An open registry key, closed when dropped.
-struct Key(HKEY);
+pub(crate) struct Key(HKEY);
 
 impl Key {
-    fn open(parent: HKEY, path: &str, access: windows::Win32::System::Registry::REG_SAM_FLAGS) -> Option<Key> {
+    pub(crate) fn open(
+        parent: HKEY,
+        path: &str,
+        access: windows::Win32::System::Registry::REG_SAM_FLAGS,
+    ) -> Option<Key> {
         let mut h = HKEY::default();
         // SAFETY: valid strings and an out handle.
         let r = unsafe { RegOpenKeyExW(parent, &HSTRING::from(path), None, access, &mut h) };
         (r == ERROR_SUCCESS).then_some(Key(h))
     }
 
+    /// The text value `name` of the subkey `sub`, empty when it is not there.
+    pub(crate) fn text(&self, sub: &str, name: &str) -> String {
+        let mut buf = [0u16; NAME_MAX];
+        let mut size = u32::try_from(std::mem::size_of_val(&buf)).unwrap_or(0);
+        // SAFETY: valid strings and an out buffer of the size passed.
+        let r = unsafe {
+            RegGetValueW(
+                self.0,
+                &HSTRING::from(sub),
+                &HSTRING::from(name),
+                RRF_RT_REG_SZ,
+                None,
+                Some(buf.as_mut_ptr().cast()),
+                Some(&mut size),
+            )
+        };
+        if r != ERROR_SUCCESS {
+            return String::new();
+        }
+        let len = buf.iter().position(|c| *c == 0).unwrap_or(buf.len());
+        String::from_utf16_lossy(&buf[..len])
+    }
+
     /// The names of the subkeys.
-    fn children(&self) -> Vec<String> {
+    pub(crate) fn children(&self) -> Vec<String> {
         let mut out = Vec::new();
         for i in 0.. {
             let mut buf = [0u16; NAME_MAX];

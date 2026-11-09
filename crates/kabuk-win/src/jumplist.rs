@@ -206,7 +206,7 @@ fn link_entry(bytes: &[u8]) -> Option<Entry> {
 }
 
 /// A title given as a resource reference (`@C:\…\x.dll,-123`) in the user's words.
-fn resolve_resource(title: &str) -> String {
+pub(crate) fn resolve_resource(title: &str) -> String {
     use windows::Win32::UI::Shell::SHLoadIndirectString;
     if !title.starts_with('@') {
         return title.to_string();

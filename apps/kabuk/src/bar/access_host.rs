@@ -64,14 +64,12 @@ impl Shared {
             ),
             // The language's whole name once its panel listed them, else its short code
             // (the tooltip asks Windows for every language: not on each drawing).
-            hit::KEYBOARD => {
-                let now = kabuk_win::input_lang::current();
-                self.input_langs
-                    .as_ref()
-                    .and_then(|all| all.iter().find(|l| Some(l.hkl) == now))
-                    .map(|l| l.name.clone())
-                    .or_else(|| data.keyboard.clone())
-            }
+            hit::KEYBOARD => self
+                .input_langs
+                .as_ref()
+                .and_then(|all| all.get(kabuk_win::input_lang::in_front(all)?))
+                .map(|l| l.name.clone())
+                .or_else(|| data.keyboard.clone()),
             _ => None,
         };
         // A figure's tooltip repeats its label; the keyboard's asks Windows for every
