@@ -73,15 +73,20 @@ fn watchdog_restores_hidden_window_within_two_seconds_after_a_kill() {
 /// the shell started again.
 #[test]
 fn watchdog_restarts_a_shell_that_stopped_answering() {
-    use kabuk_core::hang::{ANSWER_WAIT, HUNG_AFTER, MISSED_PROBES, PROBE_EVERY};
+    use kabuk_core::hang::{ANSWER_WAIT, HUNG_AFTER, MISSED_PROBES, PROBE_EVERY, STARTING_FOR};
     let sandbox = Sandbox::new();
     let t = title("hang");
     let window = TestWindow::open(&["--title", &t]);
-    let mut watchdog = sandbox.watchdog_with_wm_and(&["--debug-hide-title", &t, "--debug-hang-after-ms", "500"]);
+    // Past the first minute, where the shell has the longer limit (D104).
+    let hang_after = (STARTING_FOR + PROBE_EVERY).as_millis().to_string();
+    let mut watchdog = sandbox.watchdog_with_wm_and(&["--debug-hide-title", &t, "--debug-hang-after-ms", &hang_after]);
     wait_hidden_by_shell(&sandbox, &window);
     let pid = sandbox.state().kabuk_pid.expect("shell pid recorded");
     assert!(
-        wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("simulated hang") == 1).is_some(),
+        wait_until(STARTUP_TIMEOUT + STARTING_FOR + PROBE_EVERY, || sandbox
+            .log_lines("simulated hang")
+            == 1)
+        .is_some(),
         "the shell never hung"
     );
 

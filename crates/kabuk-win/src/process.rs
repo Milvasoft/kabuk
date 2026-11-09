@@ -190,6 +190,14 @@ impl Process {
         (!id.is_empty()).then_some(id)
     }
 
+    /// Whether the process runs below normal priority, as the shell does for a game (D85).
+    pub fn below_normal(&self) -> bool {
+        use windows::Win32::System::Threading::{GetPriorityClass, BELOW_NORMAL_PRIORITY_CLASS};
+        // SAFETY: valid handle with query rights; a failure returns 0, which is no class.
+        let class = unsafe { GetPriorityClass(self.handle.raw()) };
+        class == BELOW_NORMAL_PRIORITY_CLASS.0
+    }
+
     /// Whether the process's top-level windows of `classes` each answer within `wait`
     /// (DECISIONS D55). A hung window's thread is not waited for at all.
     pub fn answers(&self, classes: &[&str], wait: Duration) -> kabuk_core::hang::Probe {
@@ -602,6 +610,22 @@ mod tests {
         let mut child = sleeper();
         let other = Process::open(child.id()).unwrap();
         assert_eq!(other.answers(&[PROBED], wait), Probe::NoWindows, "not its window");
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    /// D104: the watchdog reads from outside that a shell stepped back for a game.
+    #[test]
+    fn a_process_below_normal_priority_is_seen_as_such() {
+        use std::os::windows::io::AsRawHandle;
+        use windows::Win32::Foundation::HANDLE;
+        use windows::Win32::System::Threading::{SetPriorityClass, BELOW_NORMAL_PRIORITY_CLASS};
+        let mut child = sleeper();
+        let other = Process::open(child.id()).unwrap();
+        assert!(!other.below_normal());
+        // SAFETY: the child's own handle, valid while `child` lives, and a valid class.
+        unsafe { SetPriorityClass(HANDLE(child.as_raw_handle()), BELOW_NORMAL_PRIORITY_CLASS) }.unwrap();
+        assert!(other.below_normal());
         let _ = child.kill();
         let _ = child.wait();
     }

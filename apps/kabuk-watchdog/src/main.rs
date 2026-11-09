@@ -14,7 +14,9 @@ use kabuk_core::config::{self, shortcut::EMERGENCY_CHORD};
 use kabuk_core::hang;
 use kabuk_core::instance::{exit, Instance, EMERGENCY_GRACE};
 use kabuk_core::paths::Paths;
-use kabuk_core::restart::{Decision, RestartLimiter, MAX_RESTARTS, RESTART_WINDOW};
+use kabuk_core::restart::{
+    start_again_when_taken, Decision, RestartLimiter, ENDED_SHELL_WAIT, MAX_RESTARTS, RESTART_WINDOW, TAKEN_WAIT,
+};
 use kabuk_win::msgloop::{self, HotKey, MessageWindow, Wake, MSG_HOTKEY};
 use kabuk_win::process::Process;
 use kabuk_win::restore;
@@ -107,6 +109,7 @@ fn run() -> i32 {
     let clock = SystemClock::new();
     let mut limiter = RestartLimiter::default();
     let mut restarts = 0u32;
+    let mut taken_tries = 0u32;
     loop {
         let child = match Command::new(&shell).args(cli::shell_args(&options, restarts)).spawn() {
             Ok(c) => c,
@@ -143,6 +146,16 @@ fn run() -> i32 {
         let code = process.exit_code().map_or(-1, |c| c as i32);
         tracing::info!(pid, code, "shell exited");
         match code {
+            exit::ALREADY_RUNNING if start_again_when_taken(restarts, taken_tries) => {
+                // The shell ended a moment ago still holds its lock (D104).
+                taken_tries += 1;
+                tracing::warn!(taken_tries, "the desk is still taken; starting the shell again soon");
+                if !matches!(msgloop::run_until(&[&emergency], Some(TAKEN_WAIT)), Wake::Timeout) {
+                    restore::restore_file(&paths.state_file());
+                    return exit::OK;
+                }
+                continue;
+            }
             exit::ALREADY_RUNNING => {
                 // Another shell owns the desktop; its windows must stay as they are.
                 return exit::OK;
@@ -154,6 +167,17 @@ fn run() -> i32 {
             _ => {
                 let report = restore::restore_file(&paths.state_file());
                 tracing::warn!(code, ?report, "shell crashed; desktop restored");
+                // Ending a process can take a while under load, and it keeps its lock
+                // until it is gone; the desktop did not wait for that, the next shell does.
+                match msgloop::run_until(&[&process, &emergency], Some(ENDED_SHELL_WAIT)) {
+                    Wake::Signalled(0) => {}
+                    Wake::Timeout => tracing::error!(pid, "the ended shell is still not gone"),
+                    _ => {
+                        restore::restore_file(&paths.state_file());
+                        return exit::OK;
+                    }
+                }
+                taken_tries = 0;
             }
         }
         match limiter.on_crash(clock.now()) {
@@ -176,6 +200,7 @@ fn run() -> i32 {
 /// (DECISIONS D55).
 fn watch(process: &Process, emergency: &NamedEvent, clock: &SystemClock) -> Wake {
     let mut silence = hang::HangWatch::default();
+    let started = clock.now();
     loop {
         match msgloop::run_until(&[process, emergency], Some(hang::PROBE_EVERY)) {
             Wake::Timeout => {
@@ -183,7 +208,12 @@ fn watch(process: &Process, emergency: &NamedEvent, clock: &SystemClock) -> Wake
                 if probe == hang::Probe::Silent {
                     tracing::warn!(pid = process.pid(), "the shell did not answer");
                 }
-                if silence.probe(clock.now(), probe) {
+                let hung = if hang::patient(clock.now().saturating_sub(started), process.below_normal()) {
+                    silence.probe_in_game(clock.now(), probe)
+                } else {
+                    silence.probe(clock.now(), probe)
+                };
+                if hung {
                     tracing::error!(pid = process.pid(), "shell stopped answering; ending it");
                     let code = u32::try_from(exit::HUNG).unwrap_or_default();
                     if let Err(e) = process.terminate(code) {

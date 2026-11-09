@@ -6,6 +6,20 @@ use std::time::Duration;
 /// ARCHITECTURE §2: at most 3 restarts in 60 s.
 pub const MAX_RESTARTS: usize = 3;
 pub const RESTART_WINDOW: Duration = Duration::from_secs(60);
+/// How long a shell that was ended may take to be really gone before the next one starts.
+pub const ENDED_SHELL_WAIT: Duration = Duration::from_secs(30);
+/// How many times a restarted shell that found the desk taken is started again, and how
+/// long apart (D104).
+pub const TAKEN_RETRIES: u32 = 10;
+pub const TAKEN_WAIT: Duration = Duration::from_secs(3);
+
+/// Whether to start the shell again after it left because another one holds the lock.
+/// At the first start that is a real second shell, which keeps the desk. After a crash it
+/// is the shell just ended, still dying (found by the user: Kabuk stayed away until it
+/// was started by hand), so it is tried again for a while.
+pub fn start_again_when_taken(restarts: u32, tried: u32) -> bool {
+    restarts > 0 && tried < TAKEN_RETRIES
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Decision {
@@ -101,6 +115,14 @@ mod tests {
         // The first three are now exactly 60 s old and no longer count.
         assert_eq!(l.on_crash(clock.now()), Decision::Restart);
         assert_eq!(l.recent(), 1);
+    }
+
+    #[test]
+    fn a_taken_desk_is_tried_again_only_after_a_crash_and_only_for_a_while() {
+        assert!(!start_again_when_taken(0, 0), "a real second shell keeps the desk");
+        assert!(start_again_when_taken(1, 0));
+        assert!(start_again_when_taken(2, TAKEN_RETRIES - 1));
+        assert!(!start_again_when_taken(1, TAKEN_RETRIES));
     }
 
     #[test]

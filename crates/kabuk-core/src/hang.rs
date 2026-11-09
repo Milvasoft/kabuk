@@ -13,6 +13,19 @@ pub const PROBE_EVERY: Duration = Duration::from_secs(5);
 pub const ANSWER_WAIT: Duration = Duration::from_secs(2);
 /// How long the shell may stay silent.
 pub const HUNG_AFTER: Duration = Duration::from_secs(15);
+/// How long the shell may stay silent while it runs below normal priority for a game
+/// (D85, D104): a game using every core keeps it waiting that long and more, and it is
+/// not hung (found by the user: Kabuk was ended twice in one evening under a game).
+pub const HUNG_AFTER_IN_GAME: Duration = Duration::from_secs(120);
+/// A shell this young gets the longer limit too: it lowers its priority only once its
+/// window manager runs, and under a game getting there takes many seconds.
+pub const STARTING_FOR: Duration = Duration::from_secs(60);
+
+/// Whether the shell gets [`HUNG_AFTER_IN_GAME`]: it has stepped back for a game, or it
+/// is still starting.
+pub fn patient(age: Duration, below_normal: bool) -> bool {
+    below_normal || age < STARTING_FOR
+}
 /// Questions in a row that must go unanswered too, so that time jumping ahead (the PC
 /// waking from sleep) never ends a shell by itself.
 pub const MISSED_PROBES: u32 = 3;
@@ -45,11 +58,20 @@ pub struct HangWatch {
 impl HangWatch {
     /// Records the question asked at `now`; true once the shell counts as hung.
     pub fn probe(&mut self, now: Duration, probe: Probe) -> bool {
+        self.judge(now, probe, HUNG_AFTER)
+    }
+
+    /// As [`HangWatch::probe`], for a shell that has stepped back for a game.
+    pub fn probe_in_game(&mut self, now: Duration, probe: Probe) -> bool {
+        self.judge(now, probe, HUNG_AFTER_IN_GAME)
+    }
+
+    fn judge(&mut self, now: Duration, probe: Probe, limit: Duration) -> bool {
         match probe {
             Probe::Silent => {
                 let since = *self.silent_since.get_or_insert(now);
                 self.missed += 1;
-                self.missed >= MISSED_PROBES && now.saturating_sub(since) >= HUNG_AFTER
+                self.missed >= MISSED_PROBES && now.saturating_sub(since) >= limit
             }
             Probe::Answered | Probe::NoWindows => {
                 *self = HangWatch::default();
@@ -120,8 +142,48 @@ mod tests {
         assert!(!w.probe(s(20), Probe::NoWindows));
     }
 
+    /// D104: under a game the normal limit passes without a verdict, the longer one
+    /// ends it, and silence that began before the game keeps counting from its start.
+    #[test]
+    fn a_shell_stepped_back_for_a_game_gets_longer() {
+        let mut w = HangWatch::default();
+        let mut t = 0;
+        while t < 120 {
+            assert!(!w.probe_in_game(s(t), Probe::Silent), "ended at {t} s");
+            t += 5;
+        }
+        assert!(w.probe_in_game(s(120), Probe::Silent));
+
+        let mut w = HangWatch::default();
+        assert!(!w.probe(s(0), Probe::Silent));
+        assert!(!w.probe_in_game(s(5), Probe::Silent));
+        assert!(!w.probe_in_game(s(10), Probe::Silent));
+        assert!(
+            w.probe(s(15), Probe::Silent),
+            "the game is over: the normal limit again"
+        );
+    }
+
+    #[test]
+    fn an_answer_under_a_game_starts_the_count_again() {
+        let mut w = HangWatch::default();
+        assert!(!w.probe_in_game(s(0), Probe::Silent));
+        assert!(!w.probe_in_game(s(100), Probe::Answered));
+        assert!(!w.probe_in_game(s(120), Probe::Silent));
+        assert!(!w.probe_in_game(s(235), Probe::Silent));
+    }
+
+    #[test]
+    fn a_shell_starting_or_under_a_game_gets_the_longer_limit() {
+        assert!(patient(Duration::ZERO, false));
+        assert!(patient(STARTING_FOR - Duration::from_millis(1), false));
+        assert!(!patient(STARTING_FOR, false));
+        assert!(patient(s(3600), true));
+    }
+
     #[test]
     fn the_limits_fit_the_rhythm() {
+        assert!(HUNG_AFTER_IN_GAME > HUNG_AFTER);
         // A question waits less than the time between two of them, and the silence
         // lasts for more questions than the minimum, so both conditions can be met.
         assert!(ANSWER_WAIT < PROBE_EVERY);
