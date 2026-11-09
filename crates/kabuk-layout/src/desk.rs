@@ -458,7 +458,12 @@ impl Desk {
         before.insert(w.id);
         self.monitors[m].workspaces[target].entries.push(entry);
         if target != self.monitors[m].active {
-            return self.sync(&before, &[], None);
+            let mut effects = self.sync(&before, &[], None);
+            // Showing a floating window does not place it, so it goes there while hidden.
+            if floating && w.place {
+                effects.push(Effect::Place(w.id, w.at));
+            }
+            return effects;
         }
         let reflow = if floating { Vec::new() } else { vec![(m, target)] };
         // Focus is Windows' business here: a window that opens in the background must
@@ -904,6 +909,20 @@ impl Desk {
             return Vec::new();
         }
         self.toggle_floating(id)
+    }
+
+    /// A window of a saved desktop back at its place (DECISIONS D101): floating at `rect`,
+    /// on whichever workspace it is.
+    pub fn float_at(&mut self, id: WindowId, rect: Rect) -> Vec<Effect> {
+        let mut effects = self.set_floating(id, true);
+        let Some((m, w, i)) = self.find(id) else {
+            return effects;
+        };
+        self.monitors[m].workspaces[w].entries[i].float_rect = rect;
+        effects.retain(|e| !matches!(e, Effect::Place(p, _) if *p == id));
+        // On a hidden workspace too: showing a floating window does not place it.
+        effects.push(Effect::Place(id, rect));
+        effects
     }
 
     /// The window did not take the size it was given (its minimum is larger).

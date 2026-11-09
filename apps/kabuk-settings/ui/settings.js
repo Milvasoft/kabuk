@@ -179,7 +179,7 @@
   document.addEventListener("keyup", onKey, true);
 
   /* ---------- pages ---------- */
-  const navItems = [["look", "app"], ["wall", "image"], ["saver", "lock"], ["bar", "tile"], ["windows", "tile"], ["rules", "file"], ["game", "pad"], ["launcher", "search"], ["keys", "term"], ["lang", "globe"], ["oled", "shield"], ["about", "cube"]];
+  const navItems = [["look", "app"], ["wall", "image"], ["saver", "lock"], ["bar", "tile"], ["windows", "tile"], ["desktops", "app"], ["rules", "file"], ["game", "pad"], ["launcher", "search"], ["keys", "term"], ["lang", "globe"], ["oled", "shield"], ["about", "cube"]];
 
   function lookPage() {
     const c = code();
@@ -487,6 +487,17 @@
       ${profilesGroup()}
       ${hotCornersGroup()}
       ${gesturesGroup()}`;
+  }
+
+  // Saved desktops (DECISIONS D101): the windows as they were, brought back later.
+  function desktopsPage() {
+    const list = cfg().desktop || [];
+    const groups = list.map((d, i) => `<div class="set-grp">${row(escapeHtml(d.name), tv("dkCount", (d.window || []).length), `<span style="display:flex;gap:10px"><button type="button" class="linkish" data-desktop-open="${i}">${t("pfOpen")}</button><button type="button" class="linkish" data-desktop-drop="${i}">${t("setRemove")}</button></span>`)}
+      ${row(t("dkAgain"), t("dkAgainH"), `<button class="tgl" type="button" role="switch" aria-checked="${!!d.start_again}" aria-label="${escapeHtml(t("dkAgain"))}" data-desktop-again="${i}"></button>`)}</div>`).join("");
+    return head(t("navDesktops"), t("dkDesc")) + (groups || `<div class="set-grp"><div class="set-row"><span>${t("dkNone")}</span></div></div>`) + `
+      <div class="set-grp"><div style="display:flex;gap:8px;align-items:center"><span class="num"><input type="text" id="desktop-name" style="width:200px" placeholder="${t("dkNamePh")}" aria-label="${t("dkName")}"></span><button class="set-btn ghost" type="button" data-desktop-save>${t("dkSave")}</button></div>
+      <div class="note">${t("dkNote")}</div>
+      ${ui.desktopMsg ? `<div class="note" role="status">${escapeHtml(ui.desktopMsg)}</div>` : ""}</div>`;
   }
 
   // Kabuk's do not disturb (PLAN M19 U20): its own notices held back, summed up when off.
@@ -862,7 +873,7 @@
     return `<div>${check}${open}</div>${said ? `<div class="note" data-update-said="${u.state}">${escapeHtml(said)}</div>` : ""}`;
   }
 
-  const PAGES = { look: lookPage, wall: wallPage, saver: saverPage, bar: barPage, windows: windowsPage, rules: rulesPage, game: gamePage, launcher: launcherPage, keys: keysPage, lang: langPage, oled: oledPage, about: aboutPage };
+  const PAGES = { look: lookPage, wall: wallPage, saver: saverPage, bar: barPage, windows: windowsPage, desktops: desktopsPage, rules: rulesPage, game: gamePage, launcher: launcherPage, keys: keysPage, lang: langPage, oled: oledPage, about: aboutPage };
 
   /* ---------- search (PLAN M19 U20) ---------- */
   /* Settings found by their label, hint and page in the language in use: every page drawn
@@ -1026,6 +1037,14 @@
     }
     if (on("[data-genstop]")) { post({ op: "gen-cancel" }); return; }
     if (on("[data-genapply]")) { post({ op: "gen-apply" }); return; }
+    if ((el = on("[data-desktop-save]"))) {
+      const name = (document.getElementById("desktop-name") || {}).value || "";
+      if (!name.trim()) { ui.desktopMsg = t("pfNameMissing"); render(); return; }
+      ui.desktopMsg = ""; post({ op: "desktop-save", name: name.trim() }); return;
+    }
+    if ((el = on("[data-desktop-open]"))) { const d = (cfg().desktop || [])[Number(el.dataset.desktopOpen)]; if (d) post({ op: "desktop-open", name: d.name }); return; }
+    if ((el = on("[data-desktop-drop]"))) { const i = Number(el.dataset.desktopDrop); set("desktop", (cfg().desktop || []).filter((_, j) => j !== i)); return; }
+    if ((el = on("[data-desktop-again]"))) { const i = Number(el.dataset.desktopAgain); set("desktop", (cfg().desktop || []).map((d, j) => (j === i ? { ...d, start_again: !d.start_again } : d))); return; }
     if ((el = on("[data-profile-save]"))) {
       const name = (document.getElementById("profile-name") || {}).value || "";
       if (!name.trim()) { ui.profileMsg = t("pfNameMissing"); render(); return; }
@@ -1229,6 +1248,10 @@
       case "gallery-previews-done":
         ui.previewsDone = true;
         document.querySelectorAll("img[data-gprev]").forEach(previewCame);
+        break;
+      case "desktop":
+        ui.desktopMsg = m.done === "empty" ? t("dkEmpty") : m.done === "not-running" ? t("pfNotRunning") : t("dkOpened");
+        render();
         break;
       case "profile":
         ui.profileMsg = m.done === "empty" ? t("pfEmpty") : m.done === "not-running" ? t("pfNotRunning") : t("pfOpened");

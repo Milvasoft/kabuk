@@ -74,7 +74,12 @@ pub fn main(common: &Common, words: &[String]) -> i32 {
         Err(_) => return fail(&i18n, &Message::new("cli-msg-not-running", vec![]), exit::NOT_RUNNING),
     };
     let name = ipc::pipe_name(&sid, instance.id());
-    let answer = kabuk_win::pipe::request(&name, &ipc::request_line(words), TIMEOUT, |server| {
+    let wait = if request.takes_long() {
+        ipc::LONG_ANSWER
+    } else {
+        TIMEOUT
+    };
+    let answer = kabuk_win::pipe::request(&name, &ipc::request_line(words), wait, |server| {
         // The launcher, a panel… take the keyboard: let the shell come to the front.
         if request.takes_keyboard() {
             kabuk_win::process::allow_foreground(server);

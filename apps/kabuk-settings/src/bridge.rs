@@ -264,6 +264,20 @@ impl Bridge {
                 };
                 json!({ "op": "profile", "done": done })
             }
+            "desktop-save" => {
+                let name = m.get("name").and_then(Value::as_str)?;
+                self.save_desktop(name)
+            }
+            "desktop-open" => {
+                let name = m.get("name").and_then(Value::as_str)?;
+                let done = if self.ask(&["desktops", "open", name]).is_some() || self.ask(&["query", "state"]).is_some()
+                {
+                    "opened"
+                } else {
+                    "not-running"
+                };
+                json!({ "op": "desktop", "done": done })
+            }
             "theme-import" => self.import_theme(m.get("path").and_then(Value::as_str)),
             "settings-export" => self.export_settings(m.get("path").and_then(Value::as_str)),
             "settings-import" => self.import_settings(
@@ -563,6 +577,14 @@ impl Bridge {
                 Err(e) => tracing::warn!(error = %e, "layout profiles not kept by the reset"),
             }
         }
+        if !cfg.desktops.is_empty() {
+            let desktops = serde_json::to_value(&cfg.desktops).unwrap_or(Value::Null);
+            match config::edit::set(&text, "desktop", &desktops) {
+                Ok(with) => text = with,
+                // Kept in the backup either way.
+                Err(e) => tracing::warn!(error = %e, "saved desktops not kept by the reset"),
+            }
+        }
         self.replace_settings(&text, "reset", &i18n)
     }
 
@@ -582,6 +604,29 @@ impl Bridge {
         let mut state = self.state();
         state["settings_done"] = json!({ "done": done, "backup": backup.display().to_string() });
         state
+    }
+
+    /// Asks the shell to save desktop `name` (DECISIONS D101), which reads what its windows
+    /// are showing and writes the file; a fresh state then shows the set.
+    fn save_desktop(&self, name: &str) -> Value {
+        // Asked first with the short wait: a long one would hold the page when Kabuk is off.
+        if self.ask(&["query", "state"]).is_none() {
+            return json!({ "op": "desktop", "done": "not-running" });
+        }
+        let sid = kabuk_win::pipe::user_sid().ok();
+        let pipe = sid.map(|sid| kabuk_core::ipc::pipe_name(&sid, self.instance.id()));
+        let words = ["desktops".to_string(), "save".to_string(), name.to_string()];
+        let line = kabuk_core::ipc::request_line(&words);
+        let Some(answer) =
+            pipe.and_then(|p| kabuk_win::pipe::request(&p, &line, kabuk_core::ipc::LONG_ANSWER, |_| {}).ok())
+        else {
+            return json!({ "op": "desktop", "done": "not-running" });
+        };
+        if kabuk_core::ipc::Response::read(&answer).is_ok_and(|r| r.ok) {
+            self.state()
+        } else {
+            json!({ "op": "desktop", "done": "empty" })
+        }
     }
 
     /// Saves layout profile `name` (DECISIONS D65) from `windows` (`query windows`' answer):
@@ -1595,7 +1640,7 @@ command = \"evil.exe\"
     #[test]
     fn every_setting_goes_back_to_its_default_and_can_come_back() {
         let dir = tempfile::tempdir().unwrap();
-        let mine = "schema = 1\n# mine\n[windows]\ngap = 12\n[shortcuts]\nlauncher = [\"Win+Shift+R\"]\n[[rules.rule]]\nexe = \"Discord.exe\"\nworkspace = 5\n[[profile]]\nname = \"Kodlama\"\n[[profile.window]]\nexe = \"Code.exe\"\nopen = 'C:\\Code\\Code.exe'\nmonitor = 1\nworkspace = 2\n";
+        let mine = "schema = 1\n# mine\n[windows]\ngap = 12\n[shortcuts]\nlauncher = [\"Win+Shift+R\"]\n[[rules.rule]]\nexe = \"Discord.exe\"\nworkspace = 5\n[[profile]]\nname = \"Kodlama\"\n[[profile.window]]\nexe = \"Code.exe\"\nopen = 'C:\\Code\\Code.exe'\nmonitor = 1\nworkspace = 2\n[[desktop]]\nname = \"Aksam\"\n[[desktop.window]]\nexe = \"a.exe\"\nopen = 'a.exe'\nmonitor = 1\nworkspace = 1\n";
         let b = bridge(&dir, Some(mine));
         assert_eq!(b.config().profiles.len(), 1, "the profile reads");
         let s = reply(&b, json!({ "op": "settings-reset" }));
@@ -1612,6 +1657,7 @@ command = \"evil.exe\"
         );
         assert_eq!(now.profiles.len(), 1);
         assert_eq!(now.profiles[0].name, "Kodlama");
+        assert_eq!(now.desktops[0].name, "Aksam", "the saved desktops too (D101)");
         assert_eq!(std::fs::read_to_string(&backup).unwrap(), mine);
         reply(&b, json!({ "op": "settings-import", "backup": true }));
         assert_eq!(std::fs::read_to_string(&b.config_file).unwrap(), mine);

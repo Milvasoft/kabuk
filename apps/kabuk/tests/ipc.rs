@@ -443,6 +443,239 @@ fn a_layout_profile_moves_open_windows_and_starts_the_rest() {
     assert_eq!(sandbox.restore().0, 0);
 }
 
+/// What `find` finds within `timeout`.
+fn found_within<T>(timeout: Duration, mut find: impl FnMut() -> Option<T>) -> Option<T> {
+    let mut found = None;
+    wait_until(timeout, || {
+        found = find();
+        found.is_some()
+    });
+    found
+}
+
+/// A started program's windows end with the test, failed or not.
+struct EndsTitled(&'static str);
+
+impl Drop for EndsTitled {
+    fn drop(&mut self) {
+        for w in kabuk_win::window::windows_of_class(TEST_WINDOW_CLASS) {
+            if !w.title().contains(self.0) {
+                continue;
+            }
+            if let Some(p) = w.pid().and_then(|pid| kabuk_win::process::Process::open(pid).ok()) {
+                let _ = p.terminate(1);
+                p.wait(Some(SETTLE));
+            }
+        }
+    }
+}
+
+fn titled(sandbox: &Sandbox, wanted: &str) -> Vec<Value> {
+    ok(sandbox, &["query", "windows"])
+        .json()
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["title"].as_str().is_some_and(|t| t == wanted))
+        .cloned()
+        .collect()
+}
+
+/// DECISIONS D101: what is on screen is saved with the arguments and folder its program
+/// was started with, and comes back with exactly those arguments (the test app takes its
+/// title from them) after the window was closed.
+#[test]
+fn a_saved_desktop_brings_a_program_back_with_its_arguments() {
+    let sandbox = Sandbox::new();
+    let _shell = Shell::start_with(&sandbox, NO_GAME);
+    let _ends = EndsTitled("saved-args");
+    let wanted = title("saved-args");
+    let a = TestWindow::open(&["--title", &wanted]);
+    managed(&sandbox, &a);
+    let answer = ok(&sandbox, &["desktops", "save", "Test", "set"]).json();
+    assert_eq!(answer["windows"], 1, "{answer}");
+    let cfg = kabuk_core::config::parse(&std::fs::read_to_string(sandbox.config_file()).unwrap())
+        .unwrap()
+        .config;
+    assert_eq!(cfg.desktops.len(), 1);
+    let saved = &cfg.desktops[0].windows[0];
+    assert_eq!(saved.exe, "kabuk-testapp.exe");
+    assert!(saved.args.contains(&wanted), "{saved:?}");
+    assert!(!saved.dir.is_empty(), "its folder: {saved:?}");
+    assert_eq!(saved.workspace, 1);
+
+    let listed = ok(&sandbox, &["desktops", "list"]).json();
+    assert_eq!(listed[0]["name"], "Test set", "{listed}");
+    // Saved while open: opening reuses the very window and starts nothing.
+    assert!(wait_until(SETTLE, || sandbox.log_lines("configuration") > 0).is_some());
+    std::thread::sleep(Duration::from_millis(600));
+    ok(&sandbox, &["desktops", "open", "test", "set"]);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("moved=1 started=0") == 1).is_some());
+
+    a.close();
+    assert!(wait_until(SETTLE, || titled(&sandbox, &wanted).is_empty()).is_some());
+    ok(&sandbox, &["desktops", "open", "Test", "set"]);
+    assert!(
+        wait_until(STARTUP_TIMEOUT, || titled(&sandbox, &wanted).len() == 1).is_some(),
+        "the program came back with its arguments"
+    );
+
+    ok(&sandbox, &["desktops", "delete", "Test", "set"]);
+    assert_eq!(
+        ok(&sandbox, &["desktops", "list"]).json().as_array().map(Vec::len),
+        Some(0)
+    );
+    let unknown = msg(&sandbox, &["desktops", "open", "nope"]);
+    assert_ne!(unknown.code, 0, "a set that is not there is said");
+    assert_eq!(sandbox.restore().0, 0);
+}
+
+/// DECISIONS D101: a window goes to its workspace and its floating place; one saved on a
+/// monitor that is gone goes to Monitor 1 (main); a program that is gone is reported and
+/// the rest still open.
+#[test]
+fn a_saved_desktop_puts_windows_back_and_reports_a_missing_program() {
+    let sandbox = Sandbox::new();
+    let exe = testapp_exe();
+    let main = kabuk_win::shell::monitors().into_iter().find(|m| m.primary).unwrap();
+    let (floats, gone) = (title("saved-floats"), title("saved-monitor"));
+    let set = format!(
+        "{NO_GAME}[[desktop]]\nname = \"Places\"\n\
+         [[desktop.window]]\nexe = \"nowhere.exe\"\nopen = 'C:\\nowhere\\nowhere.exe'\nmonitor = {n}\nworkspace = 1\n\
+         [[desktop.window]]\nexe = \"kabuk-testapp.exe\"\nopen = '{exe}'\nargs = '--title {floats}'\nmonitor = {n}\nworkspace = 3\nfloating = true\nx = 90\ny = 70\nw = 500\nh = 400\n\
+         [[desktop.window]]\nexe = \"kabuk-testapp.exe\"\nopen = '{exe}'\nargs = '--title {gone}'\nmonitor = 16\nworkspace = 4\n",
+        n = main.number,
+        exe = exe.display(),
+    );
+    let _shell = Shell::start_with(&sandbox, &set);
+    let _ends = EndsTitled("saved-");
+    ok(&sandbox, &["desktops", "open", "Places"]);
+    assert!(wait_until(SETTLE, || sandbox.log_lines("saved desktop program not started") == 1).is_some());
+    assert!(
+        wait_until(STARTUP_TIMEOUT, || titled(&sandbox, &floats).len() == 1
+            && titled(&sandbox, &gone).len() == 1)
+        .is_some(),
+        "the rest still open"
+    );
+    let first = titled(&sandbox, &floats).remove(0);
+    assert_eq!(first["workspace"], 3, "{first}");
+    assert_eq!(first["floating"], true, "{first}");
+    let second = titled(&sandbox, &gone).remove(0);
+    assert_eq!(second["workspace"], 4, "{second}");
+    assert_eq!(second["monitor"], main.number, "the main monitor: {second}");
+    // Its place is kept for when its workspace shows.
+    ok(&sandbox, &["workspace", "3"]);
+    let hwnd = kabuk_win::window::Hwnd(first["hwnd"].as_u64().unwrap());
+    // Read now: the bar has taken its strip since the set was written.
+    let area = kabuk_win::shell::monitors()
+        .into_iter()
+        .find(|m| m.primary)
+        .unwrap()
+        .work_area;
+    let (left, top) = (area.left + 90, area.top + 70);
+    assert!(
+        wait_until(SETTLE, || hwnd
+            .frame_rect()
+            .is_some_and(|r| (r.left - left).abs() <= 2 && (r.top - top).abs() <= 2))
+        .is_some(),
+        "{:?} wanted at {left},{top}",
+        hwnd.frame_rect()
+    );
+    assert_eq!(sandbox.restore().0, 0);
+}
+
+/// DECISIONS D101, the point of it all: a browser showing a local address, opened by hand
+/// in a profile, is read from outside, and starts again at that address in that profile.
+/// Edge, as every Windows 11 has it; the shell is not needed for this.
+#[test]
+fn a_browser_comes_back_at_its_address_with_its_profile() {
+    use kabuk_core::desktops::{launch_args, saved, Seen};
+    use kabuk_win::process::Process;
+    use std::io::{Read, Write};
+
+    const EDGE: &str = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe";
+    const PAGE_TITLE: &str = "KabukSavedDesktopPage";
+
+    struct Ends(u32);
+    impl Drop for Ends {
+        fn drop(&mut self) {
+            if let Ok(p) = Process::open(self.0) {
+                let _ = p.terminate(1);
+                p.wait(Some(SETTLE));
+            }
+        }
+    }
+
+    let server = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = server.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in server.incoming().flatten() {
+            let mut stream = stream;
+            let mut request = [0u8; 2048];
+            let _ = stream.read(&mut request);
+            let body = format!("<html><title>{PAGE_TITLE}</title><body>saved</body></html>");
+            let _ = write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+        }
+    });
+    let window = || {
+        kabuk_win::window::windows_of_class("Chrome_WidgetWin_1")
+            .into_iter()
+            .find(|w| w.title().contains(PAGE_TITLE))
+    };
+    let data = tempfile::tempdir().unwrap();
+    let address = format!("http://127.0.0.1:{port}/page");
+    let by_hand = format!(
+        "--user-data-dir=\"{}\" --profile-directory=\"Profile 3\" --no-first-run --no-default-browser-check --new-window {address}",
+        data.path().display()
+    );
+    kabuk_win::shellitems::start(EDGE, &by_hand, None, false).unwrap();
+    let first = found_within(STARTUP_TIMEOUT, window).expect("the browser's window");
+    let pid = first.pid().unwrap();
+    let ends = Ends(pid);
+
+    let shown = found_within(SETTLE, || kabuk_win::browser::address_bar(first)).expect("its address bar");
+    let seen = Seen {
+        hwnd: first.0,
+        exe: "msedge.exe".into(),
+        open: EDGE.into(),
+        command_line: Process::query(pid).unwrap().command_line().unwrap(),
+        app_id: kabuk_win::shellitems::window_app_id(first),
+        showing: Some(shown.clone()),
+        monitor: 1,
+        workspace: 1,
+        ..Seen::default()
+    };
+    let w = saved(&seen);
+    assert_eq!(w.address, address, "shown as {shown:?}");
+    assert!(w.args.contains("--profile-directory=\"Profile 3\""), "{w:?}");
+    assert!(w.args.contains(&data.path().display().to_string()), "{w:?}");
+    assert!(
+        !w.args.contains("127.0.0.1"),
+        "the process's first address is not kept: {w:?}"
+    );
+
+    // Gone, and started again from what was saved.
+    drop(ends);
+    assert!(wait_until(SETTLE, || window().is_none()).is_some());
+    kabuk_win::shellitems::start(EDGE, &launch_args(&w), None, false).unwrap();
+    let again = found_within(STARTUP_TIMEOUT, window).expect("the browser's window again");
+    let _ends = Ends(again.pid().unwrap());
+    let shown = found_within(SETTLE, || kabuk_win::browser::address_bar(again)).expect("its address bar");
+    assert_eq!(
+        kabuk_core::desktops::address_to_open(&shown).as_deref(),
+        Some(address.as_str())
+    );
+    assert_eq!(
+        kabuk_win::shellitems::window_app_id(again),
+        seen.app_id,
+        "the same profile"
+    );
+}
+
 #[test]
 fn reload_and_launcher_reach_the_bar_and_the_window_manager() {
     let sandbox = Sandbox::new();

@@ -7,6 +7,7 @@ pub mod calendar;
 pub mod cli;
 pub mod clock;
 pub mod config;
+pub mod desktops;
 pub mod dropdown;
 pub mod fsutil;
 pub mod fullscreen;

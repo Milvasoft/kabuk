@@ -36,7 +36,7 @@ const { chromium } = require("playwright");
 const root = path.resolve(__dirname, "..");
 const exe = path.join(root, "target", "debug", "examples", "bridge_stdio.exe");
 const ORIGIN = "https://kabuk.settings/";
-const PAGES = ["look", "wall", "saver", "bar", "windows", "rules", "game", "launcher", "keys", "lang", "oled", "about"];
+const PAGES = ["look", "wall", "saver", "bar", "windows", "desktops", "rules", "game", "launcher", "keys", "lang", "oled", "about"];
 const TIMEOUT = 5000;
 // Creating a wallpaper asks the model twice and checks each answer on the GPU.
 const CREATE_TIMEOUT = 120000;
@@ -165,7 +165,7 @@ async function main() {
   await page.goto(`${ORIGIN}index.html`);
   await page.waitForSelector(".set-nav");
   await settled();
-  check((await page.locator(".set-nav").count()) === 12, "12 pages in the navigation");
+  check((await page.locator(".set-nav").count()) === 13, "13 pages in the navigation");
   check((await page.locator(".set-nav").first().innerText()).includes("Görünüm"), "Turkish words from the language files");
 
   // PLAN M19 U20: search finds a setting by its label, its hint or its page, in the page's
@@ -733,6 +733,29 @@ async function main() {
   check(toml().trim() === "schema = 1" && fs.readFileSync(backup, "utf8") === beforeReset && (await fileSaid()).includes(backup), `reset all: every setting back to its default (${toml().trim()})`);
   await page.click("[data-settings-undo]"); await settled();
   check(toml() === beforeReset, "reset all: brought back");
+
+  // DECISIONS D101: a saved desktop is listed with its windows, its switch is written, and
+  // without Kabuk running saving and opening say so; removing it leaves the file's rest.
+  await go("desktops");
+  check((await page.locator(".set-main").innerText()).includes("Henüz kayıtlı masaüstü yok"), "saved desktops: none yet");
+  await page.click("[data-desktop-save]"); await settled();
+  check((await page.locator(".set-main .note[role=status]").count()) === 1, "saved desktops: a name is asked for");
+  await page.fill("#desktop-name", "Akşam");
+  await page.click("[data-desktop-save]"); await settled();
+  check(ops[ops.length - 1] === "desktop-save" && (await page.locator(".set-main .note[role=status]").innerText()).includes("çalışmıyor"), "saved desktops: saving without Kabuk says so");
+  fs.writeFileSync(config, toml() + '\n[[desktop]]\nname = "İş"\n[[desktop.window]]\nexe = "a.exe"\nopen = "a.exe"\nmonitor = 1\nworkspace = 1\n');
+  await page.click(`[data-page="windows"]`); await settled();
+  await page.click(`[data-set="windows.tiling_layout"][data-val='"dwindle"']`); await settled();
+  await go("desktops");
+  const desktopText = await page.locator(".set-main").innerText();
+  check(desktopText.includes("İş") && desktopText.includes("1 pencere"), "saved desktops: listed with its windows");
+  if (shots) await page.screenshot({ path: path.join(shots, "desktops-set.png") });
+  await page.click(`[data-desktop-again="0"]`); await settled();
+  check(/start_again = true/.test(toml()) && (await page.getAttribute(`[data-desktop-again="0"]`, "aria-checked")) === "true", "saved desktops: always start again is written");
+  await page.click(`[data-desktop-open="0"]`); await settled();
+  check(ops[ops.length - 1] === "desktop-open" && (await page.locator(".set-main .note[role=status]").innerText()).includes("çalışmıyor"), "saved desktops: opening without Kabuk says so");
+  await page.click(`[data-desktop-drop="0"]`); await settled();
+  check(!toml().includes('"İş"') && /language = "tr"/.test(toml()) && /tiling_layout = "dwindle"/.test(toml()), `saved desktops: removed, the rest of the file kept: ${toml()}`);
 
   // PLAN M19 U11: Ollama's address, in kabuk.toml alone before: one without http is
   // refused and says why, a right one is written and named in the status.

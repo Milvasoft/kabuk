@@ -131,6 +131,46 @@ impl Process {
         Some(String::from_utf16_lossy(&buf[..len as usize]))
     }
 
+    /// The command line the process was started with, program included. Windows tells it
+    /// to anyone who may ask the process questions, so nothing of the process is read.
+    pub fn command_line(&self) -> Option<String> {
+        use windows::Wdk::System::Threading::{NtQueryInformationProcess, PROCESSINFOCLASS};
+        use windows::Win32::Foundation::UNICODE_STRING;
+        /// `ProcessCommandLineInformation`, which the headers do not name.
+        const COMMAND_LINE: PROCESSINFOCLASS = PROCESSINFOCLASS(60);
+        let mut size = 0u32;
+        // SAFETY: a null buffer of size zero only asks for the size needed.
+        let _ =
+            unsafe { NtQueryInformationProcess(self.handle.raw(), COMMAND_LINE, std::ptr::null_mut(), 0, &mut size) };
+        if (size as usize) < std::mem::size_of::<UNICODE_STRING>() {
+            return None;
+        }
+        // Whole u64s: the answer starts with a UNICODE_STRING, which holds a pointer.
+        let mut buf = vec![0u64; (size as usize).div_ceil(8)];
+        // SAFETY: `buf` holds at least `size` bytes.
+        unsafe {
+            NtQueryInformationProcess(
+                self.handle.raw(),
+                COMMAND_LINE,
+                buf.as_mut_ptr().cast(),
+                size,
+                &mut size,
+            )
+        }
+        .ok()
+        .ok()?;
+        // SAFETY: the call succeeded, so `buf` starts with a UNICODE_STRING whose text
+        // lies inside `buf`, which outlives this borrow.
+        let text = unsafe {
+            let line = &*buf.as_ptr().cast::<UNICODE_STRING>();
+            if line.Buffer.is_null() {
+                return None;
+            }
+            String::from_utf16_lossy(std::slice::from_raw_parts(line.Buffer.0, usize::from(line.Length) / 2))
+        };
+        Some(text)
+    }
+
     /// The app's identity when it is a packaged (Store) app, as `shell:AppsFolder` names
     /// it (e.g. `5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App`); `None` for other programs.
     pub fn app_user_model_id(&self) -> Option<String> {
@@ -190,6 +230,68 @@ impl Process {
         self.wait(Some(grace));
         false
     }
+}
+
+/// The folder process `pid` works in, read from its process block; `None` when Windows
+/// refuses the reading (an elevated or protected program) or for a 32-bit program, whose
+/// current folder is kept elsewhere. Only reads, and only on the user's asking: a window
+/// saved in a set (DECISIONS D101). A game's process is not to be opened like this.
+pub fn working_directory(pid: u32) -> Option<String> {
+    use windows::Wdk::System::Threading::{NtQueryInformationProcess, ProcessBasicInformation};
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
+    use windows::Win32::System::Threading::{IsWow64Process, PROCESS_BASIC_INFORMATION, PROCESS_VM_READ};
+    /// Where the 64-bit process block holds its parameters' address.
+    const PARAMETERS_IN_BLOCK: usize = 0x20;
+    /// Where the parameters hold the current folder's `UNICODE_STRING`.
+    const FOLDER_IN_PARAMETERS: usize = 0x38;
+
+    fn read(process: HANDLE, at: usize, into: &mut [u8]) -> Option<()> {
+        // SAFETY: `into` is a valid buffer of the length passed; a wrong address only fails.
+        unsafe { ReadProcessMemory(process, at as *const _, into.as_mut_ptr().cast(), into.len(), None) }.ok()
+    }
+    fn word(process: HANDLE, at: usize) -> Option<usize> {
+        let mut bytes = [0u8; 8];
+        read(process, at, &mut bytes)?;
+        usize::try_from(u64::from_le_bytes(bytes)).ok()
+    }
+
+    // SAFETY: plain call; the returned handle is owned by the wrapper.
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, false, pid) }.ok()?;
+    let process = OwnedHandle::new(process);
+    let mut wow64 = windows::core::BOOL(0);
+    // SAFETY: valid handle with query rights and a valid out pointer.
+    unsafe { IsWow64Process(process.raw(), &mut wow64) }.ok()?;
+    if wow64.as_bool() {
+        return None;
+    }
+    let mut basic = PROCESS_BASIC_INFORMATION::default();
+    let mut size = 0u32;
+    // SAFETY: `basic` is a valid buffer of the size passed.
+    unsafe {
+        NtQueryInformationProcess(
+            process.raw(),
+            ProcessBasicInformation,
+            (&mut basic as *mut PROCESS_BASIC_INFORMATION).cast(),
+            u32::try_from(std::mem::size_of::<PROCESS_BASIC_INFORMATION>()).ok()?,
+            &mut size,
+        )
+    }
+    .ok()
+    .ok()?;
+    let parameters = word(process.raw(), basic.PebBaseAddress as usize + PARAMETERS_IN_BLOCK)?;
+    let at = parameters + FOLDER_IN_PARAMETERS;
+    // A UNICODE_STRING: its length in bytes, then (at the next word) the text's address.
+    let length = word(process.raw(), at)? & 0xFFFF;
+    let text = word(process.raw(), at + 8)?;
+    let mut bytes = vec![0u8; length];
+    read(process.raw(), text, &mut bytes)?;
+    let wide: Vec<u16> = bytes
+        .chunks_exact(2)
+        .map(|b| u16::from_le_bytes([b[0], b[1]]))
+        .collect();
+    let folder = String::from_utf16_lossy(&wide);
+    (!folder.is_empty()).then_some(folder)
 }
 
 /// Whether process `pid` runs with higher rights than Kabuk (an elevated, "Run as
@@ -345,6 +447,30 @@ mod tests {
         assert!(!higher_rights(false, true));
         assert!(!runs_elevated(std::process::id()), "this very process");
         assert!(!runs_elevated(u32::MAX), "no such process");
+    }
+
+    /// DECISIONS D101: a process tells how it was started and where it works, whichever
+    /// words it was given; one that is gone tells nothing.
+    #[test]
+    fn a_process_tells_its_command_line_and_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut child = Command::new("ping")
+            .args(["-n", "30", "127.0.0.1"])
+            .current_dir(dir.path())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let p = Process::query(child.id()).unwrap();
+        let line = p.command_line().expect("its command line");
+        assert!(line.ends_with("-n 30 127.0.0.1"), "{line}");
+        assert!(line.to_lowercase().contains("ping"), "{line}");
+        let folder = working_directory(child.id()).expect("its folder");
+        let want = dir.path().canonicalize().unwrap();
+        let got = std::path::Path::new(&folder).canonicalize().unwrap();
+        assert_eq!(got, want, "{folder}");
+        let _ = child.kill();
+        let _ = child.wait();
+        assert_eq!(working_directory(0x7fff_fff0), None, "no such process");
     }
 
     /// Opened for questions only, the handle holds no right to end the program (the

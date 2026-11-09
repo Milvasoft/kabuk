@@ -240,6 +240,23 @@ fn is_hidden(meta: &std::fs::Metadata) -> bool {
     meta.file_attributes() & HIDDEN_OR_SYSTEM != 0
 }
 
+/// The saved desktops (DECISIONS D101), each to open by its name.
+pub fn saved_desktops(i18n: &I18n, names: &[String]) -> Vec<Item> {
+    let label = i18n.tr("k-desktop");
+    names
+        .iter()
+        .map(|name| Item {
+            icon: "tile",
+            ..Item::new(
+                i18n.tr_args("k-desktop-open", &[("value", kabuk_i18n::Arg::Str(name.clone()))]),
+                label.clone(),
+                Kind::Command,
+                Target::SavedDesktop(name.clone()),
+            )
+        })
+        .collect()
+}
+
 /// The `Bookmarks` files of every Chrome and Edge profile under `%LOCALAPPDATA%`.
 pub fn bookmark_files(local_app_data: &Path) -> Vec<PathBuf> {
     let browsers = [
@@ -457,6 +474,19 @@ mod tests {
         let got = recent(&recent_dir);
         assert_eq!(long(got), long(vec![(new, false), (files.clone(), true), (old, false)]));
         assert!(recent(&dir.path().join("nope")).is_empty());
+    }
+
+    /// DECISIONS D101: each saved desktop is an entry that opens it by its name.
+    #[test]
+    fn saved_desktops_become_entries() {
+        let tr = I18n::new(Lang::Tr);
+        let d = saved_desktops(&tr, &["Kodlama".to_string()]);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].title, "Kodlama masaüstünü aç");
+        assert_eq!(d[0].subtitle, tr.tr("k-desktop"));
+        assert_eq!(d[0].target, Target::SavedDesktop("Kodlama".into()));
+        assert_eq!(d[0].target.memory().as_deref(), Some("desktop:Kodlama"));
+        assert!(saved_desktops(&tr, &[]).is_empty());
     }
 
     /// DECISIONS D65: each layout profile is an entry that opens it by its name.

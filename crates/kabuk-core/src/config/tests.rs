@@ -469,6 +469,29 @@ fn wallpaper_dependencies() {
     assert_eq!(e.problem, Problem::OutOfRange { min: 1, max: 16 });
 }
 
+/// DECISIONS D101: a saved desktop reads back with what each window was showing, and one
+/// with no name, nothing to start or a place Kabuk does not have is refused.
+#[test]
+fn saved_desktops() {
+    let good = "schema = 1\n[[desktop]]\nname = \"Is\"\nstart_again = true\n[[desktop.window]]\nexe = \"chrome.exe\"\nopen = 'C:\\c.exe'\nargs = '--profile-directory=\"Profile 1\"'\naddress = \"http://localhost:6179\"\nmonitor = 2\nworkspace = 3\nfloating = true\nx = 5\ny = 6\nw = 700\nh = 500\n";
+    let c = parse(good).unwrap().config;
+    assert!(c.desktops[0].start_again);
+    let w = &c.desktops[0].windows[0];
+    assert_eq!(w.address, "http://localhost:6179");
+    assert_eq!(w.args, "--profile-directory=\"Profile 1\"");
+    assert_eq!((w.monitor, w.workspace, w.x, w.y, w.w, w.h), (2, 3, 5, 6, 700, 500));
+    let e = single_error("schema = 1\n[[desktop]]\nname = \" \"\n");
+    assert_eq!((e.path, e.problem), (path("desktop[0].name"), Problem::Empty));
+    let e = single_error(
+        "schema = 1\n[[desktop]]\nname = \"x\"\n[[desktop.window]]\nexe = \"a.exe\"\nopen = \"a.exe\"\nmonitor = 1\nworkspace = 12\n",
+    );
+    assert_eq!(e.path, path("desktop[0].window[0].workspace"));
+    let e = single_error(
+        "schema = 1\n[[desktop]]\nname = \"x\"\n[[desktop.window]]\nexe = \"a.exe\"\nopen = \"\"\nmonitor = 1\nworkspace = 1\n",
+    );
+    assert_eq!((e.path, e.problem), (path("desktop[0].window[0].open"), Problem::Empty));
+}
+
 /// DECISIONS D65: a layout profile reads back, and one with no name, nothing to start,
 /// a workspace past the last or no monitor is refused where it is wrong.
 #[test]

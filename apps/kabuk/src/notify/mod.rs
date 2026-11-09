@@ -52,6 +52,10 @@ pub enum Notice {
     QuietOff {
         missed: u32,
     },
+    /// Some programs of a saved desktop did not come back (DECISIONS D101).
+    DesktopMissing {
+        count: u32,
+    },
     /// `kabuk` was started while it already runs (PLAN M19 U20): this one keeps the desk.
     AlreadyRunning,
     /// `kabuk` was started while it already ran: the running one gave way to the new one,
@@ -132,6 +136,7 @@ impl Notice {
             Notice::Restarted => ("notify-restarted", Some("notify-restarted-s")),
             Notice::Elevated => ("notify-elevated", Some("notify-elevated-s")),
             Notice::QuietOff { .. } => ("notify-quiet-off", None),
+            Notice::DesktopMissing { .. } => ("notify-desktop-missing", None),
             Notice::AlreadyRunning => ("notify-already-running", Some("notify-already-running-s")),
             Notice::StartedAgain => ("notify-started-again", Some("notify-started-again-s")),
         }
@@ -151,6 +156,7 @@ impl Notice {
             | Notice::Failed(_)
             | Notice::Restarted
             | Notice::Elevated
+            | Notice::DesktopMissing { .. }
             | Notice::AlreadyRunning
             | Notice::StartedAgain => "app",
         }
@@ -168,6 +174,10 @@ impl Notice {
         let (title, sub) = self.keys();
         let sub = match (self, sub) {
             (_, Some(key)) => i18n.tr(key),
+            (Notice::DesktopMissing { count }, None) => i18n.tr_args(
+                "notify-desktop-missing-s",
+                &[("value", kabuk_i18n::Arg::Num(f64::from(count)))],
+            ),
             (Notice::GameOff { missed }, None) => {
                 i18n.tr_args("notify-missed", &[("value", kabuk_i18n::Arg::Num(f64::from(missed)))])
             }
@@ -296,6 +306,7 @@ mod tests {
                 Notice::Layout { master: false },
                 Notice::Restarted,
                 Notice::Elevated,
+                Notice::DesktopMissing { count: 2 },
                 Notice::QuietOff { missed: 4 },
                 Notice::AlreadyRunning,
                 Notice::StartedAgain,

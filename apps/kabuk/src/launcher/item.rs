@@ -97,6 +97,8 @@ pub enum Target {
     Copy(String),
     /// A layout profile opens (DECISIONS D65).
     Profile(String),
+    /// A saved desktop opens (DECISIONS D101).
+    SavedDesktop(String),
 }
 
 impl Target {
@@ -107,6 +109,7 @@ impl Target {
             Target::Shell(s) => Some(s.clone()),
             Target::Command(c) => Some(format!("command:{c:?}")),
             Target::Profile(name) => Some(format!("profile:{name}")),
+            Target::SavedDesktop(name) => Some(format!("desktop:{name}")),
             Target::Window(_) | Target::Copy(_) => None,
         }
     }

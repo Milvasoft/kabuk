@@ -386,6 +386,24 @@ pub fn known_app_id(exe: &str) -> Option<&'static str> {
         .map(|(_, id)| *id)
 }
 
+/// Starts `program` with `args` in `folder`, as administrator when `elevated` (Windows
+/// then asks the user, and this waits for the answer).
+pub fn start(program: &str, args: &str, folder: Option<&str>, elevated: bool) -> std::io::Result<()> {
+    let verb = HSTRING::from(if elevated { "runas" } else { "open" });
+    let (args, folder) = (HSTRING::from(args), folder.map(HSTRING::from));
+    let folder = folder
+        .as_ref()
+        .map_or(windows::core::PCWSTR::null(), |f| windows::core::PCWSTR(f.as_ptr()));
+    // SAFETY: plain strings that outlive the call; ShellExecuteW returns a value above 32
+    // on success.
+    let r = unsafe { ShellExecuteW(None, &verb, &HSTRING::from(program), &args, folder, SW_SHOWNORMAL) };
+    if r.0 as isize > 32 {
+        Ok(())
+    } else {
+        Err(std::io::Error::other(format!("ShellExecute failed ({})", r.0 as isize)))
+    }
+}
+
 /// Opens `file` with `program` (a recent file from an app's menu on the bar).
 pub fn open_with(program: &str, file: &str) -> std::io::Result<()> {
     // SAFETY: plain strings; ShellExecuteW returns a value above 32 on success.

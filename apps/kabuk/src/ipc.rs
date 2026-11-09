@@ -3,7 +3,7 @@
 //! manager's queue and the bars' control window, so a client never waits on either.
 
 use kabuk_core::instance::Instance;
-use kabuk_core::ipc::{self, PanelName, QueryKind, Request, Response};
+use kabuk_core::ipc::{self, DesktopsOp, PanelName, QueryKind, Request, Response};
 use kabuk_layout::Kind;
 use kabuk_win::msgloop::{self, Msg};
 use kabuk_win::pipe::{PipeServer, Reply};
@@ -33,6 +33,8 @@ pub struct Targets {
     pub tray: Option<std::sync::Arc<std::sync::Mutex<Vec<kabuk_core::tray::Icon>>>>,
     pub state: SharedState,
     pub instance: Instance,
+    /// `kabuk.toml`, where the saved desktops are kept.
+    pub config_file: std::path::PathBuf,
 }
 
 /// Starts serving this instance's pipe.
@@ -105,6 +107,25 @@ fn handle(line: &str, t: &Targets) -> Reply {
             PanelName::Volume => MSG_OPEN_VOLUME_PANEL,
         }),
         Request::Profile(name) => to_wm(Command::OpenProfile(name)),
+        Request::Desktops(op) => {
+            use crate::desktops as saved;
+            match op {
+                DesktopsOp::Save(name) => match &t.wm {
+                    Some(link) => match saved::save(&name, &link.view(), &t.config_file) {
+                        Ok(windows) => Response::with(json!({ "name": name, "windows": windows })),
+                        Err(key) => Response::failed(key),
+                    },
+                    None => Response::failed(error::NO_WM),
+                },
+                DesktopsOp::Open(name) if saved::exists(&name, &t.config_file) => to_wm(Command::OpenDesktop(name)),
+                DesktopsOp::Open(_) => Response::failed(saved::error::NOT_FOUND),
+                DesktopsOp::Delete(name) => match saved::delete(&name, &t.config_file) {
+                    Ok(()) => Response::done(),
+                    Err(key) => Response::failed(key),
+                },
+                DesktopsOp::List => Response::with(saved::list(&t.config_file)),
+            }
+        }
         Request::Quiet(on) => to_bar_with(MSG_SET_QUIET, crate::bar::manager::quiet_wparam(on)),
         Request::StartedAgain => to_bar(MSG_STARTED_AGAIN),
         Request::Query(kind) => Response::with(query(kind, t)),
@@ -215,7 +236,7 @@ fn query(kind: QueryKind, t: &Targets) -> Value {
                         "exe": path.as_deref().and_then(|p| p.rsplit(['\\', '/']).next()),
                         // What opens the program again: a packaged app by its id, as its
                         // file under WindowsApps cannot be started (layout profiles, D65).
-                        "open": open_target(path.as_deref(), h),
+                        "open": crate::desktops::open_target(path.as_deref(), h),
                         "device": w.device,
                         "monitor": view.monitors.iter().find(|m| m.device == w.device).map(|m| m.number),
                         "workspace": w.workspace,
@@ -247,14 +268,4 @@ fn query(kind: QueryKind, t: &Targets) -> Value {
                 .collect(),
         ),
     }
-}
-
-/// What opens a window's program again: its file, or for a packaged app (its file under
-/// `WindowsApps`) `shell:AppsFolder\<its app id>`.
-fn open_target(path: Option<&str>, h: Hwnd) -> Option<String> {
-    let path = path?;
-    if path.to_ascii_lowercase().contains("\\windowsapps\\") {
-        return kabuk_win::shellitems::window_app_id(h).map(|id| format!("shell:AppsFolder\\{id}"));
-    }
-    Some(path.to_string())
 }

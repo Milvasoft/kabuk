@@ -177,6 +177,26 @@ pub fn validate(config: &Config) -> Vec<(KeyPath, Problem)> {
         }
     }
 
+    // saved desktops (D101)
+    for (i, d) in config.desktops.iter().enumerate() {
+        let base = KeyPath::of(&["desktop"]).index(i);
+        if d.name.trim().is_empty() {
+            push(base.key("name"), Problem::Empty);
+        }
+        for (j, w) in d.windows.iter().enumerate() {
+            let at = base.key("window").index(j);
+            if w.open.trim().is_empty() {
+                push(at.key("open"), Problem::Empty);
+            }
+            if !in_range(w.workspace, (1, workspaces)) {
+                push(at.key("workspace"), out_of_range((1, workspaces)));
+            }
+            if !in_range(w.monitor, MONITOR_RANGE) {
+                push(at.key("monitor"), out_of_range(MONITOR_RANGE));
+            }
+        }
+    }
+
     // launcher
     for (i, folder) in config.launcher.indexed_folders.iter().enumerate() {
         if folder.trim().is_empty() {

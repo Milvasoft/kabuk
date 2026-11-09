@@ -247,6 +247,7 @@ pub fn main(options: Run) -> i32 {
         tray: bars.as_ref().and_then(BarManager::tray_list),
         state: state.clone(),
         instance: instance.clone(),
+        config_file: paths.config_file.clone(),
     })
     .map_err(|e| tracing::error!(error = %e, "command pipe unavailable"))
     .ok();

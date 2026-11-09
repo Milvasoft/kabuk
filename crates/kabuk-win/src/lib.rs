@@ -4,6 +4,7 @@
 pub mod appbar;
 pub mod audio;
 pub mod brightness;
+pub mod browser;
 pub mod clipboard;
 pub mod credentials;
 pub mod cursors;

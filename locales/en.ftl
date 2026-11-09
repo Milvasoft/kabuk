@@ -16,7 +16,8 @@ cli-usage =
                                 float <toggle|on|off>, close, scratchpad <toggle|send>,
                                 group <toggle|next>, layout <dwindle|master|floating|tiling|cycle>,
                                 dropdown, desktop, launcher, overview, apps, keys, saver, tray,
-                                panel <quick|network|calendar|volume>, profile <name>, reload,
+                                panel <quick|network|calendar|volume>, profile <name>,
+                                desktops <save|open|delete> <name>, desktops list, reload,
                                 query <state|windows|monitors|tray>, quiet <on|off|toggle>, restore
     Options:
       --state-dir <folder>    Folder for the state file and logs
@@ -142,6 +143,29 @@ pf-name-missing = Give the profile a name first
 pf-empty = No window to save: Kabuk is not running, or no program is open
 pf-not-running = Kabuk is not running
 pf-opened = Opening; programs not open yet start and take their places
+k-desktop = Saved desktop
+k-desktop-open = Open the { $value } desktop
+dk = Saved desktops
+dk-desc = Save what is on screen and bring it back later as it was: each program with the arguments it was started with, in its folder, on its monitor and workspace; a browser at the address it was showing, with its profile; File Explorer at its folder.
+dk-count = { $value } windows
+dk-none = No saved desktops yet
+dk-name = Desktop name
+dk-name-ph = Work, Evening…
+dk-save = Save what is on screen
+dk-again = Always start the programs again
+dk-again-h = Off: a window showing the same thing already goes to its place and nothing is started twice
+dk-note = A browser window comes back at the tab it is showing, not with its other tabs. The windows are read only when you save.
+dk-empty = No window to save: no program is open, or Kabuk could not write the file
+dk-opened = Opening; programs start one by one and take their places
+nav-desktops = Saved desktops
+ipc-error-desktop-empty = There is no window to save.
+ipc-error-desktop-not-found = There is no saved desktop by that name.
+ipc-error-desktop-not-saved = The saved desktops could not be written to the settings file.
+notify-desktop-missing = A saved desktop did not fully come back
+notify-desktop-missing-s = { $value ->
+    [one] One program could not be opened; the rest are open.
+   *[other] { $value } programs could not be opened; the rest are open.
+}
 th = Theme file
 th-h = Your theme, colours, bar, cursors and gallery wallpaper in one file to share; a theme file never changes shortcuts, rules or programs
 th-export = Export…

@@ -35,6 +35,47 @@ pub struct Config {
     /// Layout profiles (DECISIONS D65), `[[profile]]`.
     #[serde(rename = "profile", skip_serializing_if = "Vec::is_empty")]
     pub profiles: Vec<Profile>,
+    /// Saved desktops (DECISIONS D101), `[[desktop]]`.
+    #[serde(rename = "desktop", skip_serializing_if = "Vec::is_empty")]
+    pub desktops: Vec<SavedDesktop>,
+}
+
+/// A saved desktop (`kabuk_core::desktops`): windows as they were, to bring back.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SavedDesktop {
+    pub name: String,
+    /// Starts every program again, even when the very window is open already.
+    pub start_again: bool,
+    #[serde(rename = "window", skip_serializing_if = "Vec::is_empty")]
+    pub windows: Vec<SavedWindow>,
+}
+
+/// A window of a saved desktop.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SavedWindow {
+    /// Its program's file name, as rules match it.
+    pub exe: String,
+    /// What starts it (its file, or a packaged app's `shell:AppsFolder\…`).
+    pub open: String,
+    /// The arguments it starts with.
+    pub args: String,
+    /// The folder it starts in; empty for its program's own.
+    pub dir: String,
+    /// What it was showing: a browser's address, a File Explorer window's folder.
+    pub address: String,
+    /// As Windows numbers it.
+    pub monitor: u32,
+    pub workspace: u32,
+    pub floating: bool,
+    /// Its place, relative to its monitor's work area (physical pixels); `w` 0 when not known.
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+    /// Runs as administrator: opening asks Windows' permission.
+    pub elevated: bool,
 }
 
 /// A layout profile (`kabuk_core::profile`): programs over monitors and workspaces.
@@ -215,6 +256,7 @@ impl Default for Config {
             gestures: Gestures::default(),
             notices: Notices::default(),
             profiles: Vec::new(),
+            desktops: Vec::new(),
         }
     }
 }

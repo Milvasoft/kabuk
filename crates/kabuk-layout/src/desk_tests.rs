@@ -182,6 +182,61 @@ fn a_rule_can_send_a_new_window_to_a_hidden_workspace() {
     assert!(info[4].busy && !info[4].active);
 }
 
+/// DECISIONS D101, found by its integration test: showing a floating window does not place
+/// it, so one with a place of its own goes there while its workspace is hidden.
+#[test]
+fn a_floating_window_opened_on_a_hidden_workspace_goes_to_its_place() {
+    let mut d = desk(false);
+    d.add(new(1));
+    let at = Rect {
+        x: 90,
+        y: 70,
+        w: 500,
+        h: 400,
+    };
+    let e = d.add(NewWindow {
+        workspace: Some(5),
+        floating: true,
+        at,
+        place: true,
+        ..new(2)
+    });
+    assert_eq!(e, vec![Effect::Hide(2), Effect::Place(2, at)]);
+    assert_eq!(d.rect_of(2), Some(at));
+}
+
+/// DECISIONS D101: a window already open goes floating to its saved place, on a hidden
+/// workspace as on the one showing, and its old tile closes.
+#[test]
+fn a_saved_window_floats_at_its_place_wherever_it_is() {
+    let mut d = desk(false);
+    d.add(new(1));
+    d.add(new(2));
+    let at = Rect {
+        x: 90,
+        y: 70,
+        w: 500,
+        h: 400,
+    };
+    let e = d.float_at(2, at);
+    assert!(d.is_floating(2));
+    assert_eq!(d.rect_of(2), Some(at));
+    assert_eq!(
+        e.iter()
+            .filter(|x| matches!(x, Effect::Place(2, r) if *r == at))
+            .count(),
+        1,
+        "{e:?}"
+    );
+    assert!(placed(&e).contains(&1), "the other takes the room: {e:?}");
+
+    d.move_to(1, 3);
+    let later = Rect { x: 10, ..at };
+    assert_eq!(d.float_at(1, later).last(), Some(&Effect::Place(1, later)));
+    assert_eq!(d.rect_of(1), Some(later));
+    assert_eq!(d.float_at(99, at), vec![], "no such window");
+}
+
 #[test]
 fn moving_the_focused_window_to_another_workspace_hides_it_and_reflows() {
     let mut d = desk(false);

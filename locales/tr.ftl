@@ -16,7 +16,8 @@ cli-usage =
                                 float <toggle|on|off>, close, scratchpad <toggle|send>,
                                 group <toggle|next>, layout <dwindle|master|floating|tiling|cycle>,
                                 dropdown, desktop, launcher, overview, apps, keys, saver, tray,
-                                panel <quick|network|calendar|volume>, profile <ad>, reload,
+                                panel <quick|network|calendar|volume>, profile <ad>,
+                                desktops <save|open|delete> <ad>, desktops list, reload,
                                 query <state|windows|monitors|tray>, quiet <on|off|toggle>, restore
     Seçenekler:
       --state-dir <klasör>    Durum dosyası ve log klasörü
@@ -141,6 +142,26 @@ pf-name-missing = Önce profile bir ad ver
 pf-empty = Kaydedilecek pencere yok: Kabuk çalışmıyor ya da açık program yok
 pf-not-running = Kabuk çalışmıyor
 pf-opened = Açılıyor; açık olmayan programlar başlayıp yerlerini alacak
+k-desktop = Kayıtlı masaüstü
+k-desktop-open = { $value } masaüstünü aç
+dk = Kayıtlı masaüstleri
+dk-desc = Ekrandakileri kaydet, sonra olduğu gibi geri getir: her program başlatıldığı argümanlarla, kendi klasöründe, kendi monitöründe ve çalışma alanında; tarayıcı gösterdiği adreste ve kendi profiliyle; Dosya Gezgini kendi klasöründe.
+dk-count = { $value } pencere
+dk-none = Henüz kayıtlı masaüstü yok
+dk-name = Masaüstü adı
+dk-name-ph = İş, Akşam…
+dk-save = Ekrandakileri kaydet
+dk-again = Programları her zaman yeniden başlat
+dk-again-h = Kapalıyken aynı şeyi gösteren açık pencere yerine gider, hiçbir şey iki kez başlatılmaz
+dk-note = Tarayıcı penceresi gösterdiği sekmeyle geri gelir, diğer sekmeleriyle gelmez. Pencereler yalnızca kaydettiğinde okunur.
+dk-empty = Kaydedilecek pencere yok: açık program yok ya da Kabuk dosyaya yazamadı
+dk-opened = Açılıyor; programlar sırayla başlayıp yerlerini alıyor
+nav-desktops = Kayıtlı masaüstleri
+ipc-error-desktop-empty = Kaydedilecek pencere yok.
+ipc-error-desktop-not-found = Bu adla kayıtlı masaüstü yok.
+ipc-error-desktop-not-saved = Kayıtlı masaüstleri ayar dosyasına yazılamadı.
+notify-desktop-missing = Kayıtlı masaüstü tam olarak gelmedi
+notify-desktop-missing-s = { $value } program açılamadı, diğerleri açık.
 th = Tema dosyası
 th-h = Teman, renklerin, barın, imleçlerin ve galeri duvar kâğıdın paylaşmak için tek dosyada; bir tema dosyası kısayollarını, kurallarını ya da programlarını asla değiştirmez
 th-export = Dışa aktar…

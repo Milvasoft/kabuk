@@ -11,7 +11,7 @@
 
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
 use std::sync::{mpsc, Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -89,6 +89,8 @@ mod timer {
     pub const CONFIG: usize = 3;
     /// Minimises or restores a window once its genie is on screen.
     pub const GENIE: usize = 4;
+    /// The next step of opening a saved desktop.
+    pub const DESKTOP: usize = 5;
 }
 
 /// How long a genie Kabuk starts itself (a click on the bar) is on screen before the
@@ -239,6 +241,16 @@ pub enum Command {
     /// `kabuk msg profile <name>`, the launcher or the settings: a layout profile opens
     /// (DECISIONS D65).
     OpenProfile(String),
+    /// `kabuk msg desktops open <name>`, the launcher or the settings: a saved desktop
+    /// opens (DECISIONS D101).
+    OpenDesktop(String),
+    /// What opening that set takes, read off the window manager's thread.
+    DesktopPlanned {
+        name: String,
+        steps: Vec<kabuk_core::desktops::Step>,
+    },
+    /// A saved window's program could not be started.
+    DesktopFailed(String),
     /// Where each window's app icon is on the bar (screen pixels), for the genie.
     AppIcons(Vec<(u64, state::Rect)>),
     /// The mouse is on an app's icon: a genie may come soon (its renderer is made ahead).
@@ -512,6 +524,8 @@ struct Wm {
     /// Programs a layout profile started, waiting for their windows: the program, where
     /// its window goes, and since when (D65).
     profile_wait: Vec<(kabuk_core::config::ProfileWindow, Instant)>,
+    /// The programs of the saved desktops being opened (D101).
+    opening: kabuk_core::desktops::Opening,
 }
 
 fn run(
@@ -566,6 +580,7 @@ fn run(
         dropdown: None,
         dropdown_wait: None,
         profile_wait: Vec::new(),
+        opening: kabuk_core::desktops::Opening::default(),
     }));
     let weak = Rc::downgrade(&wm);
     let own = Rc::new(std::cell::Cell::new(None));
@@ -883,6 +898,10 @@ impl Wm {
                         self.kill(timer::CHECK);
                         self.check_placements();
                     }
+                    timer::DESKTOP => {
+                        self.kill(timer::DESKTOP);
+                        self.desktop_step();
+                    }
                     timer::GENIE => {
                         self.kill(timer::GENIE);
                         self.genie_lead_over();
@@ -989,6 +1008,14 @@ impl Wm {
             Command::Minimize(hwnd) => self.minimize(hwnd),
             Command::ToggleDesktop => self.toggle_desktop(),
             Command::OpenProfile(name) => self.open_profile(&name),
+            Command::OpenDesktop(name) => self.open_desktop(&name),
+            Command::DesktopPlanned { name, steps } => self.place_desktop(&name, steps),
+            Command::DesktopFailed(exe) => {
+                if self.opening.failed(&exe) {
+                    self.notice(crate::notify::Notice::DesktopMissing { count: 1 });
+                }
+                self.desktop_step();
+            }
             Command::AppIcons(icons) => {
                 tracing::debug!(icons = icons.len(), "app icons known");
                 self.icons = icons.into_iter().collect();
@@ -1333,6 +1360,110 @@ impl Wm {
         tracing::info!(name = %p.name, moved, started, "layout profile opened");
     }
 
+    /// Opens saved desktop `name` (DECISIONS D101). What is open now is read off this
+    /// thread: it waits on other programs.
+    fn open_desktop(&mut self, name: &str) {
+        let Some(set) = self
+            .config
+            .current()
+            .desktops
+            .iter()
+            .find(|d| d.name.eq_ignore_ascii_case(name))
+            .cloned()
+        else {
+            tracing::warn!(name, "no such saved desktop");
+            return;
+        };
+        let Some(window) = self.window().map(|w| w.hwnd()) else {
+            return;
+        };
+        let view = self.view.lock().map(|v| Arc::clone(&v)).unwrap_or_default();
+        let queue = self.queue.clone();
+        std::thread::spawn(move || {
+            let open = if set.start_again {
+                Vec::new()
+            } else {
+                crate::desktops::read_windows(&view)
+            };
+            let steps = kabuk_core::desktops::plan(&set, &open);
+            send(&queue, window, Command::DesktopPlanned { name: set.name, steps });
+        });
+    }
+
+    /// Windows of the set that are open go to their places; the rest start, one at a time.
+    fn place_desktop(&mut self, name: &str, steps: Vec<kabuk_core::desktops::Step>) {
+        use kabuk_core::desktops::{place_in, Step};
+        let monitors = kabuk_win::shell::monitors();
+        let (mut moved, mut launches) = (0, Vec::new());
+        for step in steps {
+            match step {
+                Step::Move { hwnd, window } => {
+                    let Some(m) = monitors
+                        .iter()
+                        .find(|m| m.number == window.monitor)
+                        .or_else(|| monitors.iter().find(|m| m.primary))
+                    else {
+                        continue;
+                    };
+                    let mut effects = self.desk.move_to_place(hwnd, &m.device, window.workspace);
+                    match place_in(&window, m.work_area).filter(|_| window.floating) {
+                        Some(at) => effects.extend(self.desk.float_at(hwnd, rect_of(at))),
+                        None => effects.extend(self.desk.set_floating(hwnd, window.floating)),
+                    }
+                    self.apply(effects);
+                    moved += 1;
+                }
+                Step::Launch(w) => launches.push(w),
+            }
+        }
+        let started = launches.len();
+        self.opening.add(launches);
+        tracing::info!(name, moved, started, "saved desktop opened");
+        self.desktop_step();
+    }
+
+    /// Reports programs whose windows never came and starts the next one if it is time.
+    fn desktop_step(&mut self) {
+        let now = Instant::now();
+        let count = self.opening.expired(now);
+        if count > 0 {
+            tracing::warn!(count, "saved desktop windows did not come");
+            self.notice(crate::notify::Notice::DesktopMissing { count });
+        }
+        while let Some(w) = self.opening.next(now) {
+            self.start_saved(w);
+        }
+        match self.opening.wake_in(now) {
+            Some(after) => self.schedule(timer::DESKTOP, after.max(Duration::from_millis(1))),
+            None => self.kill(timer::DESKTOP),
+        }
+    }
+
+    fn start_saved(&self, w: kabuk_core::config::SavedWindow) {
+        let Some(window) = self.window().map(|w| w.hwnd()) else {
+            return;
+        };
+        let queue = self.queue.clone();
+        std::thread::spawn(move || {
+            kabuk_win::system::com_init();
+            let found = w.open.starts_with("shell:") || Path::new(&w.open).exists();
+            let args = kabuk_core::desktops::launch_args(&w);
+            let folder = kabuk_core::desktops::start_folder(&w).filter(|f| Path::new(f).is_dir());
+            let started = if found {
+                kabuk_win::shellitems::start(&w.open, &args, folder.as_deref(), w.elevated)
+            } else {
+                Err(std::io::Error::from(std::io::ErrorKind::NotFound))
+            };
+            match started {
+                Ok(()) => tracing::info!(exe = %w.exe, %args, "saved desktop program started"),
+                Err(e) => {
+                    tracing::warn!(exe = %w.exe, error = %e, "saved desktop program not started");
+                    send(&queue, window, Command::DesktopFailed(w.exe));
+                }
+            }
+        });
+    }
+
     /// Where workspace actions apply: the focused window's monitor, else the primary one.
     fn action_monitor(&self) -> Option<String> {
         self.desk.focused_monitor().or_else(|| {
@@ -1669,6 +1800,20 @@ impl Wm {
             rule.float |= w.floating;
             tracing::info!(hwnd = hwnd.0, exe = %exe, "window placed by a layout profile");
         }
+        // A window of a saved desktop: its place there (D101).
+        let saved = self.opening.came(&exe, floating);
+        if let Some(w) = &saved {
+            let known = self.screens.iter().any(|m| m.number == w.monitor);
+            rule.monitor = if known {
+                Some(w.monitor)
+            } else {
+                self.screens.iter().find(|m| m.primary).map(|m| m.number)
+            };
+            rule.workspace = Some(w.workspace);
+            rule.float |= w.floating;
+            tracing::info!(hwnd = hwnd.0, exe = %exe, workspace = w.workspace, "window placed by a saved desktop");
+            self.desktop_step();
+        }
         let floating = floating || rule.float;
         if rule.no_grab {
             self.no_grab.insert(hwnd.0);
@@ -1688,6 +1833,12 @@ impl Wm {
             w: scale_px(i32::try_from(w).unwrap_or(i32::MAX), dpi),
             h: 1,
         });
+        let saved_at = saved
+            .as_ref()
+            .filter(|_| floating)
+            .zip(target)
+            .and_then(|(w, m)| kabuk_core::desktops::place_in(w, m.work_area))
+            .map(rect_of);
         let placed_at = match (rule.placement, target) {
             (Some(p), Some(m)) if floating => Some(kabuk_layout::spot_rect(
                 rect_of(m.work_area),
@@ -1700,6 +1851,7 @@ impl Wm {
             )),
             _ => None,
         };
+        let placed_at = saved_at.or(placed_at);
         tracing::info!(
             hwnd = hwnd.0,
             class = %facts.class,

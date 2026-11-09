@@ -29,6 +29,26 @@ quiet = false             # do not disturb: held back and summed up when turned 
 command = ""              # empty: Windows Terminal (else PowerShell); or a program with its arguments
 height = 40               # percent of the monitor's height, 20-90
 
+# Saved desktops (Settings > Saved desktops or `kabuk msg desktops save Work` writes them;
+# the launcher or `kabuk msg desktops open Work` brings each window back as it was):
+# [[desktop]]
+# name = "Work"
+# start_again = false
+# [[desktop.window]]
+# exe = "chrome.exe"
+# open = 'C:\Program Files\Google\Chrome\Application\chrome.exe'
+# args = '--profile-directory="Profile 1"'
+# dir = ''
+# address = "http://localhost:6179"
+# monitor = 1
+# workspace = 2
+# floating = false
+# x = 0
+# y = 0
+# w = 1280
+# h = 800
+# elevated = false
+
 # Layout profiles (Settings > Windows saves the windows open now; the launcher or
 # `kabuk msg profile Coding` opens one):
 # [[profile]]

@@ -67,6 +67,8 @@ pub enum Request {
     Panel(PanelName),
     /// A layout profile opens (DECISIONS D65).
     Profile(String),
+    /// `desktops save|open|delete <name>` or `desktops list`: the saved desktops (D101).
+    Desktops(DesktopsOp),
     /// `restore`: emergency stop and restore, as `kabuk --restore`.
     Restore,
     /// `quiet on|off|toggle`: Kabuk's do not disturb (PLAN M19 U20); `None` toggles.
@@ -107,6 +109,7 @@ impl Request {
             | Request::FocusBar
             | Request::Panel(_)
             | Request::Profile(_)
+            | Request::Desktops(_)
             | Request::Restore
             | Request::Quiet(_)
             | Request::StartedAgain => return None,
@@ -126,6 +129,23 @@ impl Request {
                 | Request::Panel(_)
         )
     }
+
+    /// The answer waits on other programs: saving reads what every window is showing.
+    pub fn takes_long(&self) -> bool {
+        matches!(self, Request::Desktops(DesktopsOp::Save(_)))
+    }
+}
+
+/// How long a client waits for a command that [`Request::takes_long`].
+pub const LONG_ANSWER: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// What `desktops` does.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DesktopsOp {
+    Save(String),
+    Open(String),
+    Delete(String),
+    List,
 }
 
 /// The bar's panels `panel <name>` opens.
@@ -192,6 +212,7 @@ pub const COMMANDS: &[&str] = &[
     "tray",
     "panel",
     "profile",
+    "desktops",
     "reload",
     "query",
     "quiet",
@@ -363,6 +384,19 @@ pub fn parse(words: &[String]) -> Result<Request, IpcError> {
             }
             Request::Profile(name.trim().to_string())
         }
+        "desktops" => {
+            const EXPECTED: &str = "save, open or delete and a name, or list";
+            let name = rest.get(1..).unwrap_or_default().join(" ");
+            let name = name.trim().to_string();
+            let named = !name.is_empty();
+            Request::Desktops(match arg {
+                Some("save") if named => DesktopsOp::Save(name),
+                Some("open") if named => DesktopsOp::Open(name),
+                Some("delete") if named => DesktopsOp::Delete(name),
+                Some("list") if !named => DesktopsOp::List,
+                _ => return Err(one(EXPECTED)),
+            })
+        }
         "restore" => {
             takes(0, "no arguments")?;
             Request::Restore
@@ -497,6 +531,24 @@ mod tests {
         assert_eq!(p("apps"), Ok(Request::AppGrid));
         assert_eq!(p("profile Kodlama gece"), Ok(Request::Profile("Kodlama gece".into())));
         assert!(matches!(p("profile"), Err(IpcError::BadArgs { .. })));
+        assert_eq!(
+            p("desktops save Is yeri"),
+            Ok(Request::Desktops(DesktopsOp::Save("Is yeri".into())))
+        );
+        assert!(p("desktops save Is").unwrap().takes_long());
+        assert_eq!(
+            p("desktops open Is"),
+            Ok(Request::Desktops(DesktopsOp::Open("Is".into())))
+        );
+        assert!(!p("desktops open Is").unwrap().takes_long());
+        assert_eq!(
+            p("desktops delete Is"),
+            Ok(Request::Desktops(DesktopsOp::Delete("Is".into())))
+        );
+        assert_eq!(p("desktops list"), Ok(Request::Desktops(DesktopsOp::List)));
+        for bad in ["desktops", "desktops save", "desktops list x", "desktops rename a"] {
+            assert!(matches!(p(bad), Err(IpcError::BadArgs { .. })), "{bad}");
+        }
         assert_eq!(p("restore"), Ok(Request::Restore));
         assert_eq!(p("quiet on"), Ok(Request::Quiet(Some(true))));
         assert_eq!(p("quiet off"), Ok(Request::Quiet(Some(false))));

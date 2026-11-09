@@ -3,6 +3,7 @@
 
 pub mod appgrid;
 pub mod bar;
+pub mod desktops;
 pub mod grab;
 pub mod install_cmd;
 pub mod ipc;

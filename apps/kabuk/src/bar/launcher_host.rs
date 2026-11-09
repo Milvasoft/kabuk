@@ -258,6 +258,8 @@ impl Shared {
                 items.extend(sources::commands(&self.i18n));
                 let profiles: Vec<String> = self.config().profiles.iter().map(|p| p.name.clone()).collect();
                 items.extend(sources::profiles(&self.i18n, &profiles));
+                let desktops: Vec<String> = self.config().desktops.iter().map(|d| d.name.clone()).collect();
+                items.extend(sources::saved_desktops(&self.i18n, &desktops));
             }
             items.extend(l.slow.iter().cloned());
             return crate::launcher::item::recent_first(items, &l.ran, &self.pinned_targets());
@@ -601,6 +603,11 @@ impl Shared {
                     self.notify(crate::notify::Notice::Failed(crate::notify::Failure::Copy));
                 }
             },
+            Target::SavedDesktop(name) => {
+                if let Some(link) = &self.wm {
+                    link.send(crate::wm::Command::OpenDesktop(name));
+                }
+            }
             Target::Profile(name) => {
                 if let Some(link) = &self.wm {
                     link.send(crate::wm::Command::OpenProfile(name));
