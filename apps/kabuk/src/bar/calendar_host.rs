@@ -2,7 +2,7 @@
 //! DECISIONS D88): opened by a click on the clock or the bell while its module is on,
 //! placed under what was clicked. The notices are read on a thread of their own (tens of
 //! milliseconds) and the panel is drawn again when they come, and whenever Windows'
-//! notification centre changes while it is open. Left and Right turn the month; the
+//! notification centre changes while it is open. Left, Right and the wheel turn the month; the
 //! other keys move over its links and buttons as in every popup
 //! ([`crate::bar::popup_keys`]), and Enter or Space clicks the one selected.
 
@@ -327,8 +327,21 @@ impl Shared {
                     x: p.scale.dips(x),
                     y: p.scale.dips(y),
                 };
-                let value = p.layout.hit_test(at).filter(|h| h.module == calendar_panel::HIT)?.value;
-                let action = p.panel.click(value);
+                let (module, value) = p.layout.hit_test(at).map(|h| (h.module, h.value))?;
+                let action = if module == calendar_panel::DAY {
+                    p.panel.click_day(value)
+                } else if module == calendar_panel::HIT {
+                    p.panel.click(value)
+                } else {
+                    return None;
+                };
+                self.calendar_action(action);
+                Some(0)
+            }
+            msg::MOUSEWHEEL => {
+                // Up goes back, as a page scrolls.
+                let notches = msg::wheel(m.wparam) / msg::WHEEL_DELTA;
+                let action = self.calendar_panel.as_mut()?.panel.turn(-notches);
                 self.calendar_action(action);
                 Some(0)
             }
