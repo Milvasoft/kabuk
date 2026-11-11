@@ -531,7 +531,7 @@ set-ws-names = Çalışma alanı adları
 set-ws-names-h = Barın ipuçlarında, genel bakışta, başlatıcıda ve önizlemelerde; boş olan numarasıyla kalır
 set-ws-name = Çalışma alanı { $value }
 set-tiling-layout = Dizme düzeni
-set-tiling-layout-h = Her çalışma alanının düzeni; orada düzen kısayoluyla değiştirilmediyse
+set-tiling-layout-h = Tüm çalışma alanlarını ayarlar; düzen kısayolu sonra tek birini değiştirir
 set-layout-dwindle = İkiye bölerek
 set-layout-master = Ana pencere
 set-double-click = Çift tıklayınca diz
@@ -732,6 +732,8 @@ notify-already-running = Kabuk zaten çalışıyor
 notify-already-running-s = Yeniden başlatıldı; çalışan Kabuk sürüyor.
 notify-started-again = Kabuk zaten çalışıyordu
 notify-started-again-s = Yeniden başlatıldı ve çalışanın yerini aldı.
+notify-float-every-s = Artık tüm çalışma alanları yüzen düzende
+notify-tile-every-s = Tüm çalışma alanları yeniden diziliyor
 
 # Bar modülünün ipucu (PLAN M19 U15).
 tip-workspace = Çalışma alanı { $value }

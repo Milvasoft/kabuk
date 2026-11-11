@@ -4964,6 +4964,7 @@ impl Shared {
                 if let Some(link) = &self.wm {
                     link.send(wm::Command::ToggleFloatingLayout {
                         device: self.bars[index].monitor.device.clone(),
+                        every: msgloop::shift_held(),
                     });
                 }
             }

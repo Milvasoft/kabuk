@@ -535,7 +535,7 @@ set-ws-names = Workspace names
 set-ws-names-h = On the bar's tooltips, the overview, the launcher and the previews; an empty one keeps its number
 set-ws-name = Workspace { $value }
 set-tiling-layout = Tiling layout
-set-tiling-layout-h = Every workspace's, unless switched there with the layout shortcut
+set-tiling-layout-h = Sets every workspace; the layout shortcut then switches one
 set-layout-dwindle = Dwindle
 set-layout-master = Master
 set-double-click = Double-click to tile
@@ -736,6 +736,8 @@ notify-already-running = Kabuk is already running
 notify-already-running-s = It was started again; this one stays.
 notify-started-again = Kabuk was already running
 notify-started-again-s = It was started again and took over from the one running.
+notify-float-every-s = Every workspace floats now
+notify-tile-every-s = Every workspace tiles again
 
 # A bar module's tooltip (PLAN M19 U15).
 tip-workspace = Workspace { $value }

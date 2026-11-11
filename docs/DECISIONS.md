@@ -8,6 +8,9 @@ No open decisions.
 
 ## Decided and proposed
 
+### D106 · Every workspace's layout is set at once — Decided (2026-11-11)
+Found using Kabuk: with ten workspaces, floating or tiling all of them meant switching each one by hand, because the default layout in Settings reached only the workspaces never switched by hand, and Settings called it "This workspace's layout". I chose two ways to set them all. A change of the default layout, or of the tiling layout, in Settings now sets every workspace on every monitor, also one switched by hand, and the row is called "Every workspace's layout". Shift and a click on the bar's layout indicator floats or tiles every workspace at once, taking the layout the clicked monitor's workspace would switch to; a plain click still switches that one workspace, and the shortcuts still switch one. Before this, the setting kept hand-picked workspaces as they were (PLAN M19 U11); that is the one thing given up.
+
 ### D105 · The keyboard indicator lists layouts, not languages — Decided (2026-11-10)
 Found using Kabuk: the bar had no keyboard indicator on a machine where Windows offers two keyboards, because both, Turkish Q and US, are layouts of the English language and D88 listed one layout per language, so it counted one and hid. The indicator and its panel now list every layout Windows has, as Windows' own switcher does, and a choice switches to that exact layout. The chip shows the language when a layout is alone in it, and the keyboard's language where layouts share one (`TR`, `EN`), with a count if a code would still repeat. The panel names a shared language's layouts by their keyboards, in Windows' words, read from Windows' `Keyboard Layouts` key.
 

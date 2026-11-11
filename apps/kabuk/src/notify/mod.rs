@@ -12,6 +12,9 @@ pub enum Notice {
     /// A workspace switched to floating, or back to tiling.
     FloatingLayout,
     TilingLayout,
+    /// Every workspace switched at once (DECISIONS D106).
+    FloatingEverywhere,
+    TilingEverywhere,
     /// A window dragged off its tile, or tiled again by a double click.
     Floated,
     Tiled,
@@ -122,6 +125,8 @@ impl Notice {
         match self {
             Notice::FloatingLayout => ("t-float-on", Some("t-float-on-s")),
             Notice::TilingLayout => ("t-tiled", Some("t-tiled-s")),
+            Notice::FloatingEverywhere => ("t-float-on", Some("notify-float-every-s")),
+            Notice::TilingEverywhere => ("t-tiled", Some("notify-tile-every-s")),
             Notice::Floated => ("t-detached", Some("t-detached-s")),
             Notice::Tiled => ("t-retiled", Some("t-retiled-s")),
             Notice::Copied => ("t-copied", None),
@@ -145,9 +150,13 @@ impl Notice {
     /// The icon in its box (the design shows `check`; the layout ones show the layout's).
     pub fn icon(self) -> &'static str {
         match self {
-            Notice::FloatingLayout | Notice::TilingLayout | Notice::Floated | Notice::Tiled | Notice::Layout { .. } => {
-                "tile"
-            }
+            Notice::FloatingLayout
+            | Notice::TilingLayout
+            | Notice::FloatingEverywhere
+            | Notice::TilingEverywhere
+            | Notice::Floated
+            | Notice::Tiled
+            | Notice::Layout { .. } => "tile",
             Notice::GameOn | Notice::GameOff { .. } => "pad",
             Notice::Copied => "check",
             Notice::QuietOff { .. } => "bell",
@@ -293,6 +302,8 @@ mod tests {
             for n in [
                 Notice::FloatingLayout,
                 Notice::TilingLayout,
+                Notice::FloatingEverywhere,
+                Notice::TilingEverywhere,
                 Notice::Floated,
                 Notice::Tiled,
                 Notice::Copied,

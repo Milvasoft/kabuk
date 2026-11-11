@@ -77,7 +77,7 @@ Target platform: Windows 11.
   - Any window becomes floating with a single shortcut or by dragging it by its title ("Drag to float" setting).
   - With Alt held, a window is moved with left-click and resized with right-click from anywhere on it ("Hold Alt to grab anywhere").
   - Double-clicking the title of a floating window tiles it again (on windows with a title bar; replaces Windows' maximise behaviour, can be turned off in settings).
-  - A workspace can run entirely in floating layout; "Floating" can be chosen as the default layout.
+  - A workspace can run entirely in floating layout; "Floating" can be chosen as the default layout. Changing the default layout or the tiling layout in settings sets every workspace, also one switched by hand; Shift and a click on the bar's layout indicator floats or tiles every workspace at once (D106).
   - A click without movement does not float a window; it floats only if actually moved.
 - The active window is framed with the accent colour (DWM border colour on Windows 11; can be turned off in settings).
 - Smart floating: dialogs, splash screens, tooltips, owned windows, windows that cannot be resized by their border (they keep their own size; e.g. game launchers such as the League of Legends client, reported) and windows whose minimum size does not fit the layout float by default.

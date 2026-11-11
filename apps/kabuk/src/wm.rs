@@ -219,9 +219,11 @@ pub enum Command {
     /// `kabuk msg layout <name>` on the focused monitor.
     SetLayout(kabuk_core::ipc::LayoutName),
     /// A click on the bar's layout indicator: the monitor's active workspace switches
-    /// between tiling and floating.
+    /// between tiling and floating; with Shift (`every`) every workspace takes the layout
+    /// that workspace switches to (DECISIONS D106).
     ToggleFloatingLayout {
         device: String,
+        every: bool,
     },
     /// The colour of the active window's frame (the look's accent), or none.
     SetAccent(Option<(u8, u8, u8)>),
@@ -965,7 +967,8 @@ impl Wm {
                 self.apply(effects);
             }
             Command::Action(a) => self.act_on_front(a),
-            Command::ToggleFloatingLayout { device } => self.toggle_floating_layout(&device),
+            Command::ToggleFloatingLayout { device, every: false } => self.toggle_floating_layout(&device),
+            Command::ToggleFloatingLayout { device, every: true } => self.set_every_workspace_layout(&device),
             Command::Reveal(hwnd) => self.reveal(hwnd),
             Command::SelectTab(hwnd) => {
                 let effects = self.desk.select_tab(hwnd);
@@ -1642,6 +1645,21 @@ impl Wm {
             crate::notify::Notice::FloatingLayout
         } else {
             crate::notify::Notice::TilingLayout
+        });
+        self.apply(effects);
+    }
+
+    /// Every workspace of every monitor takes the layout `device`'s active one would switch
+    /// to (Shift and a click on the layout indicator; D106).
+    fn set_every_workspace_layout(&mut self, device: &str) {
+        let floating_now = self.desk.workspaces(device).iter().any(|w| w.active && w.floating);
+        let floats = !floating_now;
+        let effects = self.desk.set_every_workspace_floating(floats);
+        tracing::info!(floats, "every workspace's layout switched");
+        self.notice(if floats {
+            crate::notify::Notice::FloatingEverywhere
+        } else {
+            crate::notify::Notice::TilingEverywhere
         });
         self.apply(effects);
     }

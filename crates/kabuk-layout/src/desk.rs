@@ -1064,6 +1064,19 @@ impl Desk {
         self.relayout_floating(&[(m, active)])
     }
 
+    /// Floating (`true`) or tiling for every workspace of every monitor at once (Shift and
+    /// a click on the bar's layout indicator; DECISIONS D106).
+    pub fn set_every_workspace_floating(&mut self, floats: bool) -> Vec<Effect> {
+        let mut all = Vec::new();
+        for (m, mon) in self.monitors.iter_mut().enumerate() {
+            for (w, ws) in mon.workspaces.iter_mut().enumerate() {
+                ws.floating = Some(floats);
+                all.push((m, w));
+            }
+        }
+        self.relayout_floating(&all)
+    }
+
     /// Makes every window of the given workspaces match their floating layout, and lays
     /// out the active tiling ones.
     fn relayout_floating(&mut self, changed: &[(usize, usize)]) -> Vec<Effect> {
@@ -1490,23 +1503,25 @@ impl Desk {
         }
         let default_changed = settings.floating_layout != self.settings.floating_layout;
         if settings.kind != self.settings.kind {
-            // Workspaces that follow the tiling layout take the new one (PLAN M19 U11: it
-            // reached only workspaces made after the change).
+            // Every workspace takes the new tiling layout, also one switched by hand
+            // (DECISIONS D106; PLAN M19 U11: it reached only workspaces made after it).
             for ws in self
                 .monitors
                 .iter_mut()
                 .flat_map(|m| m.workspaces.iter_mut())
                 .chain(std::iter::once(&mut self.scratch))
-                .filter(|ws| !ws.kind_chosen)
             {
                 ws.kind = settings.kind;
+                ws.kind_chosen = false;
             }
         }
         self.settings = settings;
         if default_changed {
-            // Workspaces that follow the default layout take the new one.
+            // Every workspace takes the new default, also one switched by hand (D106):
+            // the setting is how all of them are set at once.
             for mon in &mut self.monitors {
-                for ws in mon.workspaces.iter_mut().filter(|ws| ws.floating.is_none()) {
+                for ws in &mut mon.workspaces {
+                    ws.floating = None;
                     let floats = self.settings.floating_layout;
                     for e in &mut ws.entries {
                         adopt(e, floats);

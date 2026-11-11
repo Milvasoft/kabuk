@@ -382,14 +382,15 @@ fn layout_cycles_between_dwindle_and_master_per_workspace() {
 }
 
 /// PLAN M19 U11: the tiling layout set in Settings reaches the workspaces open now, not
-/// only new ones; a workspace switched by hand (Win+Y) keeps its own.
+/// only new ones; a workspace switched by hand (Win+Y) as well (DECISIONS D106).
 #[test]
-fn the_tiling_layout_follows_the_setting_unless_a_workspace_was_switched() {
+fn the_tiling_layout_setting_sets_every_workspace() {
     let mut d = desk(false);
     for id in 1..=3 {
         d.add(new(id));
     }
-    // Workspace 2 is switched to master by hand, then back to dwindle: still its own.
+    // Workspace 2 is switched to master by hand, then back to dwindle; the setting still
+    // reaches it (DECISIONS D106: it once kept its own).
     d.switch(M1, 2);
     d.cycle_layout(M1);
     d.cycle_layout(M1);
@@ -403,8 +404,8 @@ fn the_tiling_layout_follows_the_setting_unless_a_workspace_was_switched() {
     assert_eq!(d.layout(M1, 3), Some(Kind::Master), "a hidden one too");
     assert_eq!(
         d.layout(M1, 2),
-        Some(Kind::Dwindle),
-        "the one switched by hand keeps its own"
+        Some(Kind::Master),
+        "the one switched by hand follows as well"
     );
     assert_eq!(placed(&e), vec![1, 2, 3], "the visible workspace is laid out again");
     d.set_settings(settings());
@@ -635,8 +636,10 @@ fn a_window_moved_between_floating_and_tiling_workspaces_takes_their_layout() {
     assert!(d.is_floating(2));
 }
 
+/// Asked by the user (DECISIONS D106): with ten workspaces, switching each by hand was the
+/// only way; the setting now sets every workspace, also one switched by hand.
 #[test]
-fn the_default_layout_follows_the_setting_unless_a_workspace_was_switched() {
+fn the_default_layout_setting_sets_every_workspace() {
     let floating = Settings {
         floating_layout: true,
         ..settings()
@@ -648,18 +651,52 @@ fn the_default_layout_follows_the_setting_unless_a_workspace_was_switched() {
         ..new(2)
     });
     assert!(d.is_floating(1) && d.is_floating(2));
-    // Monitor 2's workspace is switched to tiling by hand: it stays tiling.
+    // Monitor 2's workspace is switched to tiling by hand, then the setting to tiling.
     d.toggle_workspace_floating(M2);
     assert!(!d.is_floating(2));
     let e = d.set_settings(settings());
     assert!(!d.is_floating(1), "the default changed to tiling");
     assert!(placed(&e).contains(&1));
     assert!(!d.is_floating(2));
-    // And the hand-picked choice survives the default changing back.
+    // Switched back to floating by hand, the setting changing back floats it again.
     d.toggle_workspace_floating(M2);
+    assert!(d.is_floating(2));
+    d.set_settings(settings());
     d.set_settings(floating);
     assert!(d.is_floating(1) && d.is_floating(2));
-    assert!(d.workspaces(M2)[0].floating);
+    // A hand-picked tiling one floats too when the setting turns to floating.
+    d.toggle_workspace_floating(M2);
+    assert!(!d.is_floating(2));
+    d.set_settings(settings());
+    d.toggle_workspace_floating(M2);
+    d.toggle_workspace_floating(M2);
+    assert!(!d.is_floating(2));
+    d.set_settings(floating);
+    assert!(d.is_floating(2) && d.workspaces(M2)[0].floating);
+}
+
+/// D106: one switch floats or tiles every workspace of every monitor, shown or not.
+#[test]
+fn every_workspace_switches_at_once() {
+    let mut d = Desk::new(settings(), monitors(true));
+    d.add(new(1));
+    d.add(NewWindow {
+        monitor: Some(M2),
+        ..new(2)
+    });
+    d.add(NewWindow {
+        workspace: Some(3),
+        ..new(3)
+    });
+    let e = d.set_every_workspace_floating(true);
+    assert!(d.is_floating(1) && d.is_floating(2) && d.is_floating(3));
+    assert!(!placed(&e).contains(&1), "a window that floats stays where it is");
+    assert!(d.workspaces(M1).iter().all(|w| w.floating));
+    assert!(d.workspaces(M2).iter().all(|w| w.floating));
+    let e = d.set_every_workspace_floating(false);
+    assert!(!d.is_floating(1) && !d.is_floating(2) && !d.is_floating(3));
+    assert!(placed(&e).contains(&1) && placed(&e).contains(&2));
+    assert!(d.workspaces(M1).iter().all(|w| !w.floating));
 }
 
 /// `kabuk msg layout <name>` sets a layout rather than toggling it.
