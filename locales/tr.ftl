@@ -637,6 +637,7 @@ setup-store-managed = Kabuk Microsoft Store'dan kuruldu: onu Windows kurar, gün
 setup-confirm = Kabuk senin için kurulacak (yönetici izni gerekmez). Çalışırken Windows görev çubuğunun yerini kendi barı alır ve pencerelerini düzenler; kapanınca Windows eski hâline döner. Bir şey ters giderse Ctrl+Alt+Shift+End her şeyi geri getirir. Kabuk şimdi kurulsun mu?
 setup-done = Kabuk kuruldu ve çalışıyor. Başlat menüsündeki "Kabuk Ayarları" görünümünü ve davranışını değiştirir; masaüstündeki "Kabuk" kısayolu onu yeniden başlatır. Terminalde "kabuk --help" komutlarını listeler. Ctrl+Alt+Shift+End Windows'u her an geri getirir.
 setup-no-payload = Bu kurulumun içinde program yok (onlarsız derlenmiş). tools\package.ps1 ile derle.
+setup-path-emptied = Windows'taki Path değişkeninde yalnızca Kabuk'un klasörü var. Önceki bir Kabuk kurulumu uzun bir Path'i okuyamayıp yalnızca Kabuk'un klasörüyle yeniden yazdı; bu yüzden Claude Code (%USERPROFILE%\.local\bin) ya da npm (%APPDATA%\npm) gibi programlar terminalde artık bulunmuyor. Klasörlerini Ayarlar › Sistem › Hakkında › Gelişmiş sistem ayarları › Ortam Değişkenleri'nden yeniden ekle. Bu kurulum artık bunu yapmıyor ve her değişiklikten önce Path'in bir kopyasını %LOCALAPPDATA%\kabuk\path-backup.txt dosyasında tutuyor.
 
 # kabuk.toml'daki yanlışlar (bildirimler ve Ayarlar; PLAN M19 U1-U3).
 cfg-at-line = Satır { $line }: { $what }

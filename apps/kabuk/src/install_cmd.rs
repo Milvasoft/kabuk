@@ -68,6 +68,8 @@ pub fn install(setup: &Setup) -> i32 {
     let Some(roots) = roots(setup) else {
         return exit::USAGE;
     };
+    // Asked before installing: Kabuk's folder alone in `Path` afterwards is no sign.
+    let emptied = install::path_was_emptied(&roots);
     let from = std::env::current_exe()
         .ok()
         .and_then(|e| e.parent().map(std::path::Path::to_path_buf));
@@ -94,6 +96,10 @@ pub fn install(setup: &Setup) -> i32 {
     });
     if let Err(e) = install::set_start_at_sign_in(&roots, startup) {
         tracing::error!(error = %e, "start at sign-in not set");
+    }
+    if emptied {
+        tracing::warn!("the user's Path held Kabuk's folder alone");
+        tell(setup, &i18n, &i18n.tr("setup-path-emptied"), true);
     }
     let path = roots.program_dir().display().to_string();
     tell(

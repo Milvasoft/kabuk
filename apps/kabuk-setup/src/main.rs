@@ -62,8 +62,13 @@ fn run(args: Vec<String>) -> i32 {
         warn(&failed(&i18n, "no user folders"));
         return FAILED;
     };
+    // Asked before installing: Kabuk's folder alone in `Path` afterwards is no sign.
+    let emptied = kabuk_win::install::path_was_emptied(&roots);
     match install(&roots, startup) {
         Ok(()) => {
+            if emptied {
+                warn(&i18n.tr("setup-path-emptied"));
+            }
             if !quiet {
                 // Kabuk starts (it takes over from any other running), then says how.
                 let _ = Command::new(roots.program_dir().join(START)).spawn();

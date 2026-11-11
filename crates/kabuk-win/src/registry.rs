@@ -12,8 +12,11 @@ use windows::Win32::System::Registry::{
 
 use crate::sync::io_error;
 
-/// Longest text value read back (a path).
+/// The first buffer a text value is read into (characters); a longer value is read again
+/// into one of its size.
 const MAX_TEXT: usize = 1024;
+/// How often a text value that grew between asking its size and reading it is read again.
+const TEXT_TRIES: usize = 4;
 
 fn err(r: WIN32_ERROR) -> std::io::Error {
     io_error(windows::core::Error::from(r.to_hresult()))
@@ -22,25 +25,7 @@ fn err(r: WIN32_ERROR) -> std::io::Error {
 /// The text of value `name` under `HKCU\key` (`""` is the key's default value), as stored
 /// (environment variables not expanded); `None` when it is not set.
 pub fn read_text(key: &str, name: &str) -> Option<String> {
-    let mut buf = vec![0u16; MAX_TEXT];
-    let mut size = u32::try_from(buf.len() * 2).unwrap_or_default();
-    // SAFETY: valid strings and an out buffer of the size passed (in bytes).
-    let r = unsafe {
-        RegGetValueW(
-            HKEY_CURRENT_USER,
-            &HSTRING::from(key),
-            &HSTRING::from(name),
-            RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ | RRF_NOEXPAND,
-            None,
-            Some(buf.as_mut_ptr().cast()),
-            Some(&mut size),
-        )
-    };
-    if r != ERROR_SUCCESS {
-        return None;
-    }
-    let len = (size as usize / 2).saturating_sub(1).min(buf.len());
-    Some(String::from_utf16_lossy(&buf[..len]))
+    read_text_kind(key, name).map(|(text, _)| text)
 }
 
 /// The binary value `name` under `HKCU\key`; `None` when it is not set.
@@ -80,28 +65,49 @@ pub fn read_binary(key: &str, name: &str) -> Option<Vec<u8>> {
 }
 
 /// The text value `name` under `HKCU\key` and whether it is `REG_EXPAND_SZ`; `None`
-/// when it is not set.
+/// when it is not set or cannot be read (a caller that writes the value back uses
+/// [`try_read_text_kind`], which tells the two apart).
 pub fn read_text_kind(key: &str, name: &str) -> Option<(String, bool)> {
+    try_read_text_kind(key, name).ok().flatten()
+}
+
+/// The text value `name` under `HKCU\key`, of any length, and whether it is
+/// `REG_EXPAND_SZ`: `Ok(None)` when it (or the key) is not there, `Err` when it could
+/// not be read (not text, or still growing after several tries). A buffer too small is
+/// made as large as Windows says and the value read again.
+pub fn try_read_text_kind(key: &str, name: &str) -> std::io::Result<Option<(String, bool)>> {
+    use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA};
+    let (key, name) = (HSTRING::from(key), HSTRING::from(name));
     let mut buf = vec![0u16; MAX_TEXT];
-    let mut size = u32::try_from(buf.len() * 2).unwrap_or_default();
-    let mut kind = REG_VALUE_TYPE::default();
-    // SAFETY: valid strings, a type out pointer and an out buffer of the size passed.
-    let r = unsafe {
-        RegGetValueW(
-            HKEY_CURRENT_USER,
-            &HSTRING::from(key),
-            &HSTRING::from(name),
-            RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ | RRF_NOEXPAND,
-            Some(&mut kind),
-            Some(buf.as_mut_ptr().cast()),
-            Some(&mut size),
-        )
-    };
-    if r != ERROR_SUCCESS {
-        return None;
+    for _ in 0..TEXT_TRIES {
+        let mut size = u32::try_from(buf.len() * 2).map_err(std::io::Error::other)?;
+        let mut kind = REG_VALUE_TYPE::default();
+        // SAFETY: valid strings, a type out pointer and an out buffer of the size passed.
+        let r = unsafe {
+            RegGetValueW(
+                HKEY_CURRENT_USER,
+                &key,
+                &name,
+                RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ | RRF_NOEXPAND,
+                Some(&mut kind),
+                Some(buf.as_mut_ptr().cast()),
+                Some(&mut size),
+            )
+        };
+        if r == ERROR_SUCCESS {
+            let len = (size as usize / 2).saturating_sub(1).min(buf.len());
+            return Ok(Some((String::from_utf16_lossy(&buf[..len]), kind == REG_EXPAND_SZ)));
+        }
+        if r == ERROR_FILE_NOT_FOUND {
+            return Ok(None);
+        }
+        if r != ERROR_MORE_DATA {
+            return Err(err(r));
+        }
+        // `size` is now the bytes the value needs.
+        buf = vec![0u16; (size as usize).div_ceil(2) + 1];
     }
-    let len = (size as usize / 2).saturating_sub(1).min(buf.len());
-    Some((String::from_utf16_lossy(&buf[..len]), kind == REG_EXPAND_SZ))
+    Err(err(ERROR_MORE_DATA))
 }
 
 /// Whether `HKCU\key` exists.

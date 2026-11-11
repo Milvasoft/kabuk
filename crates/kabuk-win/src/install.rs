@@ -157,13 +157,38 @@ fn announce_environment(roots: &Roots) {
     };
 }
 
+/// Adds `value`, the user's `Path` before a change, to the end of the backup file
+/// ([`Roots::path_backup`]); the change waits for it.
+fn back_up_path(roots: &Roots, value: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let file = roots.path_backup();
+    if let Some(dir) = file.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let mut out = std::fs::OpenOptions::new().create(true).append(true).open(file)?;
+    writeln!(out, "{value}")?;
+    out.sync_all()
+}
+
+/// Whether the user's `Path` holds Kabuk's program folder and nothing else: an earlier
+/// setup that could not read a long `Path` emptied it (said once installed).
+pub fn path_was_emptied(roots: &Roots) -> bool {
+    let dir = roots.program_dir().display().to_string();
+    registry::try_read_text_kind(&roots.environment_key(), kabuk_core::install::PATH)
+        .ok()
+        .flatten()
+        .is_some_and(|(now, _)| kabuk_core::install::only_folder(&now, &dir))
+}
+
 /// Puts the program folder in the user's `Path`, so `kabuk` works in any new terminal;
-/// nothing when it is there already.
+/// nothing when it is there already. A `Path` that cannot be read is never written: only
+/// one that is not there at all is made; the value before a change is backed up first.
 pub fn add_to_path(roots: &Roots) -> std::io::Result<()> {
     let key = roots.environment_key();
-    let (now, expand) = registry::read_text_kind(&key, kabuk_core::install::PATH).unwrap_or_default();
+    let (now, expand) = registry::try_read_text_kind(&key, kabuk_core::install::PATH)?.unwrap_or_default();
     let dir = roots.program_dir().display().to_string();
     if let Some(new) = kabuk_core::install::path_with(&now, &dir) {
+        back_up_path(roots, &now)?;
         // `Path` is expandable when Windows made it so, or when it was empty.
         let kind = if expand || now.is_empty() {
             Text::Expandable
@@ -176,14 +201,16 @@ pub fn add_to_path(roots: &Roots) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Takes the program folder out of the user's `Path` again.
+/// Takes the program folder out of the user's `Path` again (backed up first); a `Path`
+/// that cannot be read is left as it is and said.
 pub fn remove_from_path(roots: &Roots) -> std::io::Result<()> {
     let key = roots.environment_key();
-    let Some((now, expand)) = registry::read_text_kind(&key, kabuk_core::install::PATH) else {
+    let Some((now, expand)) = registry::try_read_text_kind(&key, kabuk_core::install::PATH)? else {
         return Ok(());
     };
     let dir = roots.program_dir().display().to_string();
     if let Some(new) = kabuk_core::install::path_without(&now, &dir) {
+        back_up_path(roots, &now)?;
         let kind = if expand { Text::Expandable } else { Text::Plain };
         Key::open(&key)?.set_text(kabuk_core::install::PATH, &new, kind)?;
         announce_environment(roots);
@@ -358,6 +385,80 @@ mod tests {
         assert!(!starts_at_sign_in(&r));
         registry::delete_tree(r.test_key().unwrap()).unwrap();
         assert_eq!(registry::read_text(r.test_key().unwrap(), "x"), None);
+    }
+
+    /// A `Path` long enough to need its own test (developers' often are).
+    fn long_path() -> String {
+        (0..120)
+            .map(|i| format!(r"C:\Tools\folder-{i:03}"))
+            .collect::<Vec<_>>()
+            .join(";")
+    }
+
+    /// Found by a user's friend: a `Path` longer than 1023 characters could not be read,
+    /// counted as empty and was written back as Kabuk's folder alone, so every other
+    /// program's folder (Claude Code's, npm's) was gone from it.
+    #[test]
+    fn a_long_path_keeps_every_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = roots(dir.path());
+        let long = long_path();
+        assert!(long.len() > 2048);
+        Key::open(&r.environment_key())
+            .unwrap()
+            .set_text(kabuk_core::install::PATH, &long, Text::Expandable)
+            .unwrap();
+        add_to_path(&r).unwrap();
+        let program = r.program_dir().display().to_string();
+        assert_eq!(
+            registry::read_text_kind(&r.environment_key(), kabuk_core::install::PATH),
+            Some((format!("{long};{program}"), true))
+        );
+        // The value before the change is kept, so it can be put back by hand.
+        let backup = std::fs::read_to_string(r.path_backup()).unwrap();
+        assert!(backup.contains(&long), "not backed up");
+        remove_from_path(&r).unwrap();
+        assert_eq!(
+            registry::read_text_kind(&r.environment_key(), kabuk_core::install::PATH),
+            Some((long, true))
+        );
+        registry::delete_tree(r.test_key().unwrap()).unwrap();
+    }
+
+    /// A `Path` that cannot be read as text is left as it is, and installing says so.
+    #[test]
+    fn a_path_that_cannot_be_read_is_not_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = roots(dir.path());
+        Key::open(&r.environment_key())
+            .unwrap()
+            .set_dword(kabuk_core::install::PATH, 7)
+            .unwrap();
+        assert!(add_to_path(&r).is_err());
+        assert!(remove_from_path(&r).is_err());
+        assert_eq!(
+            registry::read_dword(&r.environment_key(), kabuk_core::install::PATH),
+            Some(7)
+        );
+        registry::delete_tree(r.test_key().unwrap()).unwrap();
+    }
+
+    /// A `Path` holding Kabuk's folder alone was emptied by an earlier setup: it is told.
+    #[test]
+    fn an_emptied_path_is_noticed() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = roots(dir.path());
+        assert!(!path_was_emptied(&r), "no Path at all");
+        let program = r.program_dir().display().to_string();
+        let key = Key::open(&r.environment_key()).unwrap();
+        key.set_text(kabuk_core::install::PATH, &format!("{program};"), Text::Expandable)
+            .unwrap();
+        assert!(path_was_emptied(&r));
+        key.set_text(kabuk_core::install::PATH, &format!(r"C:\x;{program}"), Text::Expandable)
+            .unwrap();
+        assert!(!path_was_emptied(&r));
+        drop(key);
+        registry::delete_tree(r.test_key().unwrap()).unwrap();
     }
 
     /// The removal of a program that already ended: the folder and the batch file go,

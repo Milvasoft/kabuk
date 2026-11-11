@@ -641,6 +641,7 @@ setup-store-managed = Kabuk was installed from the Microsoft Store: Windows inst
 setup-confirm = Kabuk will be installed for you (no administrator rights needed). While it runs, its own bar takes the place of Windows' taskbar and it arranges your windows; when it exits, Windows is as it was. If anything ever goes wrong, Ctrl+Alt+Shift+End brings everything back. Install Kabuk now?
 setup-done = Kabuk is installed and running. "Kabuk Settings" in the Start menu changes its look and behaviour; the "Kabuk" shortcut on your desktop starts it again. In a terminal, "kabuk --help" lists its commands. Ctrl+Alt+Shift+End brings Windows back at any time.
 setup-no-payload = This setup holds no programs (it was built without them). Build it with tools\package.ps1.
+setup-path-emptied = Your Windows Path holds only Kabuk's folder. An earlier Kabuk setup could not read a long Path and wrote it back with Kabuk's folder alone, so programs such as Claude Code (%USERPROFILE%\.local\bin) or npm (%APPDATA%\npm) are no longer found in a terminal. Add their folders again in Settings › System › About › Advanced system settings › Environment Variables. This setup no longer does that, and it keeps a copy of your Path before every change in %LOCALAPPDATA%\kabuk\path-backup.txt.
 
 # What is wrong in kabuk.toml (the notices and Settings; PLAN M19 U1-U3).
 cfg-at-line = Line { $line }: { $what }

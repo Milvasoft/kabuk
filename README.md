@@ -78,6 +78,8 @@ Kabuk needs Windows 11. You can get it in three ways:
 - Get it from the [Microsoft Store](https://apps.microsoft.com/detail/9NGK4T6XHF34), which handles updates. The Store version can't set cursors, the screen saver or Windows' colours, because Store packages aren't allowed to write those settings ([D89](docs/DECISIONS.md)). Everything else is the same.
 - Or start at the website, [kabuk.milvasoft.com](https://kabuk.milvasoft.com).
 
+**If you installed Kabuk 1.0.12 or earlier with `kabuk-setup.exe` or `kabuk --install`:** when your user `Path` was longer than 1023 characters, the setup could not read it and wrote it back with Kabuk's folder alone, so other programs' folders were removed from it, for example Claude Code's `%USERPROFILE%\.local\bin` or npm's `%APPDATA%\npm`. If a command stopped working after installing Kabuk, open Settings › System › About › Advanced system settings › Environment Variables and add those folders to your user `Path` again. From 1.0.13 the setup reads a `Path` of any length, never writes one it could not read, keeps a copy of it in `%LOCALAPPDATA%\kabuk\path-backup.txt` before every change, and warns you when it finds Kabuk's folder alone in it. The Microsoft Store version never changes `Path`.
+
 To uninstall, use Windows' "Installed apps" or run `kabuk --uninstall`. Windows goes back to how it was. Your settings stay in `%APPDATA%\kabuk` in case you come back.
 
 From a terminal, `kabuk msg <command>` drives the running shell (`kabuk msg workspace 3`, `kabuk msg query windows` for JSON). `kabuk --help` lists all the commands.

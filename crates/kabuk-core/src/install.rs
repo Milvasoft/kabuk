@@ -25,6 +25,8 @@ const RUN: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 /// The user's environment variables, and the one listing the folders of programs.
 const ENVIRONMENT: &str = "Environment";
 pub const PATH: &str = "Path";
+/// The file in Kabuk's state folder holding the user's `Path` before each setup's change.
+const PATH_BACKUP: &str = "path-backup.txt";
 /// Tests install under a key of this name (and their id) instead of `HKCU` itself, so
 /// removing that one key leaves nothing behind.
 const TEST_KEY: &str = r"Software\KabukInstallTest-";
@@ -74,6 +76,17 @@ impl Roots {
 
     pub fn program_dir(&self) -> PathBuf {
         self.programs.join(NAME)
+    }
+
+    /// Where the user's `Path` is kept before a setup changes it (CLAUDE.md safety rule 5),
+    /// each earlier value on its own line: in Kabuk's state folder, which stays when Kabuk
+    /// is removed (`%LOCALAPPDATA%\kabuk`; a test's is in its own folder).
+    pub fn path_backup(&self) -> PathBuf {
+        self.programs
+            .parent()
+            .unwrap_or(&self.programs)
+            .join(NAME.to_lowercase())
+            .join(PATH_BACKUP)
     }
 
     pub fn shortcut_dir(&self) -> PathBuf {
@@ -153,6 +166,14 @@ pub fn path_with(path: &str, dir: &str) -> Option<String> {
     })
 }
 
+/// Whether `path` holds `dir` and nothing else (empty parts aside): a `Path` an earlier
+/// setup emptied, as one that could not read a long `Path` did (Windows itself always
+/// puts a folder of its own in a user's `Path`).
+pub fn only_folder(path: &str, dir: &str) -> bool {
+    let mut parts = path.split(';').filter(|p| !p.trim().is_empty()).peekable();
+    parts.peek().is_some() && parts.all(|p| same_folder(p, dir))
+}
+
 /// `path` without `dir` (every time it is there); `None` when it is not there.
 pub fn path_without(path: &str, dir: &str) -> Option<String> {
     let parts: Vec<&str> = path.split(';').collect();
@@ -201,6 +222,9 @@ mod tests {
     fn the_program_folder_goes_into_path_once_and_out_again() {
         let dir = r"C:\Users\a\AppData\Local\Programs\Kabuk";
         assert_eq!(path_with("", dir).as_deref(), Some(dir));
+        // Kabuk's folder alone (empty parts aside) is a `Path` an earlier setup emptied.
+        assert!(only_folder(&format!("{dir};"), dir) && only_folder(&format!(";{dir}\\"), dir));
+        assert!(!only_folder("", dir) && !only_folder(&format!(r"C:\x;{dir}"), dir));
         assert_eq!(
             path_with(r"C:\x;C:\y", dir).as_deref(),
             Some(r"C:\x;C:\y;C:\Users\a\AppData\Local\Programs\Kabuk")
