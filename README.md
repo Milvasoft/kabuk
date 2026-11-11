@@ -109,3 +109,5 @@ This runs fmt, clippy with warnings as errors, the unit tests, and the Windows i
 - [docs/DECISIONS.md](docs/DECISIONS.md): why things are the way they are
 
 Apache License 2.0, see [LICENSE](LICENSE). Made by Milvasoft.
+
+<a href="https://www.opensourcealternatives.to"><img src="https://www.opensourcealternatives.to/badge-osa.svg" alt="As seen on Open Source Alternatives"></a>
