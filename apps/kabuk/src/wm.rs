@@ -483,6 +483,9 @@ struct Wm {
     game: std::collections::HashSet<String>,
     /// The `HMONITOR`s a full-screen program covers, whatever the tiling setting (D85).
     covered: Vec<isize>,
+    /// The monitors a full-screen program covers, whatever the tiling setting: no accent
+    /// frame is drawn there.
+    full_screen: std::collections::HashSet<String>,
     /// Whether Kabuk runs below normal priority for a full-screen program (D85).
     yielded: bool,
     /// Plays window moves over the work area (DECISIONS D35).
@@ -569,6 +572,7 @@ fn run(
         screens: kabuk_win::shell::monitors(),
         game: std::collections::HashSet::new(),
         covered: Vec::new(),
+        full_screen: std::collections::HashSet::new(),
         yielded: false,
         mover: kabuk_win::window_motion::Mover::start(ease)
             .map_err(|e| tracing::warn!(error = %e, "window moves will not be animated"))
@@ -2525,9 +2529,15 @@ impl Wm {
         }
     }
 
-    /// Puts the accent frame on the focused managed window, and takes it off the last one.
+    /// Puts the accent frame on the focused managed window, and takes it off the last one;
+    /// none on a monitor a full-screen program fills.
     fn update_border(&mut self) {
-        let want = self.accent.and(self.desk.focus()).filter(|id| self.desk.contains(*id));
+        let focus = self.accent.and(self.desk.focus()).filter(|id| self.desk.contains(*id));
+        let want = framed(focus, |id| {
+            self.desk
+                .workspace_of(id)
+                .is_some_and(|(device, _)| self.full_screen.contains(&device))
+        });
         if want == self.bordered {
             return;
         }
@@ -2588,6 +2598,9 @@ impl Wm {
     /// the setting says so, and the layout comes back as it was once they are free again.
     fn set_game_mode(&mut self, devices: Vec<String>) {
         crate::grab::pause(&self.snapshot, !devices.is_empty());
+        // The accent frame steps aside with the bar, whatever the tiling setting.
+        self.full_screen = devices.iter().cloned().collect();
+        self.update_border();
         let covered: Vec<isize> = kabuk_win::shell::monitors()
             .into_iter()
             .filter(|m| devices.contains(&m.device))
@@ -2721,13 +2734,30 @@ impl Wm {
     }
 }
 
+/// The window to wear the accent frame: the focused one, unless a full-screen program fills
+/// its monitor (found by the user: a yellow line round a video watched full screen in a
+/// browser).
+fn framed(focus: Option<u64>, on_full_screen: impl Fn(u64) -> bool) -> Option<u64> {
+    focus.filter(|id| !on_full_screen(*id))
+}
+
 #[cfg(test)]
 mod tests {
     //! Edge cases: an exact placement, rounding within the tolerance, a larger window, a
     //! window left elsewhere, a smaller (grid-snapped) window; settings from defaults, a
     //! floating default and a gap override; a maximised window following its work area
-    //! cut at the top and given back, on Monitor 2 left of the main one.
+    //! cut at the top and given back, on Monitor 2 left of the main one; the accent frame
+    //! off on a full-screen monitor.
     use super::*;
+
+    /// Found by the user: a video full screen in a browser kept the accent frame round it.
+    #[test]
+    fn no_frame_is_drawn_round_a_full_screen_program() {
+        assert_eq!(framed(Some(7), |_| false), Some(7));
+        assert_eq!(framed(Some(7), |id| id == 7), None, "full screen: no frame");
+        assert_eq!(framed(Some(7), |id| id == 8), Some(7), "another monitor's full screen");
+        assert_eq!(framed(None, |_| true), None);
+    }
 
     /// DECISIONS D75: a maximised window slides with its work area as an auto-hiding bar
     /// takes its strip, its invisible borders staying outside, and back when it is given
