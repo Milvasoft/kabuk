@@ -126,6 +126,26 @@ fn read_animations_on() -> bool {
     r.is_err() || on.as_bool()
 }
 
+/// How long the mouse rests before Windows shows what is under it (`SPI_GETMOUSEHOVERTIME`,
+/// 400 ms unless changed): its taskbar's window previews wait this long. `None` when it
+/// cannot be read. A plain read, cheap enough for each rest of the mouse.
+pub fn hover_time() -> Option<std::time::Duration> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SystemParametersInfoW, SPI_GETMOUSEHOVERTIME, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
+    };
+    let mut ms = 0u32;
+    // SAFETY: the out parameter is a UINT, as this action expects.
+    let r = unsafe {
+        SystemParametersInfoW(
+            SPI_GETMOUSEHOVERTIME,
+            0,
+            Some((&mut ms as *mut u32).cast()),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+    };
+    r.ok().map(|()| std::time::Duration::from_millis(u64::from(ms)))
+}
+
 /// The setting area named by a `WM_SETTINGCHANGE` (`lparam` points to a string such as
 /// `ImmersiveColorSet` when the app mode changes).
 ///

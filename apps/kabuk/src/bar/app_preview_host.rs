@@ -69,6 +69,8 @@ pub(super) struct AppPreview {
     last_closed: Option<u64>,
     close_until: Instant,
     changed: Option<Instant>,
+    /// Gliding from another app's place (where it was, when it set off) to `rect`.
+    glide: Option<(PxRect, Instant)>,
 }
 
 /// Where each card's picture goes in the panel.
@@ -110,7 +112,8 @@ impl AppPreview {
 
 impl Shared {
     /// The mouse rests on app `app` of bar `bar` (or left the apps): the previews wait
-    /// their delay, follow at once when they are already up, or go after their grace.
+    /// Windows' own hover time, as its taskbar's do, glide to the app at once when they
+    /// are already up, or go after their grace.
     pub(super) fn preview_hover(&mut self, bar: usize, app: Option<usize>) {
         self.kill(timer::APP_PREVIEW);
         if app != self.preview_held {
@@ -121,13 +124,13 @@ impl Shared {
             Some(i) if self.app_preview.is_some() => {
                 self.kill(timer::APP_PREVIEW_HIDE);
                 if self.app_preview.as_ref().is_some_and(|p| p.app != i) {
-                    self.show_app_preview(bar, i);
+                    self.glide_app_preview(bar, i);
                 }
             }
             Some(_) => {
                 self.preview_bar = bar;
                 if let Some(c) = &self.control {
-                    c.set_timer(timer::APP_PREVIEW, TIP.delay);
+                    c.set_timer(timer::APP_PREVIEW, kabuk_win::system::hover_time().unwrap_or(TIP.delay));
                 }
             }
             None if self.app_preview.is_some() => {
@@ -136,6 +139,58 @@ impl Shared {
                 }
             }
             None => {}
+        }
+    }
+
+    /// The mouse moved to app `index` while the previews are up: the same panel shows
+    /// that app's windows and glides there, as Windows' taskbar does. On another bar, or
+    /// with less motion, it is shown there at once.
+    fn glide_app_preview(&mut self, bar: usize, index: usize) {
+        let same_bar = self
+            .app_preview
+            .as_ref()
+            .is_some_and(|p| p.bar == bar && p.shown.is_some());
+        let Some(app) = self.apps.list.get(index) else { return };
+        if !same_bar || self.motion_level() != Level::Full {
+            self.show_app_preview(bar, index);
+            return;
+        }
+        let windows: Vec<u64> = app.windows.iter().copied().take(PREVIEW.max_windows).collect();
+        let Some(from) = self.app_preview.as_mut().map(|p| {
+            // The other app's closing is not this one's.
+            p.last_closed = None;
+            p.clicked = false;
+            p.rect
+        }) else {
+            return;
+        };
+        self.preview_cards_changed(index, windows);
+        let Some(p) = self.app_preview.as_mut() else { return };
+        if (from.x, from.y) == (p.rect.x, p.rect.y) {
+            return;
+        }
+        if let Some(s) = p.shown.as_ref() {
+            s.window().set_rect(PxRect {
+                x: from.x,
+                y: from.y,
+                ..p.rect
+            });
+        }
+        p.glide = Some((from, Instant::now()));
+        tracing::debug!(index, "app previews glide");
+        if p.ticker.is_none() {
+            p.ticker = self.control.as_ref().and_then(|c| {
+                FrameTicker::start(c.hwnd(), MSG_APP_PREVIEW_FRAME)
+                    .map_err(|e| tracing::warn!(error = %e, "the previews do not glide"))
+                    .ok()
+            });
+        }
+        if p.ticker.is_none() {
+            // No frames: there at once.
+            if let Some(s) = p.shown.as_ref() {
+                s.window().set_rect(p.rect);
+            }
+            p.glide = None;
         }
     }
 
@@ -334,6 +389,7 @@ impl Shared {
             last_closed: None,
             close_until: now,
             changed: None,
+            glide: None,
         });
     }
 
@@ -481,7 +537,8 @@ impl Shared {
         }
     }
 
-    /// A frame of a × growing or going back; once they all rest the frames stop.
+    /// A frame of a × growing or going back, or of the panel gliding to another app; once
+    /// they all rest the frames stop.
     pub(super) fn app_preview_frame(&mut self) {
         let text_scale = self.look.style.text_scale;
         let Some(p) = self.app_preview.as_mut() else { return };
@@ -489,6 +546,16 @@ impl Shared {
             t.taken();
         }
         let now = Instant::now();
+        if let Some((from, started)) = p.glide {
+            let elapsed = now.duration_since(started).as_secs_f32();
+            let (x, y) = app_preview::glide_at((from.x, from.y), (p.rect.x, p.rect.y), elapsed, PREVIEW.glide_seconds);
+            if let Some(s) = p.shown.as_ref() {
+                s.window().set_rect(PxRect { x, y, ..p.rect });
+            }
+            if elapsed >= PREVIEW.glide_seconds {
+                p.glide = None;
+            }
+        }
         let grown = p.marks.grown(now, &PREVIEW);
         if grown != p.drawn {
             let node = app_preview::view(text_scale, &TIP, &PREVIEW, &p.shots, &grown);
@@ -499,7 +566,7 @@ impl Shared {
             let _ = self.gpu.commit();
             p.drawn = grown;
         }
-        if p.marks.settled(now, PREVIEW.close_seconds) {
+        if p.glide.is_none() && p.marks.settled(now, PREVIEW.close_seconds) {
             p.ticker = None;
         }
     }

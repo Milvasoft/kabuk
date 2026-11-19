@@ -53,6 +53,9 @@ pub struct PreviewStyle {
     /// The most windows previewed (Windows' taskbar turns to a list beyond its width).
     pub max_windows: usize,
     pub grace: Duration,
+    /// How long the panel glides from one app to the next when the mouse moves along the
+    /// apps while it is up, as Windows' taskbar's previews do.
+    pub glide_seconds: f32,
 }
 
 pub const PREVIEW: PreviewStyle = PreviewStyle {
@@ -73,7 +76,22 @@ pub const PREVIEW: PreviewStyle = PreviewStyle {
     frame_radius: 4.0,
     max_windows: 6,
     grace: Duration::from_millis(300),
+    glide_seconds: 0.18,
 };
+
+/// Where the panel's corner is `elapsed` seconds into its glide from `from` to `to`
+/// (physical pixels), easing out; at `to` once the glide is over.
+pub fn glide_at(from: (i32, i32), to: (i32, i32), elapsed: f32, seconds: f32) -> (i32, i32) {
+    if elapsed >= seconds {
+        return to;
+    }
+    let along = |a: i32, b: i32| {
+        kabuk_ui::motion::ease_out(a as f32, b as f32, seconds)
+            .at(elapsed)
+            .round() as i32
+    };
+    (along(from.0, to.0), along(from.1, to.1))
+}
 
 /// A window as its card needs it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -311,9 +329,27 @@ mod tests {
     //! Edge cases: a tall, a wide, a very wide and a zero-sized window; pictures fitted
     //! both ways; more windows than shown; every card clickable with its frame inside it;
     //! a × growing, interrupted and going back; a window gone from the middle, from the
-    //! end and all of them; the panel kept at the mouse at every edge of the monitor.
+    //! end and all of them; the panel kept at the mouse at every edge of the monitor; the
+    //! glide from one app to the next.
     use super::*;
     use crate::bar::tooltip::TIP;
+
+    /// Asked by the user: the panel goes from app to app as on Windows' taskbar, gliding
+    /// there rather than going and coming again.
+    #[test]
+    fn the_panel_glides_from_app_to_app() {
+        let (from, to) = ((100, 900), (400, 880));
+        assert_eq!(glide_at(from, to, 0.0, 0.2), from, "it starts where it was");
+        let mid = glide_at(from, to, 0.1, 0.2);
+        assert!(
+            mid.0 > 250 && mid.0 < 400,
+            "eases out: past half way at half time: {mid:?}"
+        );
+        assert!(mid.1 < 900 && mid.1 > 880);
+        assert_eq!(glide_at(from, to, 0.2, 0.2), to, "it lands on its place");
+        assert_eq!(glide_at(from, to, 5.0, 0.2), to);
+        assert_eq!(glide_at(to, from, 0.0, 0.0), from, "no time: there at once");
+    }
     use kabuk_ui::geom::Point;
     use kabuk_ui::node::{layout, TextMeasure, TextMetrics};
 
