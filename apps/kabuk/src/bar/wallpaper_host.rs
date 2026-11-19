@@ -31,14 +31,44 @@ const PLAYER_EXE: &str = "kabuk-saver.exe";
 
 /// The animated wallpaper's player while it runs, and what it was started for.
 struct Player {
-    child: std::process::Child,
+    child: Option<std::process::Child>,
     started_for: String,
 }
 
 impl Drop for Player {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        if let Some(child) = self.child.take() {
+            end(child);
+        }
+    }
+}
+
+/// A process to end: told to stop at once, then waited for until it is gone.
+trait Ending: Send + 'static {
+    fn kill(&mut self);
+    fn wait(&mut self);
+}
+
+impl Ending for std::process::Child {
+    fn kill(&mut self) {
+        let _ = std::process::Child::kill(self);
+    }
+    fn wait(&mut self) {
+        let _ = std::process::Child::wait(self);
+    }
+}
+
+/// Ends `child`: told to stop at once, waited for on a thread of its own. Under a game
+/// the player took four seconds to go, and the bar's clicks waited for it (found by the
+/// user).
+fn end(mut child: impl Ending) {
+    child.kill();
+    let spawned = std::thread::Builder::new()
+        .name("wallpaper-player-end".into())
+        .spawn(move || child.wait());
+    if let Err(e) = spawned {
+        // The process was told to stop; only waiting for it is given up.
+        tracing::warn!(error = %e, "animated wallpaper's player not waited for");
     }
 }
 
@@ -334,11 +364,9 @@ impl Shared {
             w.brightness,
             w.pause_when_hidden
         );
-        let running = self
-            .wallpaper
-            .player
-            .as_mut()
-            .is_some_and(|p| p.started_for == wanted && matches!(p.child.try_wait(), Ok(None)));
+        let running = self.wallpaper.player.as_mut().is_some_and(|p| {
+            p.started_for == wanted && p.child.as_mut().is_some_and(|c| matches!(c.try_wait(), Ok(None)))
+        });
         if running {
             return;
         }
@@ -363,7 +391,7 @@ impl Shared {
             Ok(child) => {
                 tracing::info!(pid = child.id(), monitors = %animated.join(","), "animated wallpaper started");
                 self.wallpaper.player = Some(Player {
-                    child,
+                    child: Some(child),
                     started_for: wanted,
                 });
             }
@@ -481,5 +509,55 @@ impl Shared {
             self.wallpaper.drift_bump += 1;
         }
         self.apply_wallpaper();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Edge cases: a player slow to go is told to stop at once and not waited for on the
+    //! bar's thread; it is still waited for, elsewhere.
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    /// How long the fake player takes to go once told; far longer than a click may wait.
+    const SLOW_EXIT: Duration = Duration::from_millis(1500);
+    /// What ending may cost the caller.
+    const AT_ONCE: Duration = Duration::from_millis(200);
+
+    struct SlowPlayer {
+        killed: Arc<AtomicBool>,
+        gone: Arc<AtomicBool>,
+    }
+
+    impl Ending for SlowPlayer {
+        fn kill(&mut self) {
+            self.killed.store(true, Ordering::SeqCst);
+        }
+        fn wait(&mut self) {
+            std::thread::sleep(SLOW_EXIT);
+            self.gone.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// Found by the user: under a game, clicks on the bar waited four seconds, while the
+    /// animated wallpaper's player, told to stop for the game, took that long to go.
+    #[test]
+    fn a_player_slow_to_go_does_not_hold_the_bar() {
+        let killed = Arc::new(AtomicBool::new(false));
+        let gone = Arc::new(AtomicBool::new(false));
+        let started = Instant::now();
+        end(SlowPlayer {
+            killed: killed.clone(),
+            gone: gone.clone(),
+        });
+        assert!(started.elapsed() < AT_ONCE, "the bar waited {:?}", started.elapsed());
+        assert!(killed.load(Ordering::SeqCst), "not told to stop at once");
+        let deadline = Instant::now() + SLOW_EXIT * 4;
+        while !gone.load(Ordering::SeqCst) && Instant::now() < deadline {
+            std::thread::sleep(AT_ONCE);
+        }
+        assert!(gone.load(Ordering::SeqCst), "never waited for");
     }
 }
