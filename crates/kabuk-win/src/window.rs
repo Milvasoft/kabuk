@@ -556,10 +556,45 @@ impl Hwnd {
         front()
     }
 
-    /// Asks the window to close, as its close button would. Never blocks.
+    /// Asks the window to close, as its close button would. Never blocks. A window of a
+    /// program running as administrator refuses Kabuk's message (Windows keeps a program
+    /// from messaging one above it), so it is asked through Windows' own `EndTask`, as
+    /// Task Manager closes windows, on a thread of its own (found by the user: Task
+    /// Manager in the bar did not close from its menu).
     pub fn close_async(self) -> bool {
+        use windows::core::s;
+        use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
         // SAFETY: PostMessageW only queues the message.
-        unsafe { PostMessageW(Some(self.raw()), WM_CLOSE, WPARAM(0), LPARAM(0)) }.is_ok()
+        if unsafe { PostMessageW(Some(self.raw()), WM_CLOSE, WPARAM(0), LPARAM(0)) }.is_ok() {
+            return true;
+        }
+        if !self.exists() {
+            return false;
+        }
+        type EndTask = unsafe extern "system" fn(HWND, BOOL, BOOL) -> BOOL;
+        // SAFETY: user32 is loaded in every GUI process; its `EndTask` export has had the
+        // signature above since Windows 2000 (the `windows` crate does not declare it).
+        let end: Option<EndTask> = unsafe {
+            GetModuleHandleW(windows::core::w!("user32.dll"))
+                .ok()
+                .and_then(|m| GetProcAddress(m, s!("EndTask")))
+                .map(|f| std::mem::transmute::<unsafe extern "system" fn() -> isize, EndTask>(f))
+        };
+        let Some(end) = end else { return false };
+        let raw = self.0;
+        let spawned = std::thread::Builder::new().name("close-window".into()).spawn(move || {
+            use windows::Win32::UI::WindowsAndMessaging::IsGUIThread;
+            // `EndTask` fails with an invalid handle on a thread Windows has not made a
+            // GUI thread (found with a probe).
+            // SAFETY: converts this thread only; no other state.
+            let _ = unsafe { IsGUIThread(true) };
+            // SAFETY: a plain request with a window handle; not forced, so the program
+            // may ask first, as with its close button.
+            if !unsafe { end(Hwnd(raw).raw(), BOOL(0), BOOL(0)) }.as_bool() {
+                tracing::warn!(hwnd = raw, "window not closed");
+            }
+        });
+        spawned.is_ok()
     }
 
     /// Sets the DWM border colour (Windows 11), or back to the system default with `None`.
@@ -673,10 +708,22 @@ impl Hwnd {
         unsafe { ShowWindowAsync(self.raw(), SW_MAXIMIZE) }.as_bool()
     }
 
-    /// Asks a minimised or maximised window to return to its normal size. Never blocks.
+    /// Asks a minimised or maximised window to return to its normal size. Never blocks. A
+    /// window of a program running as administrator refuses it (found by the user: Task
+    /// Manager did not come back from the bar); Windows' own switch, which Alt+Tab uses,
+    /// brings it back and to the front instead.
     pub fn restore_async(self) -> bool {
+        use windows::Win32::UI::WindowsAndMessaging::SwitchToThisWindow;
         // SAFETY: as for `show_async`.
-        unsafe { ShowWindowAsync(self.raw(), SW_RESTORE) }.as_bool()
+        if unsafe { ShowWindowAsync(self.raw(), SW_RESTORE) }.as_bool() {
+            return true;
+        }
+        if !self.is_minimized() {
+            return false;
+        }
+        // SAFETY: a plain request with a window handle; `true` restores a minimised one.
+        unsafe { SwitchToThisWindow(self.raw(), true) };
+        true
     }
 
     /// Asks the window to hide. Never blocks. Callers record the window in the state
