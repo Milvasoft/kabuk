@@ -1806,15 +1806,24 @@ impl Desk {
     }
 }
 
-/// `r` moved inside `area` when it fits there; a rectangle larger than the area (a
-/// full-screen window) is returned as it is.
+/// `r` moved inside `area`, keeping its size: a rectangle covering the area both ways (a
+/// full-screen window) is returned as it is; one larger than the area one way only starts
+/// at the area's edge that way, as Windows places it (found by the user: a window taller
+/// than the work area opened with its top under the bar).
 fn fit_inside(r: Rect, area: Rect) -> Rect {
-    if r.w > area.w || r.h > area.h {
+    if r.w >= area.w && r.h >= area.h {
         return r;
     }
+    let along = |at: i32, size: i32, start: i32, room: i32| {
+        if size > room {
+            start
+        } else {
+            at.clamp(start, start + room - size)
+        }
+    };
     Rect {
-        x: r.x.clamp(area.x, area.right() - r.w),
-        y: r.y.clamp(area.y, area.bottom() - r.h),
+        x: along(r.x, r.w, area.x, area.w),
+        y: along(r.y, r.h, area.y, area.h),
         ..r
     }
 }

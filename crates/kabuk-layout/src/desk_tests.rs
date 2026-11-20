@@ -779,6 +779,41 @@ fn a_floating_window_opening_under_the_bar_is_moved_into_the_work_area() {
     );
 }
 
+/// Found by the user: a new window sometimes opened with its top under the bar. One
+/// taller than the work area (but not covering the monitor) was taken for a full-screen
+/// one and left there; now its top comes to the work area's, as Windows places it, and
+/// its size stays. One wider than the area comes to its left edge the same way.
+#[test]
+fn a_window_taller_than_the_work_area_opens_below_the_bar() {
+    let mut d = desk(true);
+    let tall = Rect {
+        x: 300,
+        y: 0,
+        w: 1200,
+        h: 1400,
+    };
+    let e = d.add(NewWindow {
+        floating: true,
+        at: tall,
+        ..new(1)
+    });
+    let below = Rect { y: M1_AREA.y, ..tall };
+    assert_eq!(e, vec![Effect::Place(1, below)]);
+    assert_eq!(d.rect_of(1), Some(below));
+    let wide = Rect {
+        x: -100,
+        y: 200,
+        w: 2600,
+        h: 700,
+    };
+    let e = d.add(NewWindow {
+        floating: true,
+        at: wide,
+        ..new(2)
+    });
+    assert_eq!(e, vec![Effect::Place(2, Rect { x: M1_AREA.x, ..wide })]);
+}
+
 #[test]
 fn a_tiled_window_dragged_by_its_title_floats_where_it_was_dropped() {
     let mut d = desk(false);
