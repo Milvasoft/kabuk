@@ -126,6 +126,37 @@ fn watchdog_restarts_a_shell_that_stopped_answering() {
     assert_eq!(status.code(), Some(exit::OK));
 }
 
+/// Found on the user's machine after updating: the setup's `--restore` left its stop
+/// signalled while the old watchdog was still restoring, and the watchdog started after
+/// the setup took it for a stop in progress and left, with no Kabuk running. Here the test
+/// holds the stop open, as that lingering watchdog did.
+#[test]
+fn a_watchdog_started_after_a_restore_starts_the_shell() {
+    let sandbox = Sandbox::new();
+    let instance = Instance::for_state_dir(sandbox.state_dir());
+    let held = kabuk_win::sync::NamedEvent::create_or_open(&instance.emergency_event()).unwrap();
+    let mut first = sandbox.watchdog(&[]);
+    assert!(wait_until(STARTUP_TIMEOUT, || sandbox.state().kabuk_pid.is_some()).is_some());
+    let (code, _) = sandbox.restore();
+    assert_eq!(code, 0);
+    first
+        .wait_exit(Duration::from_secs(5))
+        .expect("watchdog stops after --restore");
+    assert!(!held.is_set(), "the stop stayed signalled after the restore");
+
+    let mut second = sandbox.watchdog(&[]);
+    assert!(
+        wait_until(STARTUP_TIMEOUT, || sandbox.log_lines("shell started") == 2).is_some(),
+        "the watchdog after the restore did not start the shell"
+    );
+    assert_eq!(sandbox.log_lines("an emergency stop is in progress; not starting"), 0);
+    let (code, _) = sandbox.restore();
+    assert_eq!(code, 0);
+    second
+        .wait_exit(Duration::from_secs(5))
+        .expect("watchdog stops after --restore");
+}
+
 #[test]
 fn watchdog_gives_up_after_three_restarts_in_a_minute() {
     let sandbox = Sandbox::new();

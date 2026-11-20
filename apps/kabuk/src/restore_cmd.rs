@@ -53,6 +53,11 @@ pub fn main(common: &Common) -> i32 {
             );
         }
     }
+    // The desktop is back: the stop is cleared once the watchdog has left on it, so
+    // Kabuk can be started again at once (an update's setup starts it right after).
+    if let Ok(e) = &event {
+        kabuk_win::takeover::clear_stop(&instance, e);
+    }
     drop(event);
     exit::OK
 }

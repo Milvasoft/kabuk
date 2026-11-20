@@ -71,7 +71,18 @@ pub fn give_way(paths: &Paths) {
     }
     stop_running_shell(paths, &instance);
     let restored = matches!(restore::restore_file(&paths.state_file()), FileOutcome::Restored(_));
-    // Its watchdog leaves on the stop; the stop is cleared after it.
+    if let Ok(e) = &event {
+        clear_stop(&instance, e);
+    }
+    tracing::info!(state_dir = %paths.state_dir.display(), restored, "the shell on the desk gave way");
+}
+
+/// Clears the stop signalled on `event` once the instance's watchdog has left on it
+/// (waiting [`EMERGENCY_GRACE`] at most), so a shell of that instance can start again: the
+/// event lives on while any process still holds it (found on the user's machine: after
+/// an update's `--restore`, the old watchdog took seconds to restore and go, and the
+/// watchdog started after the setup took the stop for one in progress and left).
+pub fn clear_stop(instance: &Instance, event: &NamedEvent) {
     let until = Instant::now() + EMERGENCY_GRACE;
     while Instant::now() < until {
         if let Ok(Some(_free)) = sync::acquire_instance(&instance.watchdog_mutex()) {
@@ -79,10 +90,9 @@ pub fn give_way(paths: &Paths) {
         }
         std::thread::sleep(POLL);
     }
-    if let Ok(e) = &event {
-        let _ = e.reset();
+    if let Err(e) = event.reset() {
+        tracing::warn!(error = %e, "the stop was not cleared");
     }
-    tracing::info!(state_dir = %paths.state_dir.display(), restored, "the shell on the desk gave way");
 }
 
 /// Makes the shell of another state directory that has the desk give way (one of the
