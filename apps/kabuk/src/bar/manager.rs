@@ -2748,12 +2748,19 @@ impl Shared {
     /// The dock's size in physical pixels, with room for the OLED shift on every side.
     /// The dock window's size, and the size of the dock at rest inside it: the window is as
     /// big as the tiles can grow, so it never changes under the mouse.
-    fn dock_sizes(&self, edge: Edge, scale: Scale) -> ((i32, i32), (i32, i32)) {
+    fn dock_sizes(&self, edge: Edge, scale: Scale, mon: PxRect) -> ((i32, i32), (i32, i32)) {
         let apps = self.dock_apps().len();
+        let style = self.dock_style(edge, scale, mon);
         (
-            dock_px(dock::grown_room(edge, &dock::STYLE, apps), scale),
-            dock_px(dock::rest_box(edge, &dock::STYLE, apps), scale),
+            dock_px(dock::grown_room(edge, &style, apps), scale),
+            dock_px(dock::rest_box(edge, &style, apps), scale),
         )
+    }
+
+    /// The dock's style on monitor `mon` with its apps: smaller when they would not fit.
+    fn dock_style(&self, edge: Edge, scale: Scale, mon: PxRect) -> dock::DockStyle {
+        let length = if geometry::vertical(edge) { mon.h } else { mon.w };
+        dock::fitted(&dock::STYLE, edge, self.dock_apps().len(), scale.dips(length))
     }
 
     fn create_dock(&mut self, monitor: Monitor, edge: Edge) -> std::io::Result<Dock> {
@@ -2789,7 +2796,7 @@ impl Shared {
             (None, appbar::strip(edge, mon, thickness))
         };
         let distance = scale.px(dock::STYLE.distance) - kabuk_core::oled::MAX_SHIFT;
-        let (size, rest_size) = self.dock_sizes(edge, scale);
+        let (size, rest_size) = self.dock_sizes(edge, scale, mon);
         let rect = dock::window_rect(edge, mon, strip, size, distance);
         let rest = dock::window_rect(edge, mon, strip, rest_size, distance);
         let peek = autohide.then(Peek::hidden);
@@ -3833,7 +3840,7 @@ impl Shared {
 
     fn reposition_dock(&mut self) {
         let (size, rest_size) = match &self.dock {
-            Some(d) => self.dock_sizes(d.edge, d.scale),
+            Some(d) => self.dock_sizes(d.edge, d.scale, px_rect(d.monitor.rect)),
             None => return,
         };
         let Some(d) = self.dock.as_mut() else { return };
@@ -3980,6 +3987,10 @@ impl Shared {
         // What screen readers find on it: its apps by name and the launcher's tile (D97).
         let names: Vec<String> = self.apps.list.iter().map(|a| self.app_name(a)).collect();
         let (dock_name, launcher) = (self.i18n.tr("nav-bar"), self.i18n.tr("l-name"));
+        let style = match &self.dock {
+            Some(d) => self.dock_style(d.edge, d.scale, px_rect(d.monitor.rect)),
+            None => return Ok(false),
+        };
         let Some(d) = self.dock.as_mut() else { return Ok(false) };
         // Aside for a full-screen program: not drawn (D85).
         if d.aside {
@@ -3994,17 +4005,12 @@ impl Shared {
             return Ok(false);
         }
         let k = if grown.2 {
-            dock::magnifications(
-                &dock::centers(&dock::STYLE, apps.len()),
-                d.pointer,
-                &dock::STYLE,
-                amount,
-            )
+            dock::magnifications(&dock::centers(&style, apps.len()), d.pointer, &style, amount)
         } else {
             Vec::new()
         };
-        let box_room = dock::grown_room(d.edge, &dock::STYLE, apps.len());
-        let node = dock::view_grown(d.edge, &dock::STYLE, &apps, &k, Some(box_room));
+        let box_room = dock::grown_room(d.edge, &style, apps.len());
+        let node = dock::view_grown(d.edge, &style, &apps, &k, Some(box_room));
         // While the tiles grow the whole window is the dock's, first of all.
         if grown.2 && d.cut.take().is_some() {
             d.window.hwnd().set_shapes(&[]);
@@ -4019,7 +4025,7 @@ impl Shared {
             let distance = d.scale.px(dock::STYLE.distance) - room;
             let mon = px_rect(d.monitor.rect);
             let rect = dock::window_rect(d.edge, mon, d.strip, size, distance);
-            let rest_size = dock_px(dock::rest_box(d.edge, &dock::STYLE, apps.len()), d.scale);
+            let rest_size = dock_px(dock::rest_box(d.edge, &style, apps.len()), d.scale);
             d.rect = rect;
             d.rest = dock::window_rect(d.edge, mon, d.strip, rest_size, distance);
             moved = Some(match d.peek {

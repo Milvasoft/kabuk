@@ -308,6 +308,38 @@ pub fn grown_room(dock_edge: Edge, s: &DockStyle, apps: usize) -> (f32, f32) {
     }
 }
 
+/// The style the dock with `apps` apps is drawn in on a monitor `length` DIPs long along
+/// its edge: the design's while its room grown under the mouse fits between the
+/// [`DockStyle::distance`] margins, else everything in it smaller by the same share, so
+/// every app stays on the screen as on macOS's dock (found by a user: with many apps
+/// open the dock ran off the screen's ends).
+pub fn fitted(s: &DockStyle, dock_edge: Edge, apps: usize, length: f32) -> DockStyle {
+    let (w, h) = grown_room(dock_edge, s, apps);
+    let along = if vertical(dock_edge) { h } else { w };
+    let room = length - 2.0 * s.distance;
+    if along <= room || along <= 0.0 || room <= 0.0 {
+        return *s;
+    }
+    // Every length of the dock is a sum of these, so the room shrinks by the same share.
+    let k = room / along;
+    DockStyle {
+        gap: s.gap * k,
+        padding: s.padding * k,
+        radius: s.radius * k,
+        border: s.border * k,
+        tile: s.tile * k,
+        tile_radius: s.tile_radius * k,
+        icon: s.icon * k,
+        icon_stroke: s.icon_stroke * k,
+        separator: s.separator * k,
+        separator_along: s.separator_along * k,
+        separator_across: s.separator_across * k,
+        run_dot: s.run_dot * k,
+        run_gap: s.run_gap * k,
+        ..*s
+    }
+}
+
 /// The box (DIPs) of the dock at rest: the panel with no tile grown.
 pub fn rest_box(dock_edge: Edge, s: &DockStyle, apps: usize) -> (f32, f32) {
     let c = centers(s, apps);
@@ -570,6 +602,43 @@ mod tests {
                     (l.size.w - w).abs() < 0.01 && (l.size.h - h).abs() < 0.01,
                     "{edge:?} {count}"
                 );
+            }
+        }
+    }
+
+    /// Found by a user: with many apps open the dock ran off the screen's ends. Fitted,
+    /// it keeps the design's size while it fits and shrinks to the monitor otherwise,
+    /// grown under the mouse included, on every edge.
+    #[test]
+    fn a_dock_with_many_apps_shrinks_to_its_monitor() {
+        assert_eq!(fitted(&STYLE, Edge::Bottom, 6, 1920.0), STYLE, "six fit");
+        for edge in [Edge::Bottom, Edge::Top, Edge::Left, Edge::Right] {
+            for (apps, length) in [(40usize, 1920.0f32), (25, 1080.0), (12, 720.0)] {
+                let s = fitted(&STYLE, edge, apps, length);
+                assert!(s.tile < STYLE.tile, "{edge:?} {apps}: shrunk");
+                let (w, h) = grown_room(edge, &s, apps);
+                let along = if vertical(edge) { h } else { w };
+                assert!(
+                    (along - (length - 2.0 * STYLE.distance)).abs() < 0.01,
+                    "{edge:?} {apps}: {along} fills its monitor"
+                );
+                let (rw, rh) = rest_box(edge, &s, apps);
+                assert!(if vertical(edge) { rh } else { rw } < along);
+                // Drawn at rest it takes the box it says, its tiles in one row.
+                let list = vec![
+                    DockApp {
+                        image: None,
+                        running: false
+                    };
+                    apps
+                ];
+                let l = layout(&view(edge, &s, &list), Point::default(), &NoText);
+                assert!(
+                    (l.size.w - rw).abs() < 0.01 && (l.size.h - rh).abs() < 0.01,
+                    "{edge:?} {apps}"
+                );
+                assert_eq!(s.distance, STYLE.distance, "the margin stays");
+                assert_eq!(s.magnify, STYLE.magnify, "it grows by as much");
             }
         }
     }
