@@ -57,11 +57,13 @@ fn run(args: Vec<String>) -> i32 {
     if !quiet && !kabuk_win::system::question_box(&title, &i18n.tr("setup-confirm")) {
         return CANCELLED;
     }
-    let startup = !quiet && kabuk_win::system::question_box(&title, &i18n.tr("setup-ask-startup"));
     let Some(roots) = Roots::of_user(|k| std::env::var(k).ok()) else {
         warn(&failed(&i18n, "no user folders"));
         return FAILED;
     };
+    let startup = start_at_sign_in(quiet, kabuk_win::install::starts_at_sign_in(&roots), || {
+        kabuk_win::system::question_box(&title, &i18n.tr("setup-ask-startup"))
+    });
     // Asked before installing: Kabuk's folder alone in `Path` afterwards is no sign.
     let emptied = kabuk_win::install::path_was_emptied(&roots);
     match install(&roots, startup) {
@@ -80,6 +82,17 @@ fn run(args: Vec<String>) -> i32 {
             warn(&failed(&i18n, &e.to_string()));
             FAILED
         }
+    }
+}
+
+/// Whether Kabuk starts at sign-in after this setup: asked (`ask`) when it can ask; a
+/// silent setup, which cannot, keeps what the installation had (`installed_on`) (found
+/// by the user: each silent update turned starting at sign-in off).
+fn start_at_sign_in(quiet: bool, installed_on: bool, ask: impl FnOnce() -> bool) -> bool {
+    if quiet {
+        installed_on
+    } else {
+        ask()
     }
 }
 
@@ -131,6 +144,16 @@ mod tests {
         let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         assert!(quiet(&args(&["/S"])) && quiet(&args(&["/silent"])) && quiet(&args(&["--quiet"])));
         assert!(!quiet(&args(&[])) && !quiet(&args(&["/x"])));
+    }
+
+    /// Found by the user: Kabuk stopped starting at sign-in after silent updates.
+    #[test]
+    fn a_silent_setup_keeps_starting_at_sign_in() {
+        let never = || panic!("a silent setup asks nothing");
+        assert!(start_at_sign_in(true, true, never), "on stays on");
+        assert!(!start_at_sign_in(true, false, never), "off stays off");
+        assert!(start_at_sign_in(false, false, || true), "asked: the answer");
+        assert!(!start_at_sign_in(false, true, || false), "asked: the answer");
     }
 
     #[test]
