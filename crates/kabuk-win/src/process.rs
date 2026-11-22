@@ -619,9 +619,13 @@ mod tests {
     fn a_process_below_normal_priority_is_seen_as_such() {
         use std::os::windows::io::AsRawHandle;
         use windows::Win32::Foundation::HANDLE;
-        use windows::Win32::System::Threading::{SetPriorityClass, BELOW_NORMAL_PRIORITY_CLASS};
+        use windows::Win32::System::Threading::{SetPriorityClass, BELOW_NORMAL_PRIORITY_CLASS, NORMAL_PRIORITY_CLASS};
         let mut child = sleeper();
         let other = Process::open(child.id()).unwrap();
+        // A child inherits a below-normal class from its parent, and CI runners start the
+        // tests that way; make the starting point explicit instead of assuming it.
+        // SAFETY: the child's own handle, valid while `child` lives, and a valid class.
+        unsafe { SetPriorityClass(HANDLE(child.as_raw_handle()), NORMAL_PRIORITY_CLASS) }.unwrap();
         assert!(!other.below_normal());
         // SAFETY: the child's own handle, valid while `child` lives, and a valid class.
         unsafe { SetPriorityClass(HANDLE(child.as_raw_handle()), BELOW_NORMAL_PRIORITY_CLASS) }.unwrap();
