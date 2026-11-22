@@ -34,7 +34,13 @@ fn monitor_ids(dw: &IDesktopWallpaper) -> Vec<(String, Rect)> {
         let count = dw.GetMonitorDevicePathCount().unwrap_or(0);
         for i in 0..count {
             let Ok(id) = dw.GetMonitorDevicePathAt(i) else { continue };
-            let r = dw.GetMonitorRECT(PCWSTR(id.0)).unwrap_or_default();
+            // Windows also lists monitors connected once and gone since, which have no
+            // rectangle (found by a test after a third monitor came: five listed, three
+            // there); they are left out, as the wallpaper cannot be read or set on them.
+            let Ok(r) = dw.GetMonitorRECT(PCWSTR(id.0)) else {
+                CoTaskMemFree(Some(id.0 as *const _));
+                continue;
+            };
             out.push((
                 id.to_string().unwrap_or_default(),
                 Rect {
