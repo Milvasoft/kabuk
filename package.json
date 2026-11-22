@@ -7,6 +7,6 @@
     "fixture:contrast": "node tools/contrast-fixture.js docs/design/kabuk-tasarim.html tests/fixtures/contrast.json"
   },
   "devDependencies": {
-    "playwright": "1.56.0"
+    "playwright": "1.65.1"
   }
 }
