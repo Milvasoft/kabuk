@@ -443,6 +443,7 @@ set-key-overview = Tüm çalışma alanlarına genel bakış
 set-key-start-saver = Ekran koruyucuyu hemen başlat
 set-key-keys-card = Kısayol kartını göster
 set-key-focus-bar = Klavyeyi bardaki tepsiye getir
+set-key-quick-settings = Hızlı ayarlar (oyunda da)
 keys-title = Kısayollar
 keys-title-h = Kabuk'un ana kısayolları, senin ayarladığın gibi
 keys-welcome = Kabuk'a hoş geldin

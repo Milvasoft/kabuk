@@ -112,6 +112,7 @@ pub fn groups(s: &Shortcuts) -> Vec<(&'static str, Vec<Row>)> {
                 row("set-key-app-grid", first(&s.app_grid)),
                 row("set-key-dropdown", first(&s.dropdown)),
                 row("set-key-start-saver", first(&s.start_saver)),
+                row("set-key-quick-settings", first(&s.quick_settings)),
                 row("set-key-keys-card", first(&s.keys_card)),
                 row("keys-emergency", EMERGENCY.to_string()),
             ],
@@ -263,6 +264,8 @@ mod tests {
         assert_eq!(keys("set-key-next-tab").as_deref(), Some("Win+Shift+T"));
         assert_eq!(keys("set-key-to-scratchpad").as_deref(), Some("Win+Shift+Z"));
         assert_eq!(keys("set-key-dropdown").as_deref(), Some("Win+Enter"));
+        // D107: the quick settings, also over a game.
+        assert_eq!(keys("set-key-quick-settings").as_deref(), Some("Win+Alt+S"));
         assert_eq!(keys("keys-emergency").as_deref(), Some(EMERGENCY));
         assert!(all.iter().all(|r| !r.keys.is_empty()));
     }

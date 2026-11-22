@@ -5,10 +5,13 @@
 //! the bar's own. A level follows a press and a drag. The keyboard moves over the
 //! tiles, levels and links as in every popup ([`crate::bar::popup_keys`]): Enter or Space
 //! clicks the one selected, Left and Right move a selected level a wheel notch's step.
+//! Its shortcut (`shortcuts.quick_settings`, Win+Alt+S) works over a full-screen game too
+//! (DECISIONS D107): the panel opens over the game on its monitor, and game mode holds.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use kabuk_core::config::shortcut::Chord;
 use kabuk_ui::geom::{Point, Scale};
 use kabuk_ui::motion::Level;
 use kabuk_ui::node::Layout;
@@ -35,6 +38,8 @@ pub const MSG_TEST_QUICK_PANEL: u32 = msg::APP + 68;
 /// `kabuk msg panel quick`: open or close the panel on the bar of the monitor in use, as a
 /// click on its button does (posted to the control window).
 pub const MSG_OPEN_QUICK_PANEL: u32 = msg::APP + 81;
+/// The shortcut's hotkey ids (the bar's keyboard's start at 600).
+const HOTKEY_FIRST: i32 = 700;
 
 /// What the slow reads found, waiting for the bar's thread.
 #[derive(Clone, Debug, Default)]
@@ -86,6 +91,43 @@ pub(super) struct QuickPanel {
 }
 
 impl Shared {
+    /// Binds the quick settings' shortcut, in game mode too ([`kabuk_win::keyhook::bind_in_games`]).
+    pub(super) fn bind_quick_keys(&mut self) {
+        if !self.shortcuts {
+            return;
+        }
+        let chords = self.config().shortcuts.quick_settings.clone();
+        let Some(control) = self.control.as_ref() else { return };
+        self.quick_hotkeys.clear();
+        for (i, text) in chords.iter().enumerate() {
+            let Ok(chord) = Chord::parse(text) else {
+                tracing::warn!(chord = %text, "quick settings' shortcut not understood");
+                continue;
+            };
+            match kabuk_win::keyhook::bind_in_games(control, HOTKEY_FIRST + i as i32, chord) {
+                Ok(h) => self.quick_hotkeys.push(h),
+                Err(e) => {
+                    tracing::warn!(chord = %text, error = %e, "quick settings' shortcut taken by another program")
+                }
+            }
+        }
+    }
+
+    /// `WM_HOTKEY` on the control window; true when it was the quick settings'. The panel
+    /// opens on the bar of the monitor in use, a game's hidden one included, with the
+    /// keyboard.
+    pub(super) fn quick_keys_hotkey(&mut self, id: usize) -> bool {
+        let first = HOTKEY_FIRST as usize;
+        let ours = (first..first + self.quick_hotkeys.len()).contains(&id);
+        if ours {
+            if let Some(bar) = self.bar_in_use() {
+                tracing::info!(game = !self.game_devices.is_empty(), "quick settings by their shortcut");
+                self.toggle_quick_panel(bar, (super::view::hit::QUICK_SETTINGS, 0), true);
+            }
+        }
+        ours
+    }
+
     pub(super) fn toggle_quick_panel(&mut self, bar: usize, anchor: (&'static str, u32), activate: bool) {
         let open = self.quick_panel.is_some();
         self.close_quick_panel();

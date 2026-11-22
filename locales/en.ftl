@@ -447,6 +447,7 @@ set-key-overview = Overview of every workspace
 set-key-start-saver = Start the screen saver now
 set-key-keys-card = Show the shortcut card
 set-key-focus-bar = Put the keyboard on the bar's tray
+set-key-quick-settings = Quick settings (in games too)
 keys-title = Shortcuts
 keys-title-h = Kabuk's main shortcuts, as you set them
 keys-welcome = Welcome to Kabuk

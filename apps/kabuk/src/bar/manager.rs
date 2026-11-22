@@ -846,6 +846,8 @@ struct Shared {
     keys_card: keys_card_host::KeysCardState,
     /// The keyboard on the bar (Win+B; PLAN M19 U10).
     bar_keys: bar_keys_host::BarKeysState,
+    /// The quick settings' shortcut, bound in game mode too (D107).
+    quick_hotkeys: Vec<kabuk_win::keyhook::Bound>,
     /// The media card while it is open (D66).
     media_card: Option<media_card_host::MediaCard>,
     volume_panel: Option<volume_panel_host::VolumePanel>,
@@ -1164,6 +1166,7 @@ impl BarManager {
                 power_menu: None,
                 keys_card: Default::default(),
                 bar_keys: Default::default(),
+                quick_hotkeys: Vec::new(),
                 media_card: None,
                 volume_panel: None,
                 app_menu: None,
@@ -1278,6 +1281,7 @@ impl BarManager {
             timed("bind_saver_keys", || s.bind_saver_keys());
             timed("bind_keys_card_keys", || s.bind_keys_card_keys());
             timed("bind_bar_keys", || s.bind_bar_keys());
+            timed("bind_quick_keys", || s.bind_quick_keys());
             timed("schedule_greeting", || s.schedule_greeting());
             timed("load_pins", || s.load_pins());
             timed("apply_cursors", || s.apply_cursors());
@@ -2008,7 +2012,8 @@ impl Shared {
                 || self.saver_hotkey(m.wparam)
                 || self.app_grid_hotkey(m.wparam)
                 || self.keys_card_hotkey(m.wparam)
-                || self.bar_keys_hotkey(m.wparam))
+                || self.bar_keys_hotkey(m.wparam)
+                || self.quick_keys_hotkey(m.wparam))
             .then_some(0),
             MSG_VOLUME_KEY => {
                 self.volume_key(m.wparam);
@@ -2632,6 +2637,9 @@ impl Shared {
         }
         if before.shortcuts.focus_bar != after.shortcuts.focus_bar {
             self.bind_bar_keys();
+        }
+        if before.shortcuts.quick_settings != after.shortcuts.quick_settings {
+            self.bind_quick_keys();
         }
         if before.bar.modules.taskbar != after.bar.modules.taskbar {
             self.refresh_apps();

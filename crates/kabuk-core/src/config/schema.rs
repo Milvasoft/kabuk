@@ -1166,6 +1166,9 @@ pub struct Shortcuts {
     /// Puts the keyboard on the bar's tray, as Windows' Win+B puts it on the notification
     /// area (PLAN M19 U10, DECISIONS D98).
     pub focus_bar: Vec<String>,
+    /// Opens the quick settings on the monitor in use, also over a full-screen game
+    /// (DECISIONS D107).
+    pub quick_settings: Vec<String>,
     /// Held while dragging: left button moves, right button resizes.
     pub drag: String,
 }
@@ -1203,6 +1206,7 @@ impl Default for Shortcuts {
             keys_card: chords(&["Win+F1"]),
             dropdown: chords(&["Win+Enter"]),
             focus_bar: chords(&["Win+B"]),
+            quick_settings: chords(&["Win+Alt+S"]),
             drag: "Alt".into(),
         }
     }

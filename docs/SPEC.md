@@ -100,6 +100,7 @@ The windows on screen saved under a name and brought back later as they were, in
 - When a full-screen application (game, video player, presentation) opens, **within 1 second** on that monitor: the bar is hidden, tiling pauses (windows stay in place, new windows are not tiled), notifications are muted. A game at a resolution of its own counts (the monitor is taken as it is now), an overlay that clicks pass through does not hide it, and the bars are not made again under it when the resolution changes (DECISIONS D72).
 - Other monitors work normally (can be changed in settings).
 - Kabuk steps back for the game (DECISIONS D85): while the program is in front its keyboard hook is off (its mouse hook already is), its process runs below normal priority, nothing of Kabuk's is drawn or shown over the program (no hidden bar, dock or volume indicator), the wallpaper drift waits, and the program renaming itself costs nothing. Every monitor is looked at, with or without a bar of its own.
+- The quick settings in a game (DECISIONS D107): `Win+Alt+S` (`shortcuts.quick_settings`) opens the quick settings on the monitor in use, also while game mode holds it: the volume, every monitor's brightness and the radios without leaving the game. The chord works with the keyboard hook off, as it is also registered with Windows. It is the one thing of Kabuk's shown over the program, and only when asked for; the panel does not end game mode (the game stays in front behind it), the bar stays hidden, and a click back on the game closes it. A game in exclusive full screen is minimised by Windows when the panel takes the keyboard, as it would be for any window.
 - Game mode belongs to the game's window (DECISIONS D87): another window in front of the game for a moment (a launcher, a notice, an app keeping itself on top) keeps it; one staying in front for 3 seconds ends it, and the game minimised, closed or out of full screen ends it at once. During a game Kabuk holds no GPU device of its own, raises no window over the game and leaves the look's change and the tray's re-registration of programs until the game is over.
 - When the application closes, the previous layout returns exactly; muted notifications are shown as a single summary.
 - Each behaviour can be turned off separately: automatic detection, hide the bar, pause tiling, mute notifications, keep other monitors normal.
@@ -252,6 +253,7 @@ Defaults are on the Win key (decided on 2026-10-14, DECISIONS D40: Alt chords cl
 | Drop-down terminal (from the top of the monitor, over every workspace; DECISIONS D62) | `Win+Enter` |
 | The card of the main shortcuts (also a greeting on the first start; DECISIONS D61) | `Win+F1` |
 | The keyboard on the bar's tray (as Windows' own; DECISIONS D98) | `Win+B` |
+| The quick settings, also over a full-screen game (DECISIONS D107) | `Win+Alt+S` |
 | Emergency exit and restore | `Ctrl+Alt+Shift+End` (cannot be changed) |
 
 On the Turkish Q keyboard there must be no conflict with AltGr (`Ctrl+Alt`) or the input-language switch shortcuts (`Alt+Shift`, `Win+Space`). Pressing and releasing `Alt+Shift` on its own must not break input-language switching.

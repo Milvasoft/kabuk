@@ -720,6 +720,26 @@ impl Drop for LanguageKeys {
 pub enum Bound {
     Hook(Shortcut),
     HotKey(crate::msgloop::HotKey),
+    /// Both: the hook's outside game mode, Windows' while the hook lets every key pass.
+    Both(Shortcut, crate::msgloop::HotKey),
+}
+
+/// Binds `chord` for `window` so it works in game mode too (DECISIONS D107): with the
+/// hook, which swallows the chord wherever it is on, and registered with Windows with the
+/// same id, which gets it while the hook lets every key pass over a full-screen program.
+/// The chord never reaches both, so it acts once. Windows' registration failing (another
+/// program has the chord) leaves the hook's alone.
+pub fn bind_in_games(window: &MessageWindow, id: i32, chord: Chord) -> std::io::Result<Bound> {
+    match bind(window, id, chord)? {
+        Bound::Hook(s) => match crate::msgloop::HotKey::register(window, id, chord) {
+            Ok(h) => Ok(Bound::Both(s, h)),
+            Err(e) => {
+                tracing::warn!(error = %e, "shortcut taken by another program in game mode");
+                Ok(Bound::Hook(s))
+            }
+        },
+        other => Ok(other),
+    }
 }
 
 /// Binds `chord` for `window` with the hook, falling back to `RegisterHotKey`.

@@ -655,6 +655,7 @@ mod tests {
         ("app_grid", "apps"),
         ("keys_card", "keys"),
         ("focus_bar", "tray"),
+        ("quick_settings", "panel quick"),
         ("dropdown", "dropdown"),
     ];
     const NOT_AN_ACTION: &[&str] = &["drag"];
@@ -702,6 +703,7 @@ mod tests {
                                 | Request::AppGrid
                                 | Request::KeysCard
                                 | Request::FocusBar
+                                | Request::Panel(PanelName::Quick)
                         ),
                         "{field}: `{command}` is {request:?}"
                     );
