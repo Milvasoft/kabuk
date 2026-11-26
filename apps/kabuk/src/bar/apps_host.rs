@@ -248,7 +248,10 @@ impl Shared {
             Some(file) => {
                 let mut seen = file.seen;
                 let before = file.pins.len();
-                self.apps.pins = apps::merged(file.pins, &mut seen, &theirs);
+                // A packaged program pinned by its file starts through its package now.
+                let pins: Vec<Pin> = file.pins.iter().cloned().map(apps::repaired).collect();
+                let repaired = pins.iter().zip(&file.pins).filter(|(a, b)| a != b).count();
+                self.apps.pins = apps::merged(pins, &mut seen, &theirs);
                 self.apps.seen = seen;
                 tracing::debug!(pins = self.apps.pins.len(), "Kabuk's pins read");
                 if self.apps.pins.len() != before {
@@ -256,6 +259,11 @@ impl Shared {
                         added = self.apps.pins.len() - before,
                         "pins taken in from Windows' taskbar"
                     );
+                }
+                if repaired > 0 {
+                    tracing::info!(repaired, "pins of packaged programs' files now start their packages");
+                }
+                if self.apps.pins.len() != before || repaired > 0 {
                     let pins = self.apps.pins.clone();
                     self.write_pins(&pins);
                 }

@@ -314,7 +314,7 @@ impl Shared {
                 });
             }
             Action::Open => {
-                let target = app.link.clone().unwrap_or_else(|| app.source.clone());
+                let target = app.launch();
                 std::thread::spawn(move || {
                     kabuk_win::system::com_init();
                     if let Err(e) = kabuk_win::shellitems::open(&target) {

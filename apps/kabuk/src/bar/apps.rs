@@ -64,6 +64,18 @@ pub struct App {
     pub app_id: Option<String>,
 }
 
+impl App {
+    /// What starts the app (another window of it): its pin's shortcut or package, else a
+    /// packaged program's package (its file in `WindowsApps` cannot be started, found by
+    /// the user), else its program.
+    pub fn launch(&self) -> String {
+        self.link
+            .clone()
+            .or_else(|| self.icon.starts_with(APPS_FOLDER).then(|| self.icon.clone()))
+            .unwrap_or_else(|| self.source.clone())
+    }
+}
+
 /// What a click on an app does.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ClickAction {
@@ -82,7 +94,7 @@ pub enum ClickAction {
 /// them in turn); a click on the app in front minimises its window; otherwise its window
 /// is shown, or the pinned app started.
 pub fn click_action(app: &App, front: Option<u64>, new_window: bool) -> ClickAction {
-    let target = || app.link.clone().unwrap_or_else(|| app.source.clone());
+    let target = || app.launch();
     if new_window {
         return ClickAction::Start(target());
     }
@@ -266,7 +278,16 @@ pub fn apps(pins: &[Pin], running: &[Running], order: &[String], focused: Option
                 .collect();
             taken.extend(&windows);
             App {
-                source: p.exe.clone().unwrap_or_else(|| p.link.clone()),
+                // Its program: the pin's, else its running window's (a packaged app's pin
+                // names its package), so the window rules know it.
+                source: p
+                    .exe
+                    .clone()
+                    .or_else(|| {
+                        let w = windows.first()?;
+                        running.iter().find(|r| r.hwnd == *w).map(|r| r.exe.clone())
+                    })
+                    .unwrap_or_else(|| p.link.clone()),
                 icon: p.link.clone(),
                 link: Some(p.link.clone()),
                 focused: focused.is_some_and(|f| windows.contains(&f)),
@@ -367,17 +388,41 @@ pub fn dragged(list: &[App], pins: &[Pin], order: &mut Vec<String>, from: usize,
     pinned
 }
 
-/// The pins with `app` pinned at the end (a running program pins as itself).
+/// The pins with `app` pinned at the end: a packaged program by its package, as Windows'
+/// taskbar pins it (its file's path holds its version and cannot be started), any other
+/// running program as itself.
 pub fn pinned(pins: &[Pin], app: &App) -> Vec<Pin> {
     let mut out = pins.to_vec();
     if app.link.is_none() {
-        out.push(Pin {
-            app_id: app.app_id.clone(),
-            link: app.source.clone(),
-            exe: Some(app.source.clone()),
+        out.push(match app.icon.strip_prefix(APPS_FOLDER) {
+            Some(id) => Pin {
+                link: app.icon.clone(),
+                exe: None,
+                app_id: Some(id.to_string()),
+            },
+            None => Pin {
+                app_id: app.app_id.clone(),
+                link: app.source.clone(),
+                exe: Some(app.source.clone()),
+            },
         });
     }
     out
+}
+
+/// A pin saved before packaged programs were pinned by their package: one naming a file
+/// in the `WindowsApps` folder, with its package's app id, becomes that package; any
+/// other stays.
+pub fn repaired(p: Pin) -> Pin {
+    let packaged = p.link.to_lowercase().contains(r"\windowsapps\");
+    match p.app_id.clone().filter(|id| packaged && id.contains('!')) {
+        Some(id) => Pin {
+            link: format!("{APPS_FOLDER}{id}"),
+            exe: None,
+            app_id: Some(id),
+        },
+        None => p,
+    }
 }
 
 /// The pins without `app`.
@@ -933,5 +978,105 @@ mod tests {
             click_action(&app(CODE, None, Vec::new()), None, false),
             ClickAction::Nothing
         );
+    }
+
+    const CREWHALL_EXE: &str =
+        r"C:\Program Files\WindowsApps\Milvasoft.Crewhall_0.2.16.0_x64__tzmzhd3z3x8ea\app\Crewhall.exe";
+    const CREWHALL_ID: &str = "Milvasoft.Crewhall_tzmzhd3z3x8ea!Crewhall";
+
+    /// A window of the packaged program, as the bar reads it: its picture is its package's.
+    fn crewhall_window(hwnd: u64, exe: &str) -> Running {
+        Running {
+            hwnd,
+            exe: exe.into(),
+            icon: format!("{APPS_FOLDER}{CREWHALL_ID}"),
+            app_id: None,
+        }
+    }
+
+    /// Found by the user: Crewhall, a Store app pinned from its window, did not start
+    /// again from its pin once closed. Its pin named the program's file in the
+    /// `WindowsApps` folder, which Windows does not let anyone start (access denied, 5)
+    /// and whose path holds the version, gone at the next update. A packaged program is
+    /// pinned, started and pictured by its package's app id, as Windows' taskbar does.
+    #[test]
+    fn a_packaged_program_pinned_from_its_window_starts_through_its_package() {
+        let running = [crewhall_window(7, CREWHALL_EXE)];
+        let mut order = Vec::new();
+        remember_order(&mut order, &running);
+        let list = apps(&[], &running, &order, None);
+        let pins = pinned(&[], &list[0]);
+        assert_eq!(
+            pins,
+            vec![Pin {
+                link: format!("{APPS_FOLDER}{CREWHALL_ID}"),
+                exe: None,
+                app_id: Some(CREWHALL_ID.into()),
+            }]
+        );
+        // Closed, its pin starts it through its package.
+        let closed = apps(&pins, &[], &order, None);
+        assert_eq!(
+            click_action(&closed[0], None, false),
+            ClickAction::Start(format!("{APPS_FOLDER}{CREWHALL_ID}"))
+        );
+        // A newer version's window still goes to the pin, with the pin's picture.
+        let updated = crewhall_window(8, &CREWHALL_EXE.replace("0.2.16.0", "0.2.17.0"));
+        let again = apps(&pins, &[updated], &order, None);
+        assert_eq!(again.len(), 1);
+        assert_eq!(again[0].windows, vec![8]);
+        assert_eq!(again[0].icon, format!("{APPS_FOLDER}{CREWHALL_ID}"));
+        // Its program is the running one, which window rules go by.
+        assert_eq!(again[0].source, CREWHALL_EXE.replace("0.2.16.0", "0.2.17.0"));
+        // Not pinned, a middle click starts another window through the package too.
+        assert_eq!(
+            click_action(&list[0], Some(7), true),
+            ClickAction::Start(format!("{APPS_FOLDER}{CREWHALL_ID}"))
+        );
+    }
+
+    /// The pins saved before that fix (the user's own file): a packaged program's file
+    /// becomes its package; a program's file elsewhere, a shortcut and a pin without an
+    /// app id stay as they are.
+    #[test]
+    fn a_pin_of_a_packaged_programs_file_is_repaired() {
+        let old = Pin {
+            link: CREWHALL_EXE.into(),
+            exe: Some(CREWHALL_EXE.into()),
+            app_id: Some(CREWHALL_ID.into()),
+        };
+        assert_eq!(
+            repaired(old),
+            Pin {
+                link: format!("{APPS_FOLDER}{CREWHALL_ID}"),
+                exe: None,
+                app_id: Some(CREWHALL_ID.into()),
+            }
+        );
+        let keep = [
+            Pin {
+                link: CODE.into(),
+                exe: Some(CODE.into()),
+                app_id: Some("Microsoft.VisualStudioCode".into()),
+            },
+            Pin {
+                link: r"C:\L\Chrome.lnk".into(),
+                exe: Some(CHROME.into()),
+                app_id: Some("Chrome".into()),
+            },
+            Pin {
+                link: format!("{APPS_FOLDER}{CREWHALL_ID}"),
+                exe: None,
+                app_id: Some(CREWHALL_ID.into()),
+            },
+            Pin {
+                link: CREWHALL_EXE.to_lowercase(),
+                exe: None,
+                app_id: None,
+            },
+        ];
+        for p in keep {
+            assert_eq!(repaired(p.clone()), p);
+        }
     }
 }
